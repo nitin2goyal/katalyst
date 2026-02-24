@@ -337,6 +337,9 @@ evictor:
   utilizationThreshold: 40       # Default: 40 -- below this %, node is underutilized
   consolidationInterval: "5m"    # Default: 5m -- how often to check for consolidation
   maxConcurrentEvictions: 5      # Default: 5 -- max pods evicted at once
+  drainTimeout: "5m"             # Default: 5m -- max time to drain a node
+  partialDrainTTL: "30m"         # Default: 30m -- auto-uncordon partially drained nodes
+                                 #   after this duration (prevents indefinitely cordoned nodes)
   dryRun: false                  # Default: false -- if true, log but do not evict
 
 # ── Rebalancer ────────────────────────────────────────────────
@@ -373,12 +376,21 @@ aiGate:
   scaleThresholdPct: 30          # Default: 30 -- scaling >30% triggers AI Gate
   maxEvictNodes: 3               # Default: 3 -- evicting more nodes than this triggers
                                  #   AI Gate
+  timezone: "America/New_York"   # Default: UTC -- IANA timezone for business hours
+                                 #   detection in AI Gate prompts
 
 # ── API Server ────────────────────────────────────────────────
 apiServer:
   enabled: true                  # Default: true
   address: "0.0.0.0"            # Default: "0.0.0.0"
   port: 8080                     # Default: 8080
+
+# ── Database (SQLite) ────────────────────────────────────────
+database:
+  path: "/data/koptimizer.db"    # Default: "/data/koptimizer.db" -- SQLite database path
+                                 #   for pricing cache, audit log, and metrics. Set to ""
+                                 #   to disable persistence (in-memory only).
+  retentionDays: 90              # Default: 90 -- days to retain historical data
 ```
 
 ### Validation Rules
@@ -1225,6 +1237,53 @@ KOptimizer exports the following metrics on the `:9090/metrics` endpoint:
 |--------|------|-------------|
 | `koptimizer_gpu_nodes_idle` | Gauge | Number of GPU nodes currently idle |
 | `koptimizer_gpu_nodes_cpu_fallback` | Gauge | Number of GPU nodes serving CPU workloads as fallback |
+| `koptimizer_gpu_nodes_cpu_scavenging` | Gauge | Number of GPU nodes with active CPU scavenging |
+
+#### Spot Instance Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `koptimizer_spot_nodes_total` | Gauge | Total number of spot instance nodes |
+| `koptimizer_spot_savings_monthly_usd` | Gauge | Monthly savings from spot instances vs on-demand |
+| `koptimizer_spot_interruptions_total` | Counter | Total spot instance interruptions handled |
+| `koptimizer_spot_fallbacks_total` | Counter | Total fallbacks from spot to on-demand |
+
+#### Hibernation Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `koptimizer_hibernated_nodegroups` | Gauge | Number of currently hibernated node groups |
+| `koptimizer_hibernation_savings_monthly_usd` | Gauge | Estimated monthly savings from hibernation |
+
+#### Storage Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `koptimizer_storage_pvc_count` | Gauge | Total number of PersistentVolumeClaims |
+| `koptimizer_storage_overprovisioned_pvcs` | Gauge | Number of overprovisioned PVCs |
+| `koptimizer_storage_unused_pvcs` | Gauge | Number of unused PVCs |
+| `koptimizer_storage_monthly_cost_usd` | Gauge | Estimated monthly cost of persistent storage |
+
+#### Network Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `koptimizer_network_cross_az_bytes_total` | Counter | `source_az`, `dest_az` | Total cross-AZ network traffic in bytes |
+| `koptimizer_network_cross_az_monthly_cost_usd` | Gauge | -- | Estimated monthly cost of cross-AZ traffic |
+
+#### Pricing Fallback Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `koptimizer_pricing_fallback_total` | Counter | `provider`, `region` | Total times fallback (hardcoded) pricing was used instead of live API |
+| `koptimizer_pricing_fallback_active` | Gauge | `provider`, `region` | Set to 1 when fallback pricing is currently in use |
+| `koptimizer_pricing_last_live_update_timestamp` | Gauge | `provider`, `region` | Unix timestamp of last successful live pricing API update |
+
+#### Alert Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `koptimizer_alerts_fired_total` | Counter | `type`, `severity` | Total alerts fired |
 
 ### Key Metrics to Alert On
 
@@ -1238,6 +1297,9 @@ KOptimizer exports the following metrics on the `:9090/metrics` endpoint:
 | **Low commitment utilization** | `koptimizer_commitment_utilization_pct < 50` | Warning | Commitment below 50% utilization |
 | **Excessive evictions** | `rate(koptimizer_evictions_total[10m]) > 10` | Critical | High eviction rate may indicate instability |
 | **GPU waste** | `koptimizer_gpu_nodes_idle > 2` | Warning | Multiple GPU nodes sitting idle |
+| **Pricing fallback active** | `koptimizer_pricing_fallback_active > 0` | Warning | Live pricing API unavailable, using stale fallback rates |
+| **Pricing data stale** | `time() - koptimizer_pricing_last_live_update_timestamp > 86400` | Warning | No live pricing update in 24+ hours |
+| **Spot interruptions** | `rate(koptimizer_spot_interruptions_total[1h]) > 5` | Warning | High spot interruption rate |
 
 ### Grafana Dashboard Suggestions
 
@@ -1265,6 +1327,17 @@ Create dashboards for the following views:
 - Idle GPU nodes (`koptimizer_gpu_nodes_idle`)
 - CPU fallback nodes (`koptimizer_gpu_nodes_cpu_fallback`)
 - GPU utilization from the `/api/v1/gpu/utilization` endpoint
+
+**5. Pricing Health Dashboard**
+- Fallback pricing active indicator (`koptimizer_pricing_fallback_active`)
+- Time since last live update (`koptimizer_pricing_last_live_update_timestamp`)
+- Fallback events over time (`koptimizer_pricing_fallback_total`)
+
+**6. Spot Instance Dashboard**
+- Spot node count (`koptimizer_spot_nodes_total`)
+- Monthly spot savings (`koptimizer_spot_savings_monthly_usd`)
+- Interruption rate (`koptimizer_spot_interruptions_total`)
+- Fallback events (`koptimizer_spot_fallbacks_total`)
 
 ---
 
@@ -1326,6 +1399,11 @@ The Evictor controller respects Pod Disruption Budgets (PDBs) during all evictio
 - **Dry-run mode**: The evictor supports `dryRun: true` to log consolidation plans without executing them.
 - **Confidence scoring**: The workload scaler starts new workloads at 50% confidence and ramps to 100% over 7 days, preventing aggressive rightsizing on new deployments.
 - **OOM protection**: When an OOM kill is detected, memory requests are bumped by `oomBumpMultiplier` (default: 2.5x) to prevent repeated crashes.
+- **Partial drain auto-recovery**: Nodes that are only partially drained (some pods failed to evict) are automatically uncordoned after `partialDrainTTL` (default: 30m), preventing indefinitely cordoned nodes from reducing cluster capacity.
+- **Per-provider spot discount estimation**: Spot cost calculations use per-instance-family discount estimates from each cloud provider rather than a flat multiplier, giving more accurate savings reports.
+- **Background pricing refresh**: The pricing cache is proactively refreshed every 45 minutes (AWS) to avoid latency spikes when cache expires.
+- **Pricing sanity checks**: All live pricing data is validated against reasonable bounds ($0.001-$200/hr) before caching, preventing absurd values from corrupting cost calculations.
+- **Pagination safety limits**: All cloud API pagination loops have bounded iteration limits (50-200 pages) to prevent runaway requests from a misbehaving API.
 
 ---
 
@@ -1412,6 +1490,27 @@ curl -s http://localhost:8080/api/v1/workloads/default/Deployment/my-app/rightsi
 - Not enough data yet (need `lookbackWindow` worth of metrics, default: 7 days).
 - Workload resource usage is already close to target utilization percentages.
 - Metrics server or Prometheus not providing pod-level metrics.
+
+#### Pricing data is stale or using fallback rates
+
+**Symptom**: `koptimizer_pricing_fallback_active` metric is 1, or cost estimates seem inaccurate.
+
+**Check**:
+```bash
+# Check pricing fallback status
+curl -s http://localhost:9090/metrics | grep koptimizer_pricing
+
+# Check last live update time
+curl -s http://localhost:9090/metrics | grep pricing_last_live_update
+```
+
+**Common causes**:
+- AWS: IAM policy missing `pricing:GetProducts` permission. The AWS Pricing API is only available in `us-east-1`.
+- GCP: Cloud Billing API not enabled, or service account missing `roles/billing.viewer`.
+- Azure: Public Retail Prices API is unreachable (network policy).
+- All providers have hardcoded fallback rates that are updated quarterly. If live API is unavailable, cost estimates may drift.
+
+**Solution**: Fix the IAM/network issue to restore live pricing. KOptimizer will automatically switch back from fallback to live data on the next pricing cache refresh (every 45 minutes for background refresh, or 1 hour for lazy refresh).
 
 #### Pods being evicted unexpectedly
 
