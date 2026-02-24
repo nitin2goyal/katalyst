@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "koptimizer.fullname" . }}
+  labels:
+    {{- include "koptimizer.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "koptimizer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "koptimizer.selectorLabels" . | nindent 8 }}
+        {{- if and (eq .Values.config.cloudProvider "azure") .Values.cloudConfig.azure.workloadIdentityClientID }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "koptimizer.serviceAccountName" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config=/etc/koptimizer/config.yaml
+            - --metrics-bind-address=:{{ .Values.service.metricsPort }}
+            - --health-probe-bind-address=:8081
+          ports:
+            - name: api
+              containerPort: {{ .Values.config.apiServer.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.service.metricsPort }}
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            {{- if .Values.aiGateApiKey }}
+            - name: ANTHROPIC_API_KEY
+              value: {{ .Values.aiGateApiKey | quote }}
+            {{- else if .Values.aiGateApiKeySecretRef.name }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.aiGateApiKeySecretRef.name }}
+                  key: {{ .Values.aiGateApiKeySecretRef.key }}
+            {{- end }}
+            {{- if eq .Values.config.cloudProvider "gcp" }}
+            - name: GOOGLE_CLOUD_PROJECT
+              value: {{ .Values.cloudConfig.gcp.project | default "" | quote }}
+            - name: KOPTIMIZER_CLUSTER_NAME
+              value: {{ .Values.config.clusterName | quote }}
+            {{- end }}
+            {{- if eq .Values.config.cloudProvider "azure" }}
+            - name: AZURE_SUBSCRIPTION_ID
+              value: {{ .Values.cloudConfig.azure.subscriptionID | default "" | quote }}
+            - name: AZURE_RESOURCE_GROUP
+              value: {{ .Values.cloudConfig.azure.resourceGroup | default "" | quote }}
+            - name: KOPTIMIZER_CLUSTER_NAME
+              value: {{ .Values.config.clusterName | quote }}
+            {{- if .Values.cloudConfig.azure.tenantID }}
+            - name: AZURE_TENANT_ID
+              value: {{ .Values.cloudConfig.azure.tenantID | quote }}
+            {{- end }}
+            {{- if .Values.cloudConfig.azure.clientSecretRef.name }}
+            - name: AZURE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudConfig.azure.clientSecretRef.name }}
+                  key: {{ .Values.cloudConfig.azure.clientSecretRef.clientIDKey | default "AZURE_CLIENT_ID" }}
+            - name: AZURE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudConfig.azure.clientSecretRef.name }}
+                  key: {{ .Values.cloudConfig.azure.clientSecretRef.clientSecretKey | default "AZURE_CLIENT_SECRET" }}
+            {{- end }}
+            {{- end }}
+            {{- if eq .Values.config.cloudProvider "aws" }}
+            - name: KOPTIMIZER_CLUSTER_NAME
+              value: {{ .Values.config.clusterName | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/koptimizer
+              readOnly: true
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "koptimizer.fullname" . }}-config
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "koptimizer.fullname" .)) }}
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

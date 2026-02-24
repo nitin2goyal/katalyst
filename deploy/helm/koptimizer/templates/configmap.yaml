@@ -1,0 +1,135 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "koptimizer.fullname" . }}-config
+  labels:
+    {{- include "koptimizer.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    mode: {{ .Values.config.mode | quote }}
+    cloudProvider: {{ .Values.config.cloudProvider | quote }}
+    region: {{ .Values.config.region | quote }}
+    clusterName: {{ .Values.config.clusterName | quote }}
+    reconcileInterval: {{ .Values.config.reconcileInterval | quote }}
+    costMonitor:
+      enabled: {{ .Values.config.costMonitor.enabled }}
+      updateInterval: {{ .Values.config.costMonitor.updateInterval | quote }}
+    nodeAutoscaler:
+      enabled: {{ .Values.config.nodeAutoscaler.enabled }}
+      scanInterval: {{ .Values.config.nodeAutoscaler.scanInterval | quote }}
+      scaleUpThreshold: {{ .Values.config.nodeAutoscaler.scaleUpThreshold }}
+      scaleDownThreshold: {{ .Values.config.nodeAutoscaler.scaleDownThreshold }}
+      scaleDownDelay: {{ .Values.config.nodeAutoscaler.scaleDownDelay | quote }}
+      maxScaleUpNodes: {{ .Values.config.nodeAutoscaler.maxScaleUpNodes }}
+      maxScaleDownNodes: {{ .Values.config.nodeAutoscaler.maxScaleDownNodes }}
+    nodegroupManager:
+      enabled: {{ .Values.config.nodegroupManager.enabled }}
+      minAdjustment:
+        enabled: {{ .Values.config.nodegroupManager.minAdjustment.enabled }}
+        minUtilizationPct: {{ .Values.config.nodegroupManager.minAdjustment.minUtilizationPct }}
+        observationPeriod: {{ .Values.config.nodegroupManager.minAdjustment.observationPeriod | quote }}
+      emptyGroupDetection:
+        enabled: {{ .Values.config.nodegroupManager.emptyGroupDetection.enabled }}
+        emptyPeriod: {{ .Values.config.nodegroupManager.emptyGroupDetection.emptyPeriod | quote }}
+    rightsizer:
+      enabled: {{ .Values.config.rightsizer.enabled }}
+      lookbackWindow: {{ .Values.config.rightsizer.lookbackWindow | quote }}
+      cpuTargetUtilPct: {{ .Values.config.rightsizer.cpuTargetUtilPct }}
+      memoryTargetUtilPct: {{ .Values.config.rightsizer.memoryTargetUtilPct }}
+      minCPURequest: {{ .Values.config.rightsizer.minCPURequest | quote }}
+      minMemoryRequest: {{ .Values.config.rightsizer.minMemoryRequest | quote }}
+      oomBumpMultiplier: {{ .Values.config.rightsizer.oomBumpMultiplier }}
+      excludeNamespaces:
+      {{- range .Values.config.rightsizer.excludeNamespaces }}
+        - {{ . | quote }}
+      {{- end }}
+    workloadScaler:
+      enabled: {{ .Values.config.workloadScaler.enabled }}
+      verticalEnabled: {{ .Values.config.workloadScaler.verticalEnabled }}
+      horizontalEnabled: {{ .Values.config.workloadScaler.horizontalEnabled }}
+      surgeDetection: {{ .Values.config.workloadScaler.surgeDetection }}
+      surgeThreshold: {{ .Values.config.workloadScaler.surgeThreshold }}
+      confidenceStartPct: {{ .Values.config.workloadScaler.confidenceStartPct }}
+      confidenceFullDays: {{ .Values.config.workloadScaler.confidenceFullDays }}
+      excludeNamespaces:
+      {{- range .Values.config.workloadScaler.excludeNamespaces }}
+        - {{ . | quote }}
+      {{- end }}
+    evictor:
+      enabled: {{ .Values.config.evictor.enabled }}
+      utilizationThreshold: {{ .Values.config.evictor.utilizationThreshold }}
+      consolidationInterval: {{ .Values.config.evictor.consolidationInterval | quote }}
+      maxConcurrentEvictions: {{ .Values.config.evictor.maxConcurrentEvictions }}
+      dryRun: {{ .Values.config.evictor.dryRun }}
+    rebalancer:
+      enabled: {{ .Values.config.rebalancer.enabled }}
+      schedule: {{ .Values.config.rebalancer.schedule | quote }}
+      busyRedistribution:
+        enabled: {{ .Values.config.rebalancer.busyRedistribution.enabled }}
+        overloadedThresholdPct: {{ .Values.config.rebalancer.busyRedistribution.overloadedThresholdPct }}
+        targetUtilizationPct: {{ .Values.config.rebalancer.busyRedistribution.targetUtilizationPct }}
+    gpu:
+      enabled: {{ .Values.config.gpu.enabled }}
+      idleThresholdPct: {{ .Values.config.gpu.idleThresholdPct }}
+      idleDuration: {{ .Values.config.gpu.idleDuration | quote }}
+      cpuFallbackEnabled: {{ .Values.config.gpu.cpuFallbackEnabled }}
+      cpuScavengingEnabled: {{ .Values.config.gpu.cpuScavengingEnabled }}
+      scavengingCPUThresholdMillis: {{ .Values.config.gpu.scavengingCPUThresholdMillis }}
+    spot:
+      enabled: {{ .Values.config.spot.enabled }}
+      maxSpotPercentage: {{ .Values.config.spot.maxSpotPercentage }}
+      fallbackToOnDemand: {{ .Values.config.spot.fallbackToOnDemand }}
+      diversityMinTypes: {{ .Values.config.spot.diversityMinTypes }}
+      interruptionHandling: {{ .Values.config.spot.interruptionHandling }}
+      maxCostOverODPercent: {{ .Values.config.spot.maxCostOverODPercent }}
+    hibernation:
+      enabled: {{ .Values.config.hibernation.enabled }}
+      {{- if .Values.config.hibernation.schedules }}
+      schedules:
+      {{- range .Values.config.hibernation.schedules }}
+        - {{ . | quote }}
+      {{- end }}
+      {{- end }}
+      {{- if .Values.config.hibernation.wakeSchedules }}
+      wakeSchedules:
+      {{- range .Values.config.hibernation.wakeSchedules }}
+        - {{ . | quote }}
+      {{- end }}
+      {{- end }}
+      preserveMinOne: {{ .Values.config.hibernation.preserveMinOne }}
+    storageMonitor:
+      enabled: {{ .Values.config.storageMonitor.enabled }}
+      overprovisionThreshold: {{ .Values.config.storageMonitor.overprovisionThreshold }}
+      unusedRetentionDays: {{ .Values.config.storageMonitor.unusedRetentionDays }}
+    networkMonitor:
+      enabled: {{ .Values.config.networkMonitor.enabled }}
+      crossAZCostPerGBUSD: {{ .Values.config.networkMonitor.crossAZCostPerGBUSD }}
+      enablePodAnnotations: {{ .Values.config.networkMonitor.enablePodAnnotations }}
+    alerts:
+      enabled: {{ .Values.config.alerts.enabled }}
+      {{- if .Values.config.alerts.slackWebhookURL }}
+      slackWebhookURL: {{ .Values.config.alerts.slackWebhookURL | quote }}
+      {{- end }}
+      costAnomalyStdDev: {{ .Values.config.alerts.costAnomalyStdDev }}
+      cooldownMinutes: {{ .Values.config.alerts.cooldownMinutes }}
+    commitments:
+      enabled: {{ .Values.config.commitments.enabled }}
+      updateInterval: {{ .Values.config.commitments.updateInterval | quote }}
+      expiryWarningDays:
+      {{- range .Values.config.commitments.expiryWarningDays }}
+        - {{ . }}
+      {{- end }}
+    aiGate:
+      enabled: {{ .Values.config.aiGate.enabled }}
+      model: {{ .Values.config.aiGate.model | quote }}
+      timeout: {{ .Values.config.aiGate.timeout | quote }}
+      costThresholdUSD: {{ .Values.config.aiGate.costThresholdUSD }}
+      scaleThresholdPct: {{ .Values.config.aiGate.scaleThresholdPct }}
+      maxEvictNodes: {{ .Values.config.aiGate.maxEvictNodes }}
+    apiServer:
+      enabled: {{ .Values.config.apiServer.enabled }}
+      address: {{ .Values.config.apiServer.address | quote }}
+      port: {{ .Values.config.apiServer.port }}
+    database:
+      path: {{ .Values.config.database.path | quote }}
+      retentionDays: {{ .Values.config.database.retentionDays }}

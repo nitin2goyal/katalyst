@@ -1,0 +1,57 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "koptimizer.fullname" . }}
+  labels:
+    {{- include "koptimizer.labels" . | nindent 4 }}
+rules:
+  # Read nodes, pods, namespaces, PVs, PVCs
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "namespaces", "services", "events", "persistentvolumes", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  # Read/write ConfigMaps (hibernation state persistence)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Read node/pod metrics
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+  # Read/write deployments, statefulsets, replicasets, daemonsets
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets", "daemonsets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Read/write HPA
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Evict pods
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  # Cordon/uncordon nodes
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["patch", "update"]
+  # Read PDBs
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
+  # KOptimizer CRDs
+  - apiGroups: ["koptimizer.io"]
+    resources: ["optimizerconfigs", "recommendations", "costreports", "commitmentreports"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["koptimizer.io"]
+    resources: ["optimizerconfigs/status", "recommendations/status", "costreports/status", "commitmentreports/status"]
+    verbs: ["get", "update", "patch"]
+  # PriorityClasses for GPU scavenger pods
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    verbs: ["get", "list", "watch", "create"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]

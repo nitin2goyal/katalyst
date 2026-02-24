@@ -1,0 +1,316 @@
+package state
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"sync"
+
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/koptimizer/koptimizer/internal/store"
+	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
+	"github.com/koptimizer/koptimizer/pkg/familylock"
+	"github.com/koptimizer/koptimizer/pkg/metrics"
+)
+
+// ClusterState maintains an in-memory cache of the cluster state.
+type ClusterState struct {
+	mu         sync.RWMutex
+	client     client.Client
+	provider   cloudprovider.CloudProvider
+	metrics    metrics.MetricsCollector
+	nodes      map[string]*NodeState
+	pods       map[string]*PodState // key: namespace/name
+	nodeGroups *NodeGroupState
+	AuditLog   *AuditLog
+	NodeLock   *NodeLock
+}
+
+// NewClusterState creates a new ClusterState. If db and writer are non-nil,
+// the audit log is backed by SQLite for persistence across restarts.
+func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc metrics.MetricsCollector, db *sql.DB, writer *store.Writer) *ClusterState {
+	var auditLog *AuditLog
+	if db != nil && writer != nil {
+		auditLog = NewAuditLogWithDB(1000, db, writer)
+	} else {
+		auditLog = NewAuditLog(1000)
+	}
+	return &ClusterState{
+		client:     c,
+		provider:   provider,
+		metrics:    mc,
+		nodes:      make(map[string]*NodeState),
+		pods:       make(map[string]*PodState),
+		nodeGroups: NewNodeGroupState(),
+		AuditLog:   auditLog,
+		NodeLock:   NewNodeLock(),
+	}
+}
+
+// listAllNodes fetches all nodes using pagination to avoid OOM on large clusters.
+func (s *ClusterState) listAllNodes(ctx context.Context) (*corev1.NodeList, error) {
+	result := &corev1.NodeList{}
+	opts := &client.ListOptions{Limit: 500}
+	for {
+		page := &corev1.NodeList{}
+		if err := s.client.List(ctx, page, opts); err != nil {
+			return nil, err
+		}
+		result.Items = append(result.Items, page.Items...)
+		if page.Continue == "" {
+			break
+		}
+		opts.Continue = page.Continue
+	}
+	return result, nil
+}
+
+// listAllPods fetches all pods using pagination to avoid OOM on large clusters.
+func (s *ClusterState) listAllPods(ctx context.Context) (*corev1.PodList, error) {
+	result := &corev1.PodList{}
+	opts := &client.ListOptions{Limit: 500}
+	for {
+		page := &corev1.PodList{}
+		if err := s.client.List(ctx, page, opts); err != nil {
+			return nil, err
+		}
+		result.Items = append(result.Items, page.Items...)
+		if page.Continue == "" {
+			break
+		}
+		opts.Continue = page.Continue
+	}
+	return result, nil
+}
+
+// Refresh updates the cluster state cache from the Kubernetes API and cloud provider.
+func (s *ClusterState) Refresh(ctx context.Context) error {
+	// Fetch nodes (paginated)
+	nodeList, err := s.listAllNodes(ctx)
+	if err != nil {
+		return fmt.Errorf("listing nodes: %w", err)
+	}
+
+	// Fetch pods (paginated)
+	podList, err := s.listAllPods(ctx)
+	if err != nil {
+		return fmt.Errorf("listing pods: %w", err)
+	}
+
+	// Discover node groups
+	groups, err := s.provider.DiscoverNodeGroups(ctx)
+	if err != nil {
+		return fmt.Errorf("discovering node groups: %w", err)
+	}
+
+	// Get node metrics
+	nodeMetrics, _ := s.metrics.GetNodeMetrics(ctx) // Best effort
+	metricsMap := make(map[string]*metrics.NodeMetrics, len(nodeMetrics))
+	for i := range nodeMetrics {
+		metricsMap[nodeMetrics[i].Name] = &nodeMetrics[i]
+	}
+
+	// Build pod-to-node mapping
+	podsByNode := make(map[string][]*corev1.Pod)
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.Spec.NodeName != "" && pod.Status.Phase == corev1.PodRunning {
+			podsByNode[pod.Spec.NodeName] = append(podsByNode[pod.Spec.NodeName], pod)
+		}
+	}
+
+	// Build node group lookup
+	nodeGroupByNode := buildNodeGroupMapping(nodeList, groups)
+
+	// Pre-fetch pricing once to avoid N+1 GetNodeCost calls per node.
+	// GetNodeRegion returns the provider's default region for nodes without
+	// a region label, so a single call covers the common case.
+	var pricingMap map[string]float64
+	if len(nodeList.Items) > 0 {
+		if region, err := s.provider.GetNodeRegion(ctx, &nodeList.Items[0]); err == nil {
+			if pi, err := s.provider.GetCurrentPricing(ctx, region); err == nil {
+				pricingMap = pi.Prices
+			}
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Update nodes
+	newNodes := make(map[string]*NodeState, len(nodeList.Items))
+	for i := range nodeList.Items {
+		node := &nodeList.Items[i]
+		cpuCap, memCap, gpuCap := ExtractNodeCapacity(node)
+
+		instanceType, _ := s.provider.GetNodeInstanceType(ctx, node)
+		family, _ := familylock.ExtractFamily(instanceType)
+
+		ns := &NodeState{
+			Node:           node,
+			Pods:           podsByNode[node.Name],
+			InstanceType:   instanceType,
+			InstanceFamily: family,
+			CPUCapacity:    cpuCap,
+			MemoryCapacity: memCap,
+			GPUCapacity:    gpuCap,
+			IsGPUNode:      gpuCap > 0,
+		}
+
+		// Set node group info
+		if ngID, ok := nodeGroupByNode[node.Name]; ok {
+			ns.NodeGroupID = ngID
+		}
+
+		// Calculate requests
+		for _, pod := range ns.Pods {
+			cpuReq, memReq := ExtractPodRequests(pod)
+			ns.CPURequested += cpuReq
+			ns.MemoryRequested += memReq
+		}
+
+		// Apply metrics
+		if m, ok := metricsMap[node.Name]; ok {
+			ns.CPUUsed = m.CPUUsage
+			ns.MemoryUsed = m.MemoryUsage
+		}
+
+		// Compute cost from pre-fetched pricing (avoids per-node API call).
+		if pricingMap != nil && instanceType != "" {
+			if price, ok := pricingMap[instanceType]; ok {
+				ns.IsSpot = cloudprovider.IsSpotNode(node)
+				if ns.IsSpot {
+					// Use per-provider, per-family spot discount estimates instead
+					// of a flat multiplier. Each provider implements
+					// SpotDiscountEstimator with instance-family-specific rates.
+					if sde, ok := s.provider.(cloudprovider.SpotDiscountEstimator); ok {
+						discount := sde.EstimateSpotDiscount(instanceType)
+						ns.HourlyCostUSD = price * (1 - discount)
+					} else {
+						ns.HourlyCostUSD = price * 0.35 // fallback: ~65% spot discount
+					}
+				} else {
+					ns.HourlyCostUSD = price
+				}
+			}
+		}
+
+		newNodes[node.Name] = ns
+	}
+	s.nodes = newNodes
+
+	// Update pods
+	newPods := make(map[string]*PodState, len(podList.Items))
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		key := pod.Namespace + "/" + pod.Name
+		newPods[key] = NewPodState(pod)
+	}
+	s.pods = newPods
+
+	// Update node groups
+	nodeStates := make([]*NodeState, 0, len(s.nodes))
+	for _, n := range s.nodes {
+		nodeStates = append(nodeStates, n)
+	}
+	s.nodeGroups.Update(groups, nodeStates)
+
+	return nil
+}
+
+// GetNode returns a node by name.
+func (s *ClusterState) GetNode(name string) (*NodeState, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n, ok := s.nodes[name]
+	return n, ok
+}
+
+// GetAllNodes returns all nodes.
+func (s *ClusterState) GetAllNodes() []*NodeState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*NodeState, 0, len(s.nodes))
+	for _, n := range s.nodes {
+		result = append(result, n)
+	}
+	return result
+}
+
+// GetPod returns a pod by namespace/name.
+func (s *ClusterState) GetPod(namespace, name string) (*PodState, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.pods[namespace+"/"+name]
+	return p, ok
+}
+
+// GetAllPods returns all pods.
+func (s *ClusterState) GetAllPods() []*PodState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*PodState, 0, len(s.pods))
+	for _, p := range s.pods {
+		result = append(result, p)
+	}
+	return result
+}
+
+// GetNodeGroups returns the node group state.
+func (s *ClusterState) GetNodeGroups() *NodeGroupState {
+	return s.nodeGroups
+}
+
+// buildNodeGroupMapping maps node names to their node group IDs.
+func buildNodeGroupMapping(nodes *corev1.NodeList, groups []*cloudprovider.NodeGroup) map[string]string {
+	result := make(map[string]string)
+	// Node groups are matched by labels
+	for _, ng := range groups {
+		for i := range nodes.Items {
+			node := &nodes.Items[i]
+			if matchesNodeGroup(node, ng) {
+				result[node.Name] = ng.ID
+			}
+		}
+	}
+	return result
+}
+
+// matchesNodeGroup checks if a node belongs to a node group using multiple strategies.
+func matchesNodeGroup(node *corev1.Node, ng *cloudprovider.NodeGroup) bool {
+	if node.Labels == nil {
+		return false
+	}
+
+	// Strategy 1: Cloud-specific node group labels (most reliable).
+	// AWS EKS
+	if v, ok := node.Labels["eks.amazonaws.com/nodegroup"]; ok && v == ng.Name {
+		return true
+	}
+	// GCP GKE
+	if v, ok := node.Labels["cloud.google.com/gke-nodepool"]; ok && v == ng.Name {
+		return true
+	}
+	// Azure AKS
+	if v, ok := node.Labels["kubernetes.azure.com/agentpool"]; ok && v == ng.Name {
+		return true
+	}
+
+	// Strategy 2: Match by node group labels if present.
+	if len(ng.Labels) > 0 {
+		allMatch := true
+		for k, v := range ng.Labels {
+			if nodeVal, ok := node.Labels[k]; !ok || nodeVal != v {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			return true
+		}
+	}
+
+	return false
+}

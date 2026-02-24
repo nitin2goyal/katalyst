@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KOptimizer - Kubernetes Cost Optimization Engine</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--sidebar-bg:#1a1a2e;--sidebar-w:280px;--accent:#4361ee;--accent-light:#6c83f7;--text:#2d2d2d;--text-light:#6b7280;--bg:#ffffff;--bg-alt:#f8f9fc;--border:#e5e7eb;--code-bg:#1e1e2e;--code-text:#cdd6f4;--success:#10b981;--warn:#f59e0b;--danger:#ef4444;--radius:8px}
+html{scroll-behavior:smooth;scroll-padding-top:70px}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,sans-serif;color:var(--text);background:var(--bg);line-height:1.7;font-size:15px}
+
+/* Sidebar */
+.sidebar{position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;background:var(--sidebar-bg);color:#fff;overflow-y:auto;z-index:100;padding:0 0 2rem;transition:transform .3s}
+.sidebar-header{padding:1.5rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.1)}
+.sidebar-header h1{font-size:1.25rem;font-weight:700;letter-spacing:-.5px}
+.sidebar-header p{font-size:.75rem;color:rgba(255,255,255,.5);margin-top:.25rem}
+.sidebar nav{padding:.75rem 0}
+.sidebar nav a{display:block;padding:.45rem 1.25rem;color:rgba(255,255,255,.7);text-decoration:none;font-size:.85rem;border-left:3px solid transparent;transition:all .15s}
+.sidebar nav a:hover,.sidebar nav a.active{color:#fff;background:rgba(255,255,255,.05);border-left-color:var(--accent)}
+.sidebar nav .nav-group{padding:.5rem 1.25rem .2rem;font-size:.65rem;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,.35);margin-top:.5rem}
+
+/* Top bar */
+.topbar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:56px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 2rem;z-index:90}
+.topbar .search-box{flex:1;max-width:480px;height:36px;border:1px solid var(--border);border-radius:18px;padding:0 1rem;font-size:.85rem;color:var(--text-light);display:flex;align-items:center;gap:.5rem;background:var(--bg-alt)}
+.topbar .search-box span{opacity:.5}
+.topbar .badge{margin-left:auto;background:var(--accent);color:#fff;padding:.2rem .7rem;border-radius:12px;font-size:.75rem;font-weight:600}
+
+/* Main */
+.main{margin-left:var(--sidebar-w);padding:56px 0 0}
+.content{max-width:860px;margin:0 auto;padding:2rem 2.5rem 4rem}
+
+/* Hero */
+.hero{background:linear-gradient(135deg,var(--sidebar-bg),#16213e);color:#fff;padding:3rem 2.5rem;margin:-2rem -2.5rem 2.5rem;border-radius:0 0 var(--radius) var(--radius)}
+.hero h1{font-size:2.2rem;font-weight:800;letter-spacing:-1px}
+.hero .tagline{color:rgba(255,255,255,.7);margin:.5rem 0 1.5rem;font-size:1.05rem}
+.hero .stats{display:flex;gap:2rem;flex-wrap:wrap}
+.hero .stat{text-align:center}
+.hero .stat .num{font-size:1.8rem;font-weight:700;color:var(--accent-light)}
+.hero .stat .label{font-size:.75rem;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:1px}
+
+/* Typography */
+h2{font-size:1.6rem;font-weight:700;margin:2.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid var(--border);letter-spacing:-.5px}
+h3{font-size:1.15rem;font-weight:600;margin:1.8rem 0 .6rem;color:var(--sidebar-bg)}
+h4{font-size:1rem;font-weight:600;margin:1.2rem 0 .5rem}
+p{margin:.5rem 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+strong{font-weight:600}
+ul,ol{margin:.5rem 0 .5rem 1.5rem}
+li{margin:.25rem 0}
+
+/* Code */
+code{font-family:"SF Mono",Monaco,Consolas,"Liberation Mono",monospace;font-size:.85em;background:var(--bg-alt);padding:.15em .4em;border-radius:4px;border:1px solid var(--border)}
+pre{background:var(--code-bg);color:var(--code-text);padding:1.25rem 1.5rem;border-radius:var(--radius);overflow-x:auto;margin:1rem 0;position:relative;font-size:.84rem;line-height:1.6}
+pre code{background:none;border:none;padding:0;color:inherit;font-size:inherit}
+pre::after{content:"";position:absolute;top:.75rem;right:.75rem;width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.15)}
+
+/* Tables */
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem}
+th{background:var(--sidebar-bg);color:#fff;padding:.6rem .8rem;text-align:left;font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px}
+td{padding:.55rem .8rem;border-bottom:1px solid var(--border)}
+tr:nth-child(even){background:var(--bg-alt)}
+td code{font-size:.8rem}
+
+/* Cards */
+.card{background:var(--bg-alt);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;margin:1rem 0}
+.card h4{margin-top:0}
+
+/* Info boxes */
+.info-box{padding:1rem 1.25rem;border-radius:var(--radius);margin:1rem 0;border-left:4px solid}
+.info-box.tip{background:#ecfdf5;border-color:var(--success);color:#065f46}
+.info-box.warn{background:#fffbeb;border-color:var(--warn);color:#92400e}
+.info-box.danger{background:#fef2f2;border-color:var(--danger);color:#991b1b}
+
+/* Feature grid */
+.feature-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:1rem;margin:1rem 0}
+.feature-card{background:var(--bg-alt);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.25rem}
+.feature-card .num{display:inline-block;background:var(--accent);color:#fff;width:24px;height:24px;text-align:center;border-radius:50%;font-size:.75rem;line-height:24px;font-weight:700;margin-right:.5rem}
+.feature-card h4{display:inline;font-size:.95rem}
+.feature-card p{font-size:.85rem;color:var(--text-light);margin-top:.35rem}
+
+/* Flow diagram */
+.flow{background:var(--code-bg);color:var(--code-text);padding:1.5rem;border-radius:var(--radius);font-family:"SF Mono",Monaco,Consolas,monospace;font-size:.78rem;line-height:1.5;overflow-x:auto;white-space:pre;margin:1rem 0}
+
+/* Mobile */
+.menu-toggle{display:none;position:fixed;top:12px;left:12px;z-index:200;background:var(--sidebar-bg);color:#fff;border:none;border-radius:6px;padding:.4rem .6rem;font-size:1.2rem;cursor:pointer}
+@media(max-width:860px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .menu-toggle{display:block}
+  .topbar{left:0}
+  .main{margin-left:0}
+  .content{padding:2rem 1.25rem 4rem}
+  .hero{margin:-2rem -1.25rem 2rem;padding:2rem 1.25rem}
+  .hero .stats{gap:1rem}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h1>KOptimizer</h1>
+    <p>Kubernetes Cost Optimization</p>
+  </div>
+  <nav>
+    <div class="nav-group">Getting Started</div>
+    <a href="#overview">Overview</a>
+    <a href="#quick-start">Quick Start</a>
+    <a href="#architecture">Architecture</a>
+    <div class="nav-group">Configuration</div>
+    <a href="#config">Configuration Reference</a>
+    <a href="#modes">Operating Modes</a>
+    <a href="#helm">Helm Deployment</a>
+    <div class="nav-group">Interfaces</div>
+    <a href="#rest-api">REST API Reference</a>
+    <a href="#mcp">MCP Server</a>
+    <div class="nav-group">Operations</div>
+    <a href="#cloud-providers">Cloud Provider Setup</a>
+    <a href="#monitoring">Monitoring</a>
+    <a href="#safety">Safety Guarantees</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+  </nav>
+</aside>
+
+<div class="topbar">
+  <div class="search-box"><span>&#128269;</span> Search documentation...</div>
+  <span class="badge">v0.1.0</span>
+</div>
+
+<div class="main">
+<div class="content">
+
+<!-- Hero -->
+<div class="hero">
+  <h1>KOptimizer</h1>
+  <p class="tagline">Family-locked Kubernetes cost optimization with AI safety gate</p>
+  <div class="stats">
+    <div class="stat"><div class="num">10</div><div class="label">Features</div></div>
+    <div class="stat"><div class="num">31</div><div class="label">MCP Tools</div></div>
+    <div class="stat"><div class="num">3</div><div class="label">Cloud Providers</div></div>
+    <div class="stat"><div class="num">3</div><div class="label">Operating Modes</div></div>
+  </div>
+</div>
+
+<!-- 1. Overview -->
+<h2 id="overview">1. Overview</h2>
+
+<p>KOptimizer is a Kubernetes cost optimization engine that automatically reduces cloud spend while preserving cluster stability. It is inspired by tools like CAST AI but takes a fundamentally different approach to node management.</p>
+
+<h3>The Problem with Existing Optimizers</h3>
+<p>Traditional Kubernetes cost optimizers pick arbitrary instance families when scaling &mdash; they might swap your <code>m5</code> nodes for <code>c5</code> or <code>r5</code> nodes, create new node groups with different instance types, and break your Reserved Instance or Savings Plan commitments in the process. This leads to degraded performance and wasted money on unused reservations.</p>
+
+<h3>The KOptimizer Approach: Family-Locked Optimization with AI Safety Gate</h3>
+
+<p>KOptimizer enforces two core safety principles:</p>
+
+<ol>
+  <li><strong>Family-Lock Guard</strong> &mdash; The system never changes instance families and never creates new node groups. It scales existing node groups up and down, adjusts parameters like min/max counts, and rightsizes within the same instance family (e.g., <code>m5.large</code> to <code>m5.xlarge</code> is allowed, but <code>m5</code> to <code>c5</code> is blocked). This preserves your Reserved Instance and Savings Plan commitments.</li>
+  <li><strong>AI Safety Gate</strong> &mdash; Before executing any large or risky change, KOptimizer calls Claude to validate the decision. If the AI rejects the change, it falls back to a human-approved recommendation. If the AI API is unreachable, the change also falls back to recommendation mode.</li>
+</ol>
+
+<h3>The 10 Features</h3>
+<div class="feature-grid">
+  <div class="feature-card"><span class="num">1</span><h4>Cost Monitoring</h4><p>Real-time cost visibility by namespace, workload, and label</p></div>
+  <div class="feature-card"><span class="num">2</span><h4>Node Autoscaling</h4><p>Scale existing node groups up/down, rightsize within family</p></div>
+  <div class="feature-card"><span class="num">3</span><h4>Node Group Lifecycle</h4><p>Adjust min/max counts, detect and recommend deletion of empty groups</p></div>
+  <div class="feature-card"><span class="num">4</span><h4>Workload Rightsizing</h4><p>Auto-apply optimal CPU/memory requests based on actual usage</p></div>
+  <div class="feature-card"><span class="num">5</span><h4>Workload Autoscaler</h4><p>Unified HPA+VPA that resolves scaling conflicts</p></div>
+  <div class="feature-card"><span class="num">6</span><h4>Evictor / Bin-Packing</h4><p>Consolidate pods onto fewer nodes, drain underutilized nodes</p></div>
+  <div class="feature-card"><span class="num">7</span><h4>Rebalancer</h4><p>Redistribute workloads for optimal packing on a schedule</p></div>
+  <div class="feature-card"><span class="num">8</span><h4>GPU Optimization</h4><p>Detect idle GPUs, run CPU workloads on idle GPU nodes</p></div>
+  <div class="feature-card"><span class="num">9</span><h4>Commitment Reporting</h4><p>Track RI/Savings Plan/CUD utilization and expiry</p></div>
+  <div class="feature-card"><span class="num">10</span><h4>AI Safety Gate</h4><p>Claude validates risky changes before execution</p></div>
+</div>
+
+<h3>Multi-Cloud Support</h3>
+<p>KOptimizer supports AWS (EKS), GCP (GKE), and Azure (AKS).</p>
+
+<!-- 2. Quick Start -->
+<h2 id="quick-start">2. Quick Start</h2>
+
+<h3>Prerequisites</h3>
+<ul>
+  <li><strong>Go 1.22+</strong> (for building from source)</li>
+  <li><strong>Kubernetes cluster</strong> (EKS, GKE, or AKS)</li>
+  <li><strong>kubectl</strong> configured with cluster access</li>
+  <li><strong>Helm 3</strong> (for deployment)</li>
+  <li><strong>Docker</strong> (optional, for building container images)</li>
+</ul>
+
+<h3>Build from Source</h3>
+<pre><code># Clone the repository
+git clone https://github.com/koptimizer/koptimizer.git
+cd koptimizer
+
+# Build the main optimizer binary
+make build
+# Output: bin/koptimizer
+
+# Build the MCP server binary
+make build-mcp
+# Output: bin/koptimizer-mcp
+
+# Run all tests
+make test
+
+# Run linter
+make lint
+
+# Generate CRDs and deepcopy methods
+make generate</code></pre>
+
+<h3>Docker Image</h3>
+<pre><code># Build the Docker image (includes both koptimizer and koptimizer-mcp binaries)
+make docker-build
+# Output: koptimizer:latest
+
+# Tag and push to your registry
+docker tag koptimizer:latest your-registry.com/koptimizer:latest
+docker push your-registry.com/koptimizer:latest</code></pre>
+
+<p>The Docker image is based on <code>gcr.io/distroless/static:nonroot</code> and runs as non-root user (UID 65532). It exposes port 8080 (REST API) and port 9090 (Prometheus metrics).</p>
+
+<h3>Helm Install (Minimal)</h3>
+<pre><code># Install with defaults (recommend mode, AWS, no AI Gate API key)
+helm install koptimizer deploy/helm/koptimizer \
+  --namespace koptimizer --create-namespace \
+  --set config.cloudProvider=aws \
+  --set config.region=us-east-1
+
+# Install with AI Safety Gate enabled
+helm install koptimizer deploy/helm/koptimizer \
+  --namespace koptimizer --create-namespace \
+  --set config.cloudProvider=aws \
+  --set config.region=us-east-1 \
+  --set config.mode=active \
+  --set aiGateApiKey=sk-ant-xxxxx
+
+# Install using an existing Kubernetes secret for the API key
+helm install koptimizer deploy/helm/koptimizer \
+  --namespace koptimizer --create-namespace \
+  --set config.cloudProvider=aws \
+  --set config.region=us-east-1 \
+  --set aiGateApiKeySecretRef.name=my-anthropic-secret \
+  --set aiGateApiKeySecretRef.key=ANTHROPIC_API_KEY</code></pre>
+
+<h3>Run Locally (Development)</h3>
+<pre><code># Ensure KUBECONFIG is set or ~/.kube/config exists
+export KUBECONFIG=~/.kube/config
+
+# Run with default config
+./bin/koptimizer --config config.yaml
+
+# Run with custom addresses
+./bin/koptimizer \
+  --config config.yaml \
+  --metrics-bind-address :9090 \
+  --health-probe-bind-address :8081</code></pre>
+
+<!-- 3. Architecture -->
+<h2 id="architecture">3. Architecture</h2>
+
+<div class="flow">+----------------------------------------------------------------------+
+|                            KOptimizer                                 |
+|                                                                       |
+|  +-------------+ +-------------+ +----------+ +-------------------+  |
+|  | Cost        | | Node        | | Evictor  | | GPU               |  |
+|  | Monitor     | | Autoscaler  | |          | | Optimizer         |  |
+|  +------+------+ +------+------+ +----+-----+ +--------+----------+  |
+|         |               |              |                |             |
+|  +------+------+ +------+------+ +----+-----+ +--------+----------+  |
+|  | Commitments | | Node Group  | | Rebalancer | Workload          |  |
+|  | Reporter    | | Manager     | |          | | Scaler+Rightsizer |  |
+|  +------+------+ +------+------+ +----+-----+ +--------+----------+  |
+|         |               |              |                |             |
+|         |       +-------v--------+     |                |             |
+|         |       | Family-Lock    |     |                |             |
+|         |       | Guard          |&lt;----+                |             |
+|         |       | (NEVER change  |                      |             |
+|         |       |  families or   |                      |             |
+|         |       |  create new    |                      |             |
+|         |       |  node groups)  |                      |             |
+|         |       +-------+--------+                      |             |
+|         |               |                               |             |
+|         +-------+-------+-------+-----------+-----------+             |
+|                 |               |           |                         |
+|         +-------v--------+     |   +-------v--------+                |
+|         | AI Safety Gate |     |   | Recommendation |                |
+|         | (Claude)       |     |   | Engine (CRDs)  |                |
+|         +-------+--------+     |   +-------+--------+                |
+|                 |               |           |                         |
+|         +-------v---------------v-----------v--------+                |
+|         |           Cluster State Cache              |                |
+|         +-------+------------------+--------+--------+                |
+|                 |                  |        |                         |
+|          +------v------+  +-------v-----+ +v-----------+             |
+|          | REST API    |  | Prometheus  | | CRD Writer |             |
+|          | (:8080)     |  | Metrics     | | (audit)    |             |
+|          +-------------+  | (:9090)     | +------------+             |
+|                           +-------------+                            |
++----------------------------------------------------------------------+
+        ^                           ^
+        | Cloud APIs                | Kubernetes API
+   +----+--------+            +----+--------+
+   | AWS / GCP / |            | kube-apiserver
+   | Azure APIs  |            |              |
+   +--------------+            +--------------+</div>
+
+<h3>How Controllers Work Together</h3>
+<ol>
+  <li><strong>Cluster State Cache</strong> refreshes every <code>reconcileInterval</code> (default: 60s), pulling node, pod, and metrics data from the Kubernetes API and cloud provider APIs.</li>
+  <li><strong>Cost Monitor</strong> and <strong>Commitment Reporter</strong> are read-only controllers that compute cost attribution and track commitment utilization.</li>
+  <li><strong>Node Autoscaler</strong> watches for unschedulable pods (triggers scale-up) and underutilized nodes (triggers scale-down). All node operations pass through the <strong>Family-Lock Guard</strong>.</li>
+  <li><strong>Node Group Manager</strong> watches for underutilized node groups (adjusts min counts) and empty node groups (recommends deletion).</li>
+  <li><strong>Rightsizer</strong> analyzes workload CPU/memory usage over a lookback window and patches resource requests. <strong>Workload Scaler</strong> coordinates HPA and VPA to prevent oscillation.</li>
+  <li><strong>Evictor</strong> consolidates pods from underutilized nodes. <strong>Rebalancer</strong> periodically redistributes workloads for optimal bin-packing.</li>
+  <li><strong>GPU Optimizer</strong> detects idle GPU nodes and manages taints to allow CPU workloads as fallback.</li>
+  <li>For any risky change, the <strong>AI Safety Gate</strong> validates the decision before execution.</li>
+</ol>
+
+<h3>The Family-Lock Guard and AI Safety Gate Flow</h3>
+<div class="flow">Controller proposes action
+         |
+         v
+  Family-Lock Guard
+  "Is this within the same instance family?"
+  "Is this modifying an existing node group (not creating)?"
+         |
+    +----+----+
+    |         |
+  BLOCKED   ALLOWED
+  (logged)    |
+              v
+      Is this a risky change?
+      (&gt;30% scale, min-&gt;0, &gt;$500 impact, &gt;3 node eviction)
+         |
+    +----+----+
+    |         |
+    NO       YES
+    |         |
+    v         v
+  Execute   AI Safety Gate (Claude)
+  directly    |
+         +----+----+
+         |         |
+      APPROVED  REJECTED (or API error/timeout)
+         |         |
+         v         v
+      Execute   Create Recommendation CRD
+      directly  (human must approve)</div>
+
+<!-- 4. Configuration Reference -->
+<h2 id="config">4. Configuration Reference</h2>
+
+<p>KOptimizer loads configuration from a YAML file (default path: <code>/etc/koptimizer/config.yaml</code>). Any values not specified in the file fall back to built-in defaults. The config file path is set via the <code>--config</code> flag.</p>
+
+<h3>Full YAML Reference</h3>
+<pre><code># Operating mode: "monitor" | "recommend" | "active"
+# Default: "recommend"
+mode: "recommend"
+
+# Cloud provider: "aws" | "gcp" | "azure"
+cloudProvider: "aws"
+
+# Cloud region for pricing and API calls
+region: "us-east-1"
+
+# Kubernetes cluster name (used for node group discovery)
+clusterName: "my-cluster"
+
+# How often to refresh cluster state (Default: 60s)
+reconcileInterval: "60s"
+
+# ── Cost Monitor ─────────────────────────────────────────
+costMonitor:
+  enabled: true                  # Default: true
+  updateInterval: "5m"           # Default: 5m
+
+# ── Node Autoscaler ─────────────────────────────────────
+nodeAutoscaler:
+  enabled: true                  # Default: true
+  scanInterval: "30s"            # Default: 30s
+  scaleUpThreshold: 80           # Default: 80
+  scaleDownThreshold: 30         # Default: 30
+  scaleDownDelay: "10m"          # Default: 10m
+  maxScaleUpNodes: 5             # Default: 5
+  maxScaleDownNodes: 3           # Default: 3
+
+# ── Node Group Manager ──────────────────────────────────
+nodegroupManager:
+  enabled: true
+  minAdjustment:
+    enabled: true
+    minUtilizationPct: 30        # Below this, consider reducing min
+    observationPeriod: "48h"     # How long underutilized before acting
+  emptyGroupDetection:
+    enabled: true
+    emptyPeriod: "336h"          # 14 days
+
+# ── Rightsizer (Pod CPU/Memory) ──────────────────────────
+rightsizer:
+  enabled: true
+  lookbackWindow: "168h"         # 7 days
+  cpuTargetUtilPct: 70
+  memoryTargetUtilPct: 75
+  minCPURequest: "10m"
+  minMemoryRequest: "32Mi"
+  oomBumpMultiplier: 2.5
+  excludeNamespaces:
+    - kube-system
+
+# ── Workload Scaler (Unified HPA+VPA) ───────────────────
+workloadScaler:
+  enabled: true
+  verticalEnabled: true
+  horizontalEnabled: true
+  surgeDetection: true
+  surgeThreshold: 2.0
+  confidenceStartPct: 50
+  confidenceFullDays: 7
+  excludeNamespaces:
+    - kube-system
+    - monitoring
+
+# ── Evictor (Pod Consolidation) ─────────────────────────
+evictor:
+  enabled: true
+  utilizationThreshold: 40
+  consolidationInterval: "5m"
+  maxConcurrentEvictions: 5
+  dryRun: false
+
+# ── Rebalancer ───────────────────────────────────────────
+rebalancer:
+  enabled: true
+  schedule: "0 3 * * SUN"
+  busyRedistribution:
+    enabled: true
+    overloadedThresholdPct: 90
+    targetUtilizationPct: 70
+
+# ── GPU Optimization ─────────────────────────────────────
+gpu:
+  enabled: true
+  idleThresholdPct: 5
+  idleDuration: "30m"
+  cpuFallbackEnabled: true
+
+# ── Commitment Reporting (RI/SP/CUD) ────────────────────
+commitments:
+  enabled: true
+  updateInterval: "1h"
+  expiryWarningDays: [30, 60, 90]
+
+# ── AI Safety Gate ───────────────────────────────────────
+aiGate:
+  enabled: true
+  model: "claude-sonnet-4-6"
+  timeout: "10s"
+  costThresholdUSD: 500
+  scaleThresholdPct: 30
+  maxEvictNodes: 3
+
+# ── API Server ───────────────────────────────────────────
+apiServer:
+  enabled: true
+  address: "0.0.0.0"
+  port: 8080</code></pre>
+
+<h3>Validation Rules</h3>
+<ul>
+  <li><code>mode</code> must be one of: <code>monitor</code>, <code>recommend</code>, <code>active</code></li>
+  <li><code>cloudProvider</code> must be one of: <code>aws</code>, <code>gcp</code>, <code>azure</code> (or empty)</li>
+  <li><code>scaleUpThreshold</code> must be greater than <code>scaleDownThreshold</code></li>
+  <li><code>oomBumpMultiplier</code> must be &ge; 1.0</li>
+  <li><code>surgeThreshold</code> must be &ge; 1.0</li>
+</ul>
+
+<!-- 5. Operating Modes -->
+<h2 id="modes">5. Operating Modes</h2>
+
+<p>KOptimizer has three operating modes that control how aggressively it acts:</p>
+
+<table>
+  <thead><tr><th>Mode</th><th>Cost Monitoring</th><th>Recommendations</th><th>Auto-Execute</th></tr></thead>
+  <tbody>
+    <tr><td><code>monitor</code></td><td>Yes</td><td>No</td><td>No</td></tr>
+    <tr><td><code>recommend</code></td><td>Yes</td><td>Yes (CRDs created)</td><td>No</td></tr>
+    <tr><td><code>active</code></td><td>Yes</td><td>Yes</td><td>Yes (auto-executable only)</td></tr>
+  </tbody>
+</table>
+
+<h3>Monitor Mode</h3>
+<p>The system observes and collects data only. No Recommendation CRDs are created. Use this mode to understand your cluster's cost profile before enabling optimizations.</p>
+
+<h3>Recommend Mode (Default)</h3>
+<p>The system generates Recommendation CRDs describing what it would do, but takes no action. Every recommendation includes a human-readable summary, step-by-step action plan, estimated monthly savings, and impact assessment.</p>
+
+<h3>Active Mode</h3>
+<p>The system automatically executes actions that are marked as <code>AutoExecutable</code>. Non-auto-executable actions are still created as Recommendation CRDs for human approval. In all modes, the Family-Lock Guard is enforced.</p>
+
+<h3>AutoExecutable Decision Table</h3>
+<table>
+  <thead><tr><th>Action</th><th>Auto-Executable</th><th>AI Gate</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td>Scale node group up (small, &le;30%)</td><td>Yes</td><td>No</td><td>ASG desired 3 &rarr; 4</td></tr>
+    <tr><td>Scale node group up (large, &gt;30%)</td><td>Yes</td><td><strong>Yes</strong></td><td>ASG desired 3 &rarr; 6</td></tr>
+    <tr><td>Scale node group down (small)</td><td>Yes</td><td>No</td><td>ASG desired 5 &rarr; 4</td></tr>
+    <tr><td>Adjust node group min count</td><td>Yes</td><td><strong>Yes</strong></td><td>min 5 &rarr; 0</td></tr>
+    <tr><td>Patch pod CPU/memory requests</td><td>Yes</td><td>No</td><td>Deployment requests adjusted</td></tr>
+    <tr><td>Evict pods (&le;3 nodes)</td><td>Yes</td><td>No</td><td>Pods moved to pack tighter</td></tr>
+    <tr><td>Evict pods (&gt;3 nodes)</td><td>Yes</td><td><strong>Yes</strong></td><td>Large consolidation event</td></tr>
+    <tr><td>Cordon/drain underutilized node</td><td>Yes</td><td>No</td><td>Node emptied, group scaled down</td></tr>
+    <tr><td>GPU taint management</td><td>Yes</td><td>No</td><td>Taint added/removed on idle GPU node</td></tr>
+    <tr><td>HPA+VPA coordination</td><td>Yes</td><td>No</td><td>Scaling targets adjusted</td></tr>
+    <tr><td>Change instance size within family</td><td><strong>No</strong></td><td>N/A</td><td>Recommendation: m5.large &rarr; m5.xlarge</td></tr>
+    <tr><td>Delete empty node group</td><td><strong>No</strong></td><td>N/A</td><td>Recommendation: delete legacy-workers</td></tr>
+    <tr><td>AI Gate rejection</td><td><strong>No</strong></td><td>N/A</td><td>Recommendation with rejection reason</td></tr>
+    <tr><td>Change instance family</td><td><strong>Never generated</strong></td><td>N/A</td><td>Blocked by Family-Lock Guard</td></tr>
+    <tr><td>Create new node group</td><td><strong>Never generated</strong></td><td>N/A</td><td>Blocked by Family-Lock Guard</td></tr>
+  </tbody>
+</table>
+
+<h3>Switching Modes at Runtime</h3>
+<pre><code>curl -X PUT http://localhost:8080/api/v1/config/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "active"}'</code></pre>
+
+<!-- 6. Helm Deployment -->
+<h2 id="helm">6. Helm Deployment</h2>
+
+<h3>Chart Location</h3>
+<p>The Helm chart is located at <code>deploy/helm/koptimizer/</code>.</p>
+
+<h3>Lint Before Installing</h3>
+<pre><code>make helm-lint
+# or
+helm lint deploy/helm/koptimizer</code></pre>
+
+<h3>Install</h3>
+<pre><code>helm install koptimizer deploy/helm/koptimizer \
+  --namespace koptimizer --create-namespace \
+  -f my-values.yaml</code></pre>
+
+<h3>values.yaml Reference</h3>
+<pre><code>replicaCount: 1
+
+image:
+  repository: koptimizer
+  tag: latest
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+config:
+  mode: "recommend"
+  cloudProvider: "aws"
+  region: "us-east-1"
+  clusterName: ""
+  reconcileInterval: "60s"
+
+# Anthropic API key for AI Safety Gate
+aiGateApiKey: ""
+aiGateApiKeySecretRef:
+  name: ""
+  key: "ANTHROPIC_API_KEY"
+
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+serviceMonitor:
+  enabled: false
+  interval: "30s"
+  labels: {}</code></pre>
+
+<h3>RBAC Requirements</h3>
+<table>
+  <thead><tr><th>API Group</th><th>Resources</th><th>Verbs</th></tr></thead>
+  <tbody>
+    <tr><td><code>""</code> (core)</td><td>nodes, pods, namespaces, services, events</td><td>get, list, watch</td></tr>
+    <tr><td><code>""</code> (core)</td><td>nodes</td><td>patch, update</td></tr>
+    <tr><td><code>""</code> (core)</td><td>pods/eviction</td><td>create</td></tr>
+    <tr><td><code>metrics.k8s.io</code></td><td>nodes, pods</td><td>get, list</td></tr>
+    <tr><td><code>apps</code></td><td>deployments, statefulsets, replicasets, daemonsets</td><td>get, list, watch, patch, update</td></tr>
+    <tr><td><code>autoscaling</code></td><td>horizontalpodautoscalers</td><td>get, list, watch, create, update, patch, delete</td></tr>
+    <tr><td><code>policy</code></td><td>poddisruptionbudgets</td><td>get, list, watch</td></tr>
+    <tr><td><code>koptimizer.io</code></td><td>optimizerconfigs, recommendations, costreports, commitmentreports</td><td>get, list, watch, create, update, patch, delete</td></tr>
+    <tr><td><code>coordination.k8s.io</code></td><td>leases</td><td>get, list, watch, create, update, patch, delete</td></tr>
+  </tbody>
+</table>
+
+<h3>Setting Up the Anthropic API Key</h3>
+
+<h4>Option 1: Direct value (development only)</h4>
+<pre><code>helm install koptimizer deploy/helm/koptimizer \
+  --set aiGateApiKey=sk-ant-api03-xxxxx</code></pre>
+
+<h4>Option 2: Kubernetes Secret (recommended)</h4>
+<pre><code># Create the secret first
+kubectl create secret generic anthropic-api-key \
+  --namespace koptimizer \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
+
+# Reference it in the Helm install
+helm install koptimizer deploy/helm/koptimizer \
+  --set aiGateApiKeySecretRef.name=anthropic-api-key \
+  --set aiGateApiKeySecretRef.key=ANTHROPIC_API_KEY</code></pre>
+
+<h3>ServiceMonitor for Prometheus</h3>
+<pre><code>serviceMonitor:
+  enabled: true
+  interval: "30s"
+  labels:
+    release: prometheus    # Match your Prometheus label selector</code></pre>
+
+<!-- 7. REST API Reference -->
+<h2 id="rest-api">7. REST API Reference</h2>
+
+<p>The REST API is served on the address and port configured under <code>apiServer</code> (default: <code>0.0.0.0:8080</code>). All endpoints are under the <code>/api/v1</code> prefix. Responses are JSON.</p>
+
+<h3>Cluster</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/cluster/summary</code></td><td>Cluster overview: node count, pod count, CPU/memory utilization, estimated monthly cost</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/cluster/health</code></td><td>KOptimizer system health and enabled/disabled state of each controller</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/cluster/summary | jq .
+curl -s http://localhost:8080/api/v1/cluster/health | jq .</code></pre>
+
+<h3>Node Groups</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/nodegroups</code></td><td>All node groups with instance types, current/min/max counts, utilization, monthly cost</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/nodegroups/{id}</code></td><td>Single node group detail</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/nodegroups/{id}/nodes</code></td><td>Nodes belonging to a node group</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/nodegroups/empty</code></td><td>Node groups with zero running pods</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/nodegroups | jq .
+curl -s http://localhost:8080/api/v1/nodegroups/asg-workers-m5 | jq .
+curl -s http://localhost:8080/api/v1/nodegroups/asg-workers-m5/nodes | jq .
+curl -s http://localhost:8080/api/v1/nodegroups/empty | jq .</code></pre>
+
+<h3>Nodes</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/nodes</code></td><td>All nodes with instance type, node group, CPU/memory, cost, spot status, GPU status</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/nodes/{name}</code></td><td>Single node detail</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/nodes | jq .
+curl -s http://localhost:8080/api/v1/nodes/ip-10-0-1-42.ec2.internal | jq .</code></pre>
+
+<h3>Cost</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/cost/summary</code></td><td>Total and projected monthly cost in USD</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/cost/by-namespace</code></td><td>Cost breakdown by Kubernetes namespace</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/cost/by-workload</code></td><td>Cost breakdown by workload</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/cost/by-label</code></td><td>Cost breakdown by label selector</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/cost/trend</code></td><td>Historical cost trend data</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/cost/savings</code></td><td>Potential cost savings by category</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/cost/summary | jq .
+curl -s http://localhost:8080/api/v1/cost/by-namespace | jq .
+curl -s http://localhost:8080/api/v1/cost/savings | jq .</code></pre>
+
+<h3>Commitments</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/commitments</code></td><td>All commitment instruments (RIs, Savings Plans, CUDs) with utilization</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/commitments/underutilized</code></td><td>Commitments with low utilization (wasted spend)</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/commitments/expiring</code></td><td>Commitments expiring soon</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/commitments | jq .
+curl -s http://localhost:8080/api/v1/commitments/underutilized | jq .
+curl -s http://localhost:8080/api/v1/commitments/expiring | jq .</code></pre>
+
+<h3>Recommendations</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/recommendations</code></td><td>All optimization recommendations (filter: <code>?type=&amp;status=</code>)</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/recommendations/summary</code></td><td>Summary: total count, breakdown by type, total potential savings</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/recommendations/{id}</code></td><td>Single recommendation detail including AI Gate result</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/v1/recommendations/{id}/approve</code></td><td>Approve a recommendation for execution</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/v1/recommendations/{id}/dismiss</code></td><td>Dismiss a recommendation</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/recommendations | jq .
+curl -s http://localhost:8080/api/v1/recommendations/summary | jq .
+curl -s -X POST http://localhost:8080/api/v1/recommendations/rec-abc123/approve | jq .
+curl -s -X POST http://localhost:8080/api/v1/recommendations/rec-abc123/dismiss | jq .</code></pre>
+
+<h3>Workloads</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/workloads</code></td><td>All workloads grouped by owner with replica count and resource usage</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/workloads/{ns}/{kind}/{name}</code></td><td>Single workload detail</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/workloads/{ns}/{kind}/{name}/rightsizing</code></td><td>Rightsizing recommendations for a workload</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/workloads/{ns}/{kind}/{name}/scaling</code></td><td>Scaling recommendations (HPA+VPA status)</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/workloads | jq .
+curl -s http://localhost:8080/api/v1/workloads/default/Deployment/my-app | jq .
+curl -s http://localhost:8080/api/v1/workloads/default/Deployment/my-app/rightsizing | jq .
+curl -s http://localhost:8080/api/v1/workloads/default/Deployment/my-app/scaling | jq .</code></pre>
+
+<h3>GPU</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/gpu/nodes</code></td><td>All GPU nodes with GPU count, usage, CPU/memory utilization, hourly cost</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/gpu/utilization</code></td><td>Aggregate GPU utilization across the cluster</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/v1/gpu/recommendations</code></td><td>GPU-specific optimization recommendations</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/gpu/nodes | jq .
+curl -s http://localhost:8080/api/v1/gpu/utilization | jq .
+curl -s http://localhost:8080/api/v1/gpu/recommendations | jq .</code></pre>
+
+<h3>Config</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/v1/config</code></td><td>Current KOptimizer configuration</td></tr>
+    <tr><td><code>PUT</code></td><td><code>/api/v1/config/mode</code></td><td>Set operating mode</td></tr>
+  </tbody>
+</table>
+<pre><code>curl -s http://localhost:8080/api/v1/config | jq .
+curl -s -X PUT http://localhost:8080/api/v1/config/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "active"}' | jq .</code></pre>
+
+<!-- 8. MCP Server -->
+<h2 id="mcp">8. MCP Server</h2>
+
+<h3>What is MCP?</h3>
+<p>The Model Context Protocol (MCP) is an open standard that allows AI assistants (like Claude) to interact with external tools and data sources. KOptimizer ships an MCP server that exposes all of its functionality as tools that Claude can call directly.</p>
+<p>This means you can manage your Kubernetes cluster's cost optimization through natural conversation with Claude &mdash; asking questions like "What are my most expensive namespaces?" or "Show me idle GPU nodes" and getting real answers from your live cluster.</p>
+
+<h3>Building the MCP Server</h3>
+<pre><code>make build-mcp
+# Output: bin/koptimizer-mcp</code></pre>
+
+<h3>Running the MCP Server</h3>
+<pre><code># Connect to a local KOptimizer instance
+./bin/koptimizer-mcp --api-url http://localhost:8080
+
+# Connect to a KOptimizer instance in the cluster (via port-forward)
+kubectl port-forward -n koptimizer svc/koptimizer 8080:8080 &amp;
+./bin/koptimizer-mcp --api-url http://localhost:8080</code></pre>
+
+<h3>Connecting to Claude Desktop</h3>
+<p>Add to your Claude Desktop configuration:</p>
+<ul>
+  <li><strong>macOS</strong>: <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
+  <li><strong>Windows</strong>: <code>%APPDATA%\Claude\claude_desktop_config.json</code></li>
+</ul>
+<pre><code>{
+  "mcpServers": {
+    "koptimizer": {
+      "command": "/path/to/koptimizer-mcp",
+      "args": ["--api-url", "http://localhost:8080"]
+    }
+  }
+}</code></pre>
+
+<h3>Connecting to Claude Code</h3>
+<pre><code>claude mcp add koptimizer -- /path/to/koptimizer-mcp --api-url http://localhost:8080</code></pre>
+
+<h3>All 31 MCP Tools</h3>
+
+<h4>Cluster (2 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>get_cluster_summary</code></td><td>Get cluster overview including node count, pod count, CPU/memory utilization, and estimated monthly cost</td></tr>
+    <tr><td><code>get_cluster_health</code></td><td>Get health status and enabled/disabled state of each controller</td></tr>
+  </tbody>
+</table>
+
+<h4>Node Groups (4 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>list_nodegroups</code></td><td>List all node groups with instance types, counts, utilization, and cost</td></tr>
+    <tr><td><code>get_nodegroup</code></td><td>Get detailed information about a specific node group by ID</td></tr>
+    <tr><td><code>get_nodegroup_nodes</code></td><td>List all nodes belonging to a specific node group</td></tr>
+    <tr><td><code>list_empty_nodegroups</code></td><td>List node groups with zero running pods</td></tr>
+  </tbody>
+</table>
+
+<h4>Nodes (2 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>list_nodes</code></td><td>List all nodes with instance type, node group, CPU/memory, cost, spot and GPU status</td></tr>
+    <tr><td><code>get_node</code></td><td>Get detailed information about a specific node by name</td></tr>
+  </tbody>
+</table>
+
+<h4>Cost (6 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>get_cost_summary</code></td><td>Get overall cost summary including total and projected monthly cost</td></tr>
+    <tr><td><code>get_cost_by_namespace</code></td><td>Get cost breakdown by Kubernetes namespace</td></tr>
+    <tr><td><code>get_cost_by_workload</code></td><td>Get cost breakdown by workload</td></tr>
+    <tr><td><code>get_cost_by_label</code></td><td>Get cost breakdown by label</td></tr>
+    <tr><td><code>get_cost_trend</code></td><td>Get historical cost trend data</td></tr>
+    <tr><td><code>get_cost_savings</code></td><td>Get potential cost savings opportunities</td></tr>
+  </tbody>
+</table>
+
+<h4>Commitments (3 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>list_commitments</code></td><td>List all commitment instruments (RIs, Savings Plans, CUDs, Reservations)</td></tr>
+    <tr><td><code>list_underutilized_commitments</code></td><td>List commitments with low utilization</td></tr>
+    <tr><td><code>list_expiring_commitments</code></td><td>List commitments expiring soon</td></tr>
+  </tbody>
+</table>
+
+<h4>Recommendations (5 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>list_recommendations</code></td><td>List all optimization recommendations</td></tr>
+    <tr><td><code>get_recommendation</code></td><td>Get details of a specific recommendation by ID</td></tr>
+    <tr><td><code>approve_recommendation</code></td><td>Approve a recommendation for execution</td></tr>
+    <tr><td><code>dismiss_recommendation</code></td><td>Dismiss a recommendation</td></tr>
+    <tr><td><code>get_recommendations_summary</code></td><td>Get summary with counts by type and total potential savings</td></tr>
+  </tbody>
+</table>
+
+<h4>Workloads (4 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>list_workloads</code></td><td>List all workloads with replica count and resource usage</td></tr>
+    <tr><td><code>get_workload</code></td><td>Get workload details by namespace, kind, and name</td></tr>
+    <tr><td><code>get_workload_rightsizing</code></td><td>Get rightsizing recommendations for a workload</td></tr>
+    <tr><td><code>get_workload_scaling</code></td><td>Get scaling recommendations for a workload</td></tr>
+  </tbody>
+</table>
+
+<h4>GPU (3 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>list_gpu_nodes</code></td><td>List all GPU nodes with GPU count, usage, and cost</td></tr>
+    <tr><td><code>get_gpu_utilization</code></td><td>Get aggregate GPU utilization across the cluster</td></tr>
+    <tr><td><code>list_gpu_recommendations</code></td><td>List GPU-specific optimization recommendations</td></tr>
+  </tbody>
+</table>
+
+<h4>Config (2 tools)</h4>
+<table>
+  <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>get_config</code></td><td>Get the current KOptimizer configuration</td></tr>
+    <tr><td><code>set_mode</code></td><td>Set the operating mode (monitor, recommend, active)</td></tr>
+  </tbody>
+</table>
+
+<h3>Example Interactions</h3>
+<div class="card">
+  <p><strong>You:</strong> What does our cluster cost look like? Any easy savings?</p>
+  <p><strong>Claude:</strong> <em>(calls get_cost_summary, then get_cost_savings)</em><br>
+  Your cluster is running 47 nodes with an estimated monthly cost of $12,340. I found $2,100/month in potential savings:
+  $890/month from rightsizing 12 over-provisioned deployments, $720/month from consolidating 3 underutilized nodes, and $490/month from an underutilized m5.2xlarge Reserved Instance.</p>
+</div>
+<div class="card">
+  <p><strong>You:</strong> Approve recommendation rec-abc123</p>
+  <p><strong>Claude:</strong> <em>(calls approve_recommendation with id "rec-abc123")</em><br>
+  Done. The recommendation to scale down node group workers-m5 from 8 to 6 nodes has been approved and will be executed.</p>
+</div>
+
+<!-- 9. Cloud Provider Setup -->
+<h2 id="cloud-providers">9. Cloud Provider Setup</h2>
+
+<h3>AWS (EKS)</h3>
+<h4>Required IAM Permissions</h4>
+<pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EC2ReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceTypes",
+        "ec2:DescribeRegions"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ASGOperations",
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:DescribeAutoScalingGroups",
+        "autoscaling:DescribeTags",
+        "autoscaling:UpdateAutoScalingGroup",
+        "autoscaling:SetDesiredCapacity"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PricingRead",
+      "Effect": "Allow",
+      "Action": [
+        "pricing:GetProducts",
+        "pricing:DescribeServices"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CostExplorerRead",
+      "Effect": "Allow",
+      "Action": [
+        "ce:GetCostAndUsage",
+        "ce:GetReservationUtilization",
+        "ce:GetSavingsPlansUtilization"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CommitmentsRead",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeReservedInstances",
+        "savingsplans:DescribeSavingsPlans",
+        "savingsplans:DescribeSavingsPlansOfferingRates"
+      ],
+      "Resource": "*"
+    }
+  ]
+}</code></pre>
+
+<p>For IRSA (recommended), annotate the ServiceAccount:</p>
+<pre><code>serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/koptimizer-role</code></pre>
+
+<h4>ASG Tag Requirements</h4>
+<p>KOptimizer discovers node groups by reading Auto Scaling Group tags. Ensure your ASGs have the standard EKS tag:</p>
+<pre><code>kubernetes.io/cluster/&lt;cluster-name&gt; = owned</code></pre>
+<p>This tag is automatically present on ASGs created by <code>eksctl</code> or EKS managed node groups.</p>
+
+<h3>GCP (GKE)</h3>
+<h4>Required Roles</h4>
+<ul>
+  <li><code>roles/compute.viewer</code> &mdash; Read MIGs, instances, instance types</li>
+  <li><code>roles/compute.instanceAdmin.v1</code> &mdash; Scale MIGs (set target size)</li>
+  <li><code>roles/billing.viewer</code> &mdash; Read billing data for cost monitoring</li>
+  <li><code>roles/cloudasset.viewer</code> &mdash; Read Committed Use Discounts</li>
+</ul>
+
+<p>For Workload Identity:</p>
+<pre><code>gcloud iam service-accounts add-iam-policy-binding \
+  koptimizer@PROJECT_ID.iam.gserviceaccount.com \
+  --role roles/iam.workloadIdentityUser \
+  --member "serviceAccount:PROJECT_ID.svc.id.goog[koptimizer/koptimizer]"</code></pre>
+
+<pre><code>serviceAccount:
+  create: true
+  annotations:
+    iam.gke.io/gcp-service-account: koptimizer@PROJECT_ID.iam.gserviceaccount.com</code></pre>
+
+<h4>MIG Label Requirements</h4>
+<p>GKE automatically labels MIGs with <code>goog-k8s-cluster-name</code> and <code>goog-k8s-node-pool-name</code>. No additional labeling is required.</p>
+
+<h3>Azure (AKS)</h3>
+<h4>Required Permissions</h4>
+<ul>
+  <li><code>Reader</code> on the resource group containing the AKS cluster</li>
+  <li><code>Virtual Machine Contributor</code> on the resource group (for scaling VMSS)</li>
+  <li><code>Cost Management Reader</code> on the subscription (for cost data)</li>
+  <li><code>Reservations Reader</code> on the subscription (for reservation data)</li>
+</ul>
+
+<pre><code>az role assignment create \
+  --assignee &lt;koptimizer-identity-client-id&gt; \
+  --role "Virtual Machine Contributor" \
+  --scope /subscriptions/&lt;sub-id&gt;/resourceGroups/&lt;rg-name&gt;</code></pre>
+
+<h4>VMSS Tag Requirements</h4>
+<p>AKS automatically tags VMSS with <code>aks-managed-cluster-name</code> and <code>aks-managed-poolName</code>. No additional tagging is required.</p>
+
+<!-- 10. Monitoring -->
+<h2 id="monitoring">10. Monitoring</h2>
+
+<h3>Prometheus Metrics</h3>
+<p>KOptimizer exports metrics on the <code>:9090/metrics</code> endpoint.</p>
+
+<h4>Cluster-Level Metrics</h4>
+<table>
+  <thead><tr><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>koptimizer_cluster_node_count</code></td><td>Gauge</td><td>Total number of nodes</td></tr>
+    <tr><td><code>koptimizer_cluster_monthly_cost_usd</code></td><td>Gauge</td><td>Estimated monthly cost (USD)</td></tr>
+    <tr><td><code>koptimizer_cluster_potential_savings_usd</code></td><td>Gauge</td><td>Potential monthly savings (USD)</td></tr>
+  </tbody>
+</table>
+
+<h4>Node Group Metrics</h4>
+<table>
+  <thead><tr><th>Metric</th><th>Type</th><th>Labels</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>koptimizer_nodegroup_desired_count</code></td><td>Gauge</td><td>nodegroup, instance_type, family</td><td>Desired node count per group</td></tr>
+    <tr><td><code>koptimizer_nodegroup_cpu_utilization_pct</code></td><td>Gauge</td><td>nodegroup</td><td>CPU utilization % per group</td></tr>
+    <tr><td><code>koptimizer_nodegroup_memory_utilization_pct</code></td><td>Gauge</td><td>nodegroup</td><td>Memory utilization % per group</td></tr>
+  </tbody>
+</table>
+
+<h4>Recommendation Metrics</h4>
+<table>
+  <thead><tr><th>Metric</th><th>Type</th><th>Labels</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>koptimizer_recommendations_total</code></td><td>Counter</td><td>type, priority</td><td>Total recommendations generated</td></tr>
+    <tr><td><code>koptimizer_recommendations_executed_total</code></td><td>Counter</td><td>type</td><td>Total recommendations auto-executed</td></tr>
+  </tbody>
+</table>
+
+<h4>AI Safety Gate Metrics</h4>
+<table>
+  <thead><tr><th>Metric</th><th>Type</th><th>Labels</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>koptimizer_aigate_validations_total</code></td><td>Counter</td><td>result (approved, rejected, error)</td><td>Total AI Gate validations</td></tr>
+    <tr><td><code>koptimizer_aigate_latency_seconds</code></td><td>Histogram</td><td>&mdash;</td><td>AI Gate validation latency</td></tr>
+  </tbody>
+</table>
+
+<h4>Family-Lock, Commitment, Evictor, and GPU Metrics</h4>
+<table>
+  <thead><tr><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>koptimizer_familylock_blocked_total</code></td><td>Counter</td><td>Operations blocked by family lock</td></tr>
+    <tr><td><code>koptimizer_commitment_utilization_pct</code></td><td>Gauge</td><td>Utilization % per commitment</td></tr>
+    <tr><td><code>koptimizer_commitment_wasted_monthly_usd</code></td><td>Gauge</td><td>Monthly wasted cost per underutilized commitment</td></tr>
+    <tr><td><code>koptimizer_evictions_total</code></td><td>Counter</td><td>Total pod evictions for consolidation</td></tr>
+    <tr><td><code>koptimizer_nodes_consolidated_total</code></td><td>Counter</td><td>Total nodes consolidated (drained)</td></tr>
+    <tr><td><code>koptimizer_gpu_nodes_idle</code></td><td>Gauge</td><td>GPU nodes currently idle</td></tr>
+    <tr><td><code>koptimizer_gpu_nodes_cpu_fallback</code></td><td>Gauge</td><td>GPU nodes serving CPU workloads as fallback</td></tr>
+  </tbody>
+</table>
+
+<h3>Key Metrics to Alert On</h3>
+<table>
+  <thead><tr><th>Alert</th><th>Condition</th><th>Severity</th></tr></thead>
+  <tbody>
+    <tr><td>High cluster cost</td><td><code>koptimizer_cluster_monthly_cost_usd &gt; budget</code></td><td>Warning</td></tr>
+    <tr><td>AI Gate errors</td><td><code>rate(koptimizer_aigate_validations_total{result="error"}[5m]) &gt; 0</code></td><td>Warning</td></tr>
+    <tr><td>AI Gate high latency</td><td><code>koptimizer_aigate_latency_seconds{quantile="0.99"} &gt; 8</code></td><td>Warning</td></tr>
+    <tr><td>Family lock violations</td><td><code>rate(koptimizer_familylock_blocked_total[1h]) &gt; 0</code></td><td>Info</td></tr>
+    <tr><td>Commitment waste</td><td><code>sum(koptimizer_commitment_wasted_monthly_usd) &gt; 500</code></td><td>Warning</td></tr>
+    <tr><td>Excessive evictions</td><td><code>rate(koptimizer_evictions_total[10m]) &gt; 10</code></td><td>Critical</td></tr>
+    <tr><td>GPU waste</td><td><code>koptimizer_gpu_nodes_idle &gt; 2</code></td><td>Warning</td></tr>
+  </tbody>
+</table>
+
+<h3>Grafana Dashboard Suggestions</h3>
+<div class="feature-grid">
+  <div class="feature-card">
+    <h4>Cost Overview</h4>
+    <p>Monthly cost gauge, potential savings, cost trend over time, commitment utilization heatmap</p>
+  </div>
+  <div class="feature-card">
+    <h4>Node Group Health</h4>
+    <p>Node count per group, CPU/memory utilization per group, scaling events timeline</p>
+  </div>
+  <div class="feature-card">
+    <h4>Safety Dashboard</h4>
+    <p>AI Gate approval/rejection chart, latency histogram, family lock blocked events, eviction rate</p>
+  </div>
+  <div class="feature-card">
+    <h4>GPU Dashboard</h4>
+    <p>Idle GPU nodes, CPU fallback nodes, GPU utilization</p>
+  </div>
+</div>
+
+<!-- 11. Safety Guarantees -->
+<h2 id="safety">11. Safety Guarantees</h2>
+
+<p>KOptimizer is designed with multiple layers of safety to prevent destructive changes.</p>
+
+<h3>What the Family-Lock Guard Prevents</h3>
+<table>
+  <thead><tr><th>Action</th><th>Result</th><th>Reasoning</th></tr></thead>
+  <tbody>
+    <tr><td>Change instance family (m5 &rarr; c5)</td><td><strong>ALWAYS BLOCKED</strong></td><td>Breaks RI/SP commitments</td></tr>
+    <tr><td>Create a new node group</td><td><strong>ALWAYS BLOCKED</strong></td><td>Creates complexity, introduces unmanaged families</td></tr>
+    <tr><td>Change a node group's instance type</td><td><strong>ALWAYS BLOCKED</strong></td><td>Could break workload compatibility</td></tr>
+    <tr><td>Scale existing node group (same type)</td><td>Allowed</td><td>Just changes desired count</td></tr>
+    <tr><td>Adjust node group min/max counts</td><td>Allowed</td><td>Parameter adjustment, not type change</td></tr>
+    <tr><td>Recommend size change within family</td><td>Allowed (recommendation only)</td><td>e.g., m5.large &rarr; m5.xlarge; human must approve</td></tr>
+  </tbody>
+</table>
+
+<h3>AI Safety Gate Triggers and Fallback</h3>
+<table>
+  <thead><tr><th>Trigger</th><th>Threshold</th><th>Configurable</th></tr></thead>
+  <tbody>
+    <tr><td>Scaling a node group by more than N%</td><td><code>scaleThresholdPct</code> (default: 30%)</td><td>Yes</td></tr>
+    <tr><td>Setting a node group min to 0</td><td>Always triggers</td><td>No</td></tr>
+    <tr><td>Recommending node group deletion</td><td>Always triggers</td><td>No</td></tr>
+    <tr><td>Evicting pods from more than N nodes</td><td><code>maxEvictNodes</code> (default: 3)</td><td>Yes</td></tr>
+    <tr><td>Cost impact exceeding $N/month</td><td><code>costThresholdUSD</code> (default: $500)</td><td>Yes</td></tr>
+  </tbody>
+</table>
+
+<div class="info-box tip">
+  <strong>AI Gate decision flow:</strong> If approved, change proceeds automatically. If rejected or on API error/timeout, change becomes a Recommendation CRD requiring human approval. All decisions are logged for full audit trail.
+</div>
+
+<h3>PDB Awareness During Evictions</h3>
+<ul>
+  <li>Before evicting any pod, the controller checks the PDB for the pod's owner.</li>
+  <li>If eviction would violate the PDB's <code>minAvailable</code> or <code>maxUnavailable</code> constraint, the eviction is skipped.</li>
+  <li>Pods with local storage are not evicted by default.</li>
+</ul>
+
+<h3>Additional Safety Measures</h3>
+<ul>
+  <li><strong>Leader election</strong> &mdash; Only one KOptimizer instance is active at a time.</li>
+  <li><strong>Reconcile interval</strong> &mdash; State is refreshed periodically (default: 60s), not reactively.</li>
+  <li><strong>Scale-down delay</strong> &mdash; Node autoscaler waits <code>scaleDownDelay</code> (default: 10m) before scaling down.</li>
+  <li><strong>Dry-run mode</strong> &mdash; Evictor supports <code>dryRun: true</code> to log without acting.</li>
+  <li><strong>Confidence scoring</strong> &mdash; New workloads start at 50% confidence and ramp to 100% over 7 days.</li>
+  <li><strong>OOM protection</strong> &mdash; On OOM kill, memory requests are bumped by 2.5x to prevent repeated crashes.</li>
+</ul>
+
+<!-- 12. Troubleshooting -->
+<h2 id="troubleshooting">12. Troubleshooting</h2>
+
+<h3>KOptimizer pod is not starting</h3>
+<div class="info-box warn">
+  <strong>Symptom:</strong> Pod stuck in CrashLoopBackOff or Error state.
+</div>
+<pre><code>kubectl logs -n koptimizer deploy/koptimizer</code></pre>
+<p><strong>Common causes:</strong></p>
+<ul>
+  <li>Invalid configuration &mdash; Check for validation errors in log output.</li>
+  <li>Missing cloud credentials &mdash; Ensure ServiceAccount has proper IAM/GCP/Azure role bindings.</li>
+  <li>Missing CRDs &mdash; Run <code>make generate</code> and apply CRDs from <code>deploy/helm/koptimizer/templates/crds/</code>.</li>
+</ul>
+
+<h3>No node groups discovered</h3>
+<div class="info-box warn">
+  <strong>Symptom:</strong> <code>list_nodegroups</code> returns empty, no scaling actions occur.
+</div>
+<pre><code>curl -s http://localhost:8080/api/v1/nodegroups | jq .</code></pre>
+<p><strong>Common causes:</strong></p>
+<ul>
+  <li>AWS: ASGs missing the <code>kubernetes.io/cluster/&lt;cluster-name&gt;</code> tag.</li>
+  <li>GCP: MIGs missing the <code>goog-k8s-cluster-name</code> label.</li>
+  <li>Azure: VMSS missing the <code>aks-managed-cluster-name</code> tag.</li>
+  <li>Wrong <code>cloudProvider</code> or <code>region</code> in config.</li>
+</ul>
+
+<h3>AI Safety Gate always falling back to recommendations</h3>
+<div class="info-box warn">
+  <strong>Symptom:</strong> All large changes become recommendations instead of being auto-executed.
+</div>
+<pre><code>curl -s http://localhost:8080/api/v1/cluster/health | jq .aiGate
+curl -s http://localhost:9090/metrics | grep koptimizer_aigate</code></pre>
+<p><strong>Common causes:</strong></p>
+<ul>
+  <li><code>ANTHROPIC_API_KEY</code> environment variable not set or invalid.</li>
+  <li>AI Gate timeout too low (increase <code>aiGate.timeout</code>).</li>
+  <li>Network policy blocking outbound HTTPS to <code>api.anthropic.com</code>.</li>
+  <li><code>aiGate.enabled</code> is <code>false</code>.</li>
+</ul>
+
+<h3>Recommendations not being generated</h3>
+<pre><code>kubectl get recommendations.koptimizer.io -A
+curl -s http://localhost:8080/api/v1/recommendations | jq .</code></pre>
+<p><strong>Common causes:</strong> Mode is <code>monitor</code>, all controllers disabled, cluster already well-optimized, or metrics server not running.</p>
+
+<h3>Workload rightsizing not working</h3>
+<pre><code>curl -s http://localhost:8080/api/v1/workloads/default/Deployment/my-app/rightsizing | jq .</code></pre>
+<p><strong>Common causes:</strong> Namespace in <code>excludeNamespaces</code>, not enough data (need <code>lookbackWindow</code> of metrics), usage already close to target, or metrics server not providing pod-level metrics.</p>
+
+<h3>Pods being evicted unexpectedly</h3>
+<pre><code>kubectl get events -A --field-selector reason=Evicted
+curl -s http://localhost:8080/api/v1/config | jq .evictor</code></pre>
+<p><strong>Solutions:</strong></p>
+<ul>
+  <li>Set <code>evictor.dryRun: true</code> to see what would be evicted.</li>
+  <li>Increase <code>evictor.utilizationThreshold</code>.</li>
+  <li>Decrease <code>evictor.maxConcurrentEvictions</code>.</li>
+  <li>Add PDBs to critical workloads.</li>
+  <li>Switch to <code>recommend</code> mode.</li>
+</ul>
+
+<h3>Debug Logging</h3>
+<pre><code># For local development
+./bin/koptimizer --config config.yaml --zap-log-level debug</code></pre>
+
+<h3>Checking Controller Health</h3>
+<pre><code>curl -s http://localhost:8080/api/v1/cluster/health | jq .
+curl -s http://localhost:8081/healthz    # Liveness
+curl -s http://localhost:8081/readyz     # Readiness</code></pre>
+
+<h3>Port-Forwarding for Debugging</h3>
+<pre><code># REST API
+kubectl port-forward -n koptimizer svc/koptimizer 8080:8080
+
+# Prometheus metrics
+kubectl port-forward -n koptimizer svc/koptimizer 9090:9090
+
+# Health probes
+kubectl port-forward -n koptimizer deploy/koptimizer 8081:8081</code></pre>
+
+<h3>Verifying the Build</h3>
+<pre><code># Run all checks
+make all    # clean + generate + build + build-mcp + test
+
+# Individual checks
+make build         # Compile main binary
+make build-mcp     # Compile MCP server binary
+make test          # Run all tests with coverage
+make lint          # Run golangci-lint
+make helm-lint     # Validate Helm chart
+make generate      # Regenerate CRDs and deepcopy</code></pre>
+
+</div>
+</div>
+
+</body>
+</html>

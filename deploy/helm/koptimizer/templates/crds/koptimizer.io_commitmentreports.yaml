@@ -1,0 +1,177 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: commitmentreports.koptimizer.io
+spec:
+  group: koptimizer.io
+  names:
+    kind: CommitmentReport
+    listKind: CommitmentReportList
+    plural: commitmentreports
+    singular: commitmentreport
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.clusterName
+      name: Cluster
+      type: string
+    - jsonPath: .status.totalCommitments
+      name: Commitments
+      type: integer
+    - jsonPath: .status.totalMonthlyCommitmentCostUSD
+      name: Monthly Cost
+      type: number
+    - jsonPath: .status.avgUtilizationPct
+      name: Avg Util %
+      type: number
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CommitmentReport is the Schema for the commitmentreports API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CommitmentReportSpec defines the desired state of CommitmentReport.
+            properties:
+              clusterName:
+                description: ClusterName is the name of the cluster this report covers.
+                type: string
+            required:
+            - clusterName
+            type: object
+          status:
+            description: CommitmentReportStatus defines the observed state of CommitmentReport.
+            properties:
+              avgUtilizationPct:
+                description: AvgUtilizationPct is the average utilization across all
+                  commitments.
+                type: number
+              commitments:
+                description: Commitments lists all active commitments and their statuses.
+                items:
+                  description: CommitmentStatus represents the current status of a
+                    cloud commitment (RI/SP).
+                  properties:
+                    count:
+                      type: integer
+                    expiresAt:
+                      type: string
+                    hourlyCostUSD:
+                      type: number
+                    id:
+                      type: string
+                    instanceFamily:
+                      type: string
+                    instanceType:
+                      type: string
+                    onDemandCostUSD:
+                      type: number
+                    region:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                    utilizationPct:
+                      type: number
+                  required:
+                  - count
+                  - expiresAt
+                  - hourlyCostUSD
+                  - id
+                  - onDemandCostUSD
+                  - region
+                  - status
+                  - type
+                  - utilizationPct
+                  type: object
+                type: array
+              expiringSoon:
+                description: ExpiringSoon lists commitments that are expiring within
+                  the warning window.
+                items:
+                  description: ExpiringCommitment represents a commitment that is
+                    expiring soon.
+                  properties:
+                    commitmentID:
+                      type: string
+                    expiresIn:
+                      type: string
+                    monthlyValueUSD:
+                      type: number
+                    type:
+                      type: string
+                  required:
+                  - commitmentID
+                  - expiresIn
+                  - monthlyValueUSD
+                  - type
+                  type: object
+                type: array
+              lastUpdated:
+                description: LastUpdated is the timestamp of the last report update.
+                format: date-time
+                type: string
+              totalCommitments:
+                description: TotalCommitments is the total number of active commitments.
+                type: integer
+              totalMonthlyCommitmentCostUSD:
+                description: TotalMonthlyCommitmentCostUSD is the total monthly cost
+                  of all commitments.
+                type: number
+              underutilized:
+                description: Underutilized lists commitments that are below the utilization
+                  threshold.
+                items:
+                  description: UnderutilizedCommitment represents a commitment that
+                    is not being fully used.
+                  properties:
+                    commitmentID:
+                      type: string
+                    instanceType:
+                      type: string
+                    suggestion:
+                      type: string
+                    type:
+                      type: string
+                    utilizationPct:
+                      type: number
+                    wastedMonthlyUSD:
+                      type: number
+                  required:
+                  - commitmentID
+                  - instanceType
+                  - suggestion
+                  - type
+                  - utilizationPct
+                  - wastedMonthlyUSD
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

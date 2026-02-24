@@ -1,0 +1,13 @@
+apiVersion: v2
+name: koptimizer
+description: KOptimizer - Kubernetes Cost Optimization Engine with Family-Locked Node Management
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - cost-optimization
+  - autoscaling
+  - finops
+maintainers:
+  - name: KOptimizer Team

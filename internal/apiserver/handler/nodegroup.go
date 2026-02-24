@@ -1,0 +1,100 @@
+package handler
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/koptimizer/koptimizer/internal/state"
+	"github.com/koptimizer/koptimizer/pkg/familylock"
+)
+
+type NodeGroupHandler struct {
+	state *state.ClusterState
+	guard *familylock.FamilyLockGuard
+}
+
+func NewNodeGroupHandler(st *state.ClusterState, guard *familylock.FamilyLockGuard) *NodeGroupHandler {
+	return &NodeGroupHandler{state: st, guard: guard}
+}
+
+func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
+	groups := h.state.GetNodeGroups().GetAll()
+	var result []map[string]interface{}
+	for _, g := range groups {
+		result = append(result, map[string]interface{}{
+			"id":             g.ID,
+			"name":           g.Name,
+			"instanceType":   g.InstanceType,
+			"instanceFamily": g.InstanceFamily,
+			"currentCount":   g.CurrentCount,
+			"minCount":       g.MinCount,
+			"maxCount":       g.MaxCount,
+			"desiredCount":   g.DesiredCount,
+			"cpuUtilPct":     g.CPUUtilization(),
+			"memUtilPct":     g.MemoryUtilization(),
+			"totalPods":      g.TotalPods,
+			"monthlyCostUSD": g.MonthlyCostUSD,
+			"isEmpty":        g.IsEmpty(),
+		})
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *NodeGroupHandler) Get(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	g, ok := h.state.GetNodeGroups().Get(id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "node group not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":             g.ID,
+		"name":           g.Name,
+		"instanceType":   g.InstanceType,
+		"instanceFamily": g.InstanceFamily,
+		"currentCount":   g.CurrentCount,
+		"minCount":       g.MinCount,
+		"maxCount":       g.MaxCount,
+		"desiredCount":   g.DesiredCount,
+		"cpuUtilPct":     g.CPUUtilization(),
+		"memUtilPct":     g.MemoryUtilization(),
+		"monthlyCostUSD": g.MonthlyCostUSD,
+	})
+}
+
+func (h *NodeGroupHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	g, ok := h.state.GetNodeGroups().Get(id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "node group not found"})
+		return
+	}
+	var nodes []map[string]interface{}
+	for _, n := range g.Nodes {
+		nodes = append(nodes, map[string]interface{}{
+			"name":          n.Node.Name,
+			"cpuUtilPct":    n.CPUUtilization(),
+			"memUtilPct":    n.MemoryUtilization(),
+			"hourlyCostUSD": n.HourlyCostUSD,
+			"podCount":      len(n.Pods),
+		})
+	}
+	writeJSON(w, http.StatusOK, nodes)
+}
+
+func (h *NodeGroupHandler) GetEmpty(w http.ResponseWriter, r *http.Request) {
+	groups := h.state.GetNodeGroups().GetAll()
+	var empty []map[string]interface{}
+	for _, g := range groups {
+		if g.IsEmpty() {
+			empty = append(empty, map[string]interface{}{
+				"id":           g.ID,
+				"name":         g.Name,
+				"instanceType": g.InstanceType,
+				"currentCount": g.CurrentCount,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, empty)
+}

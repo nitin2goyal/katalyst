@@ -1,0 +1,142 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: costreports.koptimizer.io
+spec:
+  group: koptimizer.io
+  names:
+    kind: CostReport
+    listKind: CostReportList
+    plural: costreports
+    singular: costreport
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.clusterName
+      name: Cluster
+      type: string
+    - jsonPath: .spec.reportPeriod
+      name: Period
+      type: string
+    - jsonPath: .status.totalMonthlyCostUSD
+      name: Monthly Cost
+      type: number
+    - jsonPath: .status.projectedMonthlyCostUSD
+      name: Projected
+      type: number
+    - jsonPath: .status.potentialSavingsUSD
+      name: Savings
+      type: number
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CostReport is the Schema for the costreports API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CostReportSpec defines the desired state of CostReport.
+            properties:
+              clusterName:
+                description: ClusterName is the name of the cluster this report covers.
+                type: string
+              reportPeriod:
+                description: ReportPeriod defines the reporting time window (e.g.
+                  "30d", "7d").
+                type: string
+            required:
+            - clusterName
+            - reportPeriod
+            type: object
+          status:
+            description: CostReportStatus defines the observed state of CostReport.
+            properties:
+              costByNamespace:
+                additionalProperties:
+                  type: number
+                description: CostByNamespace maps namespace names to their monthly
+                  cost in USD.
+                type: object
+              costByNodeGroup:
+                additionalProperties:
+                  type: number
+                description: CostByNodeGroup maps node group names to their monthly
+                  cost in USD.
+                type: object
+              dailyCostTrend:
+                description: DailyCostTrend holds daily cost data points for trend
+                  analysis.
+                items:
+                  description: DailyCost represents cost data for a single day.
+                  properties:
+                    costUSD:
+                      type: number
+                    date:
+                      type: string
+                  required:
+                  - costUSD
+                  - date
+                  type: object
+                type: array
+              lastUpdated:
+                description: LastUpdated is the timestamp of the last report update.
+                format: date-time
+                type: string
+              potentialSavingsUSD:
+                description: PotentialSavingsUSD is the total potential savings identified.
+                type: number
+              projectedMonthlyCostUSD:
+                description: ProjectedMonthlyCostUSD is the projected monthly cost
+                  based on current trends.
+                type: number
+              topWorkloads:
+                description: TopWorkloads lists the most expensive workloads.
+                items:
+                  description: WorkloadCost represents the cost attribution for a
+                    single workload.
+                  properties:
+                    kind:
+                      type: string
+                    monthlyCostUSD:
+                      type: number
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                  - kind
+                  - monthlyCostUSD
+                  - name
+                  - namespace
+                  type: object
+                type: array
+              totalMonthlyCostUSD:
+                description: TotalMonthlyCostUSD is the total monthly cost in USD.
+                type: number
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

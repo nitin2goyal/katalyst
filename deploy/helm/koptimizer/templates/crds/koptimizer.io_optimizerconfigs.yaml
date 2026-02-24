@@ -1,0 +1,289 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: optimizerconfigs.koptimizer.io
+spec:
+  group: koptimizer.io
+  names:
+    kind: OptimizerConfig
+    listKind: OptimizerConfigList
+    plural: optimizerconfigs
+    singular: optimizerconfig
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .spec.cloudProvider
+      name: Provider
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.activeOptimizers
+      name: Active
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: OptimizerConfig is the Schema for the optimizerconfigs API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OptimizerConfigSpec defines the desired state of OptimizerConfig.
+            properties:
+              aiGate:
+                description: AIGate holds configuration for the AI gate that validates
+                  recommendations.
+                properties:
+                  costThresholdUSD:
+                    default: 100
+                    description: CostThresholdUSD is the minimum estimated cost impact
+                      to trigger AI gate review.
+                    type: number
+                  enabled:
+                    default: false
+                    description: Enabled determines whether the AI gate is active.
+                    type: boolean
+                  model:
+                    description: Model is the AI model to use for validation (e.g.
+                      "claude-sonnet-4-20250514").
+                    type: string
+                  scaleThresholdPct:
+                    default: 20
+                    description: ScaleThresholdPct is the minimum scale change percentage
+                      to trigger AI gate review.
+                    type: number
+                  timeout:
+                    default: 30s
+                    description: Timeout is the maximum duration for an AI gate call
+                      (e.g. "30s").
+                    type: string
+                type: object
+              cloudProvider:
+                description: CloudProvider is the cloud provider to use (aws, gcp,
+                  azure).
+                enum:
+                - aws
+                - gcp
+                - azure
+                type: string
+              commitments:
+                description: Commitments holds configuration for commitment (RI/SP)
+                  management.
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled determines whether commitment management
+                      is active.
+                    type: boolean
+                  expirationWarningDays:
+                    default: 30
+                    description: ExpirationWarningDays is the number of days before
+                      expiration to start warning.
+                    type: integer
+                  utilizationThreshold:
+                    default: "0.8"
+                    description: UtilizationThreshold is the minimum utilization percentage
+                      for commitments.
+                    type: string
+                type: object
+              costMonitor:
+                description: CostMonitor holds configuration for the cost monitor
+                  controller.
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled determines whether the cost monitor is active.
+                    type: boolean
+                  interval:
+                    default: 1h
+                    description: Interval is the polling interval for cost data (e.g.
+                      "1h").
+                    type: string
+                type: object
+              evictor:
+                description: Evictor holds configuration for the evictor controller.
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled determines whether the evictor is active.
+                    type: boolean
+                  maxPodsPerEviction:
+                    default: 5
+                    description: MaxPodsPerEviction is the maximum number of pods
+                      to evict per cycle.
+                    type: integer
+                type: object
+              gpu:
+                description: GPU holds configuration for GPU optimization.
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled determines whether GPU optimization is active.
+                    type: boolean
+                  timesharingEnabled:
+                    default: false
+                    description: TimesharingEnabled enables GPU time-sharing recommendations.
+                    type: boolean
+                type: object
+              mode:
+                default: monitor
+                description: Mode determines the operational mode of the optimizer.
+                enum:
+                - monitor
+                - recommend
+                - active
+                type: string
+              nodeAutoscaler:
+                description: NodeAutoscaler holds configuration for the node autoscaler
+                  controller.
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled determines whether the node autoscaler is
+                      active.
+                    type: boolean
+                  maxNodes:
+                    default: 100
+                    description: MaxNodes is the maximum number of nodes allowed.
+                    type: integer
+                  minNodes:
+                    default: 1
+                    description: MinNodes is the minimum number of nodes to maintain.
+                    type: integer
+                  scaleDownUtilizationThreshold:
+                    default: "0.5"
+                    description: ScaleDownUtilizationThreshold is the utilization
+                      below which nodes are candidates for scale-down.
+                    type: string
+                type: object
+              nodegroupManager:
+                description: NodeGroupManager holds configuration for the node group
+                  manager controller.
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled determines whether the node group manager
+                      is active.
+                    type: boolean
+                type: object
+              rebalancer:
+                description: Rebalancer holds configuration for the rebalancer controller.
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled determines whether the rebalancer is active.
+                    type: boolean
+                  imbalanceThreshold:
+                    default: "0.2"
+                    description: ImbalanceThreshold is the threshold above which rebalancing
+                      is triggered.
+                    type: string
+                type: object
+              reconcileInterval:
+                default: 5m
+                description: ReconcileInterval is the interval between reconciliation
+                  loops (e.g. "5m", "1h").
+                type: string
+              region:
+                description: Region is the cloud provider region.
+                type: string
+              rightsizer:
+                description: Rightsizer holds configuration for the rightsizer controller.
+                properties:
+                  cpuTargetUtilization:
+                    default: "0.7"
+                    description: CPUTargetUtilization is the target CPU utilization
+                      percentage.
+                    type: string
+                  enabled:
+                    default: true
+                    description: Enabled determines whether the rightsizer is active.
+                    type: boolean
+                  lookbackDays:
+                    default: 7
+                    description: LookbackDays is the number of days of historical
+                      data to consider.
+                    type: integer
+                  memoryTargetUtilization:
+                    default: "0.8"
+                    description: MemoryTargetUtilization is the target memory utilization
+                      percentage.
+                    type: string
+                type: object
+              workloadScaler:
+                description: WorkloadScaler holds configuration for the workload scaler
+                  controller.
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled determines whether the workload scaler is
+                      active.
+                    type: boolean
+                  maxReplicas:
+                    default: 100
+                    description: MaxReplicas is the maximum number of replicas.
+                    type: integer
+                  minReplicas:
+                    default: 1
+                    description: MinReplicas is the minimum number of replicas.
+                    type: integer
+                type: object
+            required:
+            - cloudProvider
+            - mode
+            - region
+            type: object
+          status:
+            description: OptimizerConfigStatus defines the observed state of OptimizerConfig.
+            properties:
+              activeOptimizers:
+                description: ActiveOptimizers is the number of currently active optimizer
+                  controllers.
+                type: integer
+              lastReconcile:
+                description: LastReconcile is the timestamp of the last successful
+                  reconciliation.
+                format: date-time
+                type: string
+              message:
+                description: Message provides additional human-readable status information.
+                type: string
+              phase:
+                description: Phase represents the current lifecycle phase of the optimizer.
+                enum:
+                - Initializing
+                - Running
+                - Paused
+                - Error
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

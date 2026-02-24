@@ -1,0 +1,222 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: recommendations.koptimizer.io
+spec:
+  group: koptimizer.io
+  names:
+    kind: Recommendation
+    listKind: RecommendationList
+    plural: recommendations
+    singular: recommendation
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .spec.priority
+      name: Priority
+      type: string
+    - jsonPath: .spec.targetName
+      name: Target
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .spec.estimatedSaving.monthlySavingsUSD
+      name: Savings/Mo
+      type: number
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Recommendation is the Schema for the recommendations API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RecommendationSpec defines the desired state of Recommendation.
+            properties:
+              actionSteps:
+                description: ActionSteps is an ordered list of steps required to execute
+                  this recommendation.
+                items:
+                  type: string
+                type: array
+              autoExecutable:
+                default: false
+                description: AutoExecutable indicates whether this recommendation
+                  can be executed automatically.
+                type: boolean
+              details:
+                additionalProperties:
+                  type: string
+                description: Details contains additional key-value metadata about
+                  the recommendation.
+                type: object
+              estimatedImpact:
+                description: EstimatedImpact is the estimated operational impact of
+                  executing this recommendation.
+                properties:
+                  monthlyCostChangeUSD:
+                    type: number
+                  nodesAffected:
+                    type: integer
+                  podsAffected:
+                    type: integer
+                  riskLevel:
+                    enum:
+                    - low
+                    - medium
+                    - high
+                    type: string
+                required:
+                - monthlyCostChangeUSD
+                - nodesAffected
+                - podsAffected
+                - riskLevel
+                type: object
+              estimatedSaving:
+                description: EstimatedSaving is the estimated cost savings from executing
+                  this recommendation.
+                properties:
+                  annualSavingsUSD:
+                    type: number
+                  currency:
+                    type: string
+                  monthlySavingsUSD:
+                    type: number
+                required:
+                - annualSavingsUSD
+                - currency
+                - monthlySavingsUSD
+                type: object
+              priority:
+                description: Priority indicates the urgency of the recommendation.
+                enum:
+                - critical
+                - high
+                - medium
+                - low
+                type: string
+              requiresAIGate:
+                default: false
+                description: RequiresAIGate indicates whether this recommendation
+                  must pass AI gate validation before execution.
+                type: boolean
+              summary:
+                description: Summary is a human-readable summary of the recommendation.
+                type: string
+              targetKind:
+                description: TargetKind is the Kubernetes resource kind being targeted
+                  (e.g. Deployment, Node).
+                type: string
+              targetName:
+                description: TargetName is the name of the targeted resource.
+                type: string
+              targetNamespace:
+                description: TargetNamespace is the namespace of the targeted resource.
+                type: string
+              type:
+                description: Type is the category of the recommendation.
+                enum:
+                - node-scale
+                - node-group-adjust
+                - node-group-delete
+                - pod-rightsize
+                - workload-scale
+                - eviction
+                - rebalance
+                - gpu-optimize
+                type: string
+            required:
+            - priority
+            - summary
+            - targetKind
+            - targetName
+            - type
+            type: object
+          status:
+            description: RecommendationStatus defines the observed state of Recommendation.
+            properties:
+              aiGateResult:
+                description: AIGateResult holds the result of the AI gate validation,
+                  if applicable.
+                properties:
+                  approved:
+                    description: Approved indicates whether the AI gate approved the
+                      recommendation.
+                    type: boolean
+                  confidence:
+                    description: Confidence is the AI model's confidence score (0.0
+                      to 1.0).
+                    type: number
+                  reasoning:
+                    description: Reasoning is the AI model's explanation for its decision.
+                    type: string
+                  validatedAt:
+                    description: ValidatedAt is the timestamp when the AI gate validation
+                      was performed.
+                    format: date-time
+                    type: string
+                  warnings:
+                    description: Warnings contains any warnings raised during AI gate
+                      validation.
+                    items:
+                      type: string
+                    type: array
+                required:
+                - approved
+                - confidence
+                - reasoning
+                - validatedAt
+                type: object
+              error:
+                description: Error holds any error message from a failed execution.
+                type: string
+              executedAt:
+                description: ExecutedAt is the timestamp when the recommendation was
+                  executed.
+                format: date-time
+                type: string
+              executionResult:
+                description: ExecutionResult holds a summary of the execution outcome.
+                type: string
+              state:
+                default: pending
+                description: State is the current state of the recommendation lifecycle.
+                enum:
+                - pending
+                - approved
+                - executing
+                - executed
+                - failed
+                - dismissed
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

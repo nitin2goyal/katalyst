@@ -1,0 +1,12 @@
+{{- if .Values.config.gpu.cpuScavengingEnabled }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: koptimizer-scavenger
+  labels:
+    {{- include "koptimizer.labels" . | nindent 4 }}
+value: -10
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "Low-priority class for CPU scavenger pods on GPU nodes. GPU workloads can always preempt these pods."
+{{- end }}

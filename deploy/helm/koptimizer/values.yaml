@@ -1,0 +1,229 @@
+replicaCount: 1
+
+image:
+  repository: koptimizer
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# KOptimizer configuration
+config:
+  mode: "recommend"  # monitor | recommend | active
+  cloudProvider: ""  # aws | gcp | azure (required)
+  region: ""         # e.g., us-east-1, europe-west1, eastus (required)
+  clusterName: ""
+  reconcileInterval: "60s"
+
+  costMonitor:
+    enabled: true
+    updateInterval: "5m"
+
+  nodeAutoscaler:
+    enabled: true
+    scanInterval: "30s"
+    scaleUpThreshold: 80
+    scaleDownThreshold: 30
+    scaleDownDelay: "10m"
+    maxScaleUpNodes: 5
+    maxScaleDownNodes: 3
+
+  nodegroupManager:
+    enabled: true
+    minAdjustment:
+      enabled: true
+      minUtilizationPct: 30
+      observationPeriod: "48h"
+    emptyGroupDetection:
+      enabled: true
+      emptyPeriod: "336h"  # 14 days
+
+  rightsizer:
+    enabled: true
+    lookbackWindow: "168h"  # 7 days
+    cpuTargetUtilPct: 70
+    memoryTargetUtilPct: 75
+    minCPURequest: "10m"
+    minMemoryRequest: "32Mi"
+    oomBumpMultiplier: 2.5
+    excludeNamespaces:
+      - kube-system
+
+  workloadScaler:
+    enabled: true
+    verticalEnabled: true
+    horizontalEnabled: true
+    surgeDetection: true
+    surgeThreshold: 2.0
+    confidenceStartPct: 50
+    confidenceFullDays: 7
+    excludeNamespaces:
+      - kube-system
+      - monitoring
+
+  evictor:
+    enabled: true
+    utilizationThreshold: 40
+    consolidationInterval: "5m"
+    maxConcurrentEvictions: 5
+    dryRun: false
+
+  rebalancer:
+    enabled: true
+    schedule: "0 3 * * SUN"
+    busyRedistribution:
+      enabled: true
+      overloadedThresholdPct: 90
+      targetUtilizationPct: 70
+
+  gpu:
+    enabled: true
+    idleThresholdPct: 5
+    idleDuration: "30m"
+    cpuFallbackEnabled: true
+    cpuScavengingEnabled: true
+    scavengingCPUThresholdMillis: 2000
+
+  spot:
+    enabled: true
+    maxSpotPercentage: 70
+    fallbackToOnDemand: true
+    diversityMinTypes: 3
+    interruptionHandling: true
+    maxCostOverODPercent: 90
+
+  hibernation:
+    enabled: false
+    schedules: []          # ["0 20 * * MON-FRI"]
+    wakeSchedules: []       # ["0 7 * * MON-FRI"]
+    excludeGroups: []
+    preserveMinOne: true
+
+  storageMonitor:
+    enabled: true
+    overprovisionThreshold: 30
+    unusedRetentionDays: 7
+
+  networkMonitor:
+    enabled: true
+    crossAZCostPerGBUSD: 0.01
+    enablePodAnnotations: false
+
+  alerts:
+    enabled: false
+    slackWebhookURL: ""
+    emailRecipients: []
+    costAnomalyStdDev: 2.0
+    cooldownMinutes: 60
+
+  commitments:
+    enabled: true
+    updateInterval: "1h"
+    expiryWarningDays: [30, 60, 90]
+
+  aiGate:
+    enabled: true
+    model: "claude-sonnet-4-6"
+    timeout: "10s"
+    costThresholdUSD: 500
+    scaleThresholdPct: 30
+    maxEvictNodes: 3
+
+  apiServer:
+    enabled: true
+    address: "0.0.0.0"
+    port: 8080
+
+  database:
+    path: "/data/koptimizer.db"
+    retentionDays: 90
+
+# Persistence for SQLite database.
+# When enabled, a PersistentVolumeClaim is used to store the SQLite database so
+# that audit events, cost trends, and metrics survive pod restarts.
+# When disabled, an emptyDir volume is used and ALL data is lost on restart.
+persistence:
+  enabled: true
+  # storageClass — leave empty to use the cluster default StorageClass
+  storageClass: ""
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  # existingClaim — set to reuse an existing PVC instead of creating a new one
+  existingClaim: ""
+
+# API key for AI Safety Gate (Claude Sonnet)
+aiGateApiKey: ""
+aiGateApiKeySecretRef:
+  name: ""
+  key: "ANTHROPIC_API_KEY"
+
+# Cloud-specific configuration
+cloudConfig:
+  gcp:
+    # GCP project ID (required for GCP)
+    project: ""
+    # Workload Identity service account annotation
+    workloadIdentityServiceAccount: ""
+  azure:
+    # Azure subscription ID (required for Azure)
+    subscriptionID: ""
+    # Azure resource group containing the AKS cluster
+    resourceGroup: ""
+    # Azure AD tenant ID (for service principal auth)
+    tenantID: ""
+    # Workload Identity client ID (recommended for AKS; set to enable federated auth)
+    workloadIdentityClientID: ""
+    # Secret reference for Azure service principal credentials (alternative to Workload Identity)
+    clientSecretRef:
+      name: ""
+      clientIDKey: "AZURE_CLIENT_ID"
+      clientSecretKey: "AZURE_CLIENT_SECRET"
+  aws:
+    # IAM role ARN for IRSA (IAM Roles for Service Accounts)
+    roleArn: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 9090
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Dashboard
+dashboard:
+  enabled: true
+  port: 3000
+  apiUrl: "http://koptimizer:8080"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  service:
+    type: ClusterIP
+    port: 3000
+
+# Prometheus ServiceMonitor
+serviceMonitor:
+  enabled: false
+  interval: "30s"
+  labels: {}
