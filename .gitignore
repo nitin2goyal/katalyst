@@ -38,6 +38,7 @@ bin/
 ### Go ###
 /optimizer
 /dashboard
+/mockapi
 *.exe
 
 ### Node ###
