@@ -62,6 +62,7 @@ func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 		MemoryRequest int64  `json:"memoryRequestBytes"`
 		CPUUsage      int64  `json:"cpuUsageMilli"`
 		MemoryUsage   int64  `json:"memoryUsageBytes"`
+		Status        string `json:"status"`
 	}
 	var matchedPods []podDetail
 	totalCPUReq := int64(0)
@@ -77,6 +78,7 @@ func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 				MemoryRequest: p.MemoryRequest,
 				CPUUsage:      p.CPUUsage,
 				MemoryUsage:   p.MemoryUsage,
+				Status:        computePodStatus(p.Pod),
 			})
 			totalCPUReq += p.CPURequest
 			totalMemReq += p.MemoryRequest
@@ -172,12 +174,14 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 	pods := h.state.GetAllPods()
 	nodes := h.state.GetAllNodes()
 
-	// Build node cost map for cost allocation
+	// Build node cost and capacity maps for capacity-based cost allocation
 	nodeCostMap := make(map[string]float64)
-	nodeCPUReqMap := make(map[string]int64)
+	nodeCPUCapMap := make(map[string]int64)
+	nodeMemCapMap := make(map[string]int64)
 	for _, n := range nodes {
 		nodeCostMap[n.Node.Name] = n.HourlyCostUSD * cost.HoursPerMonth
-		nodeCPUReqMap[n.Node.Name] = n.CPURequested
+		nodeCPUCapMap[n.Node.Name] = n.CPUCapacity
+		nodeMemCapMap[n.Node.Name] = n.MemoryCapacity
 	}
 
 	// Group pods by owner
@@ -223,10 +227,15 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 		wl.MemReq += p.MemoryRequest
 		wl.MemUsed += p.MemoryUsage
 
-		// Allocate cost from node proportionally
-		nodeTotalReq := nodeCPUReqMap[p.NodeName]
-		if nodeTotalReq > 0 && p.CPURequest > 0 {
-			fraction := float64(p.CPURequest) / float64(nodeTotalReq)
+		// Capacity-based cost allocation: blended 50/50 CPU+memory fraction of node capacity.
+		fraction := 0.0
+		if cpuCap := nodeCPUCapMap[p.NodeName]; cpuCap > 0 && p.CPURequest > 0 {
+			fraction += 0.5 * float64(p.CPURequest) / float64(cpuCap)
+		}
+		if memCap := nodeMemCapMap[p.NodeName]; memCap > 0 && p.MemoryRequest > 0 {
+			fraction += 0.5 * float64(p.MemoryRequest) / float64(memCap)
+		}
+		if fraction > 0 {
 			wl.MonthlyCost += nodeCostMap[p.NodeName] * fraction
 		}
 	}

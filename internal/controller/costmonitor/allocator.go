@@ -27,11 +27,7 @@ func (a *Allocator) AllocateByNamespace(ctx context.Context, snapshot *optimizer
 		if nodeHourlyCost == 0 {
 			continue
 		}
-
-		// Distribute node cost proportionally based on CPU + memory requests
-		totalCPURequested := node.CPURequested
-		totalMemRequested := node.MemoryRequested
-		if totalCPURequested == 0 && totalMemRequested == 0 {
+		if node.CPUCapacity == 0 && node.MemoryCapacity == 0 {
 			continue
 		}
 
@@ -50,13 +46,13 @@ func (a *Allocator) AllocateByNamespace(ctx context.Context, snapshot *optimizer
 					podMemReq += mem.Value()
 				}
 			}
-			// Weighted average: 50% CPU, 50% memory
+			// Capacity-based allocation: 50% CPU + 50% memory as fraction of node capacity.
 			fraction := 0.0
-			if totalCPURequested > 0 {
-				fraction += 0.5 * float64(podCPUReq) / float64(totalCPURequested)
+			if node.CPUCapacity > 0 {
+				fraction += 0.5 * float64(podCPUReq) / float64(node.CPUCapacity)
 			}
-			if totalMemRequested > 0 {
-				fraction += 0.5 * float64(podMemReq) / float64(totalMemRequested)
+			if node.MemoryCapacity > 0 {
+				fraction += 0.5 * float64(podMemReq) / float64(node.MemoryCapacity)
 			}
 			costs[ns] += nodeHourlyCost * cost.HoursPerMonth * fraction
 		}
@@ -85,9 +81,7 @@ func (a *Allocator) TopWorkloads(ctx context.Context, snapshot *optimizer.Cluste
 		if nodeHourlyCost == 0 {
 			continue
 		}
-		totalCPURequested := node.CPURequested
-		totalMemRequested := node.MemoryRequested
-		if totalCPURequested == 0 && totalMemRequested == 0 {
+		if node.CPUCapacity == 0 && node.MemoryCapacity == 0 {
 			continue
 		}
 
@@ -122,13 +116,13 @@ func (a *Allocator) TopWorkloads(ctx context.Context, snapshot *optimizer.Cluste
 				}
 			}
 
-			// Weighted average: 50% CPU, 50% memory
+			// Capacity-based allocation: 50% CPU + 50% memory as fraction of node capacity.
 			fraction := 0.0
-			if totalCPURequested > 0 {
-				fraction += 0.5 * float64(podCPUReq) / float64(totalCPURequested)
+			if node.CPUCapacity > 0 {
+				fraction += 0.5 * float64(podCPUReq) / float64(node.CPUCapacity)
 			}
-			if totalMemRequested > 0 {
-				fraction += 0.5 * float64(podMemReq) / float64(totalMemRequested)
+			if node.MemoryCapacity > 0 {
+				fraction += 0.5 * float64(podMemReq) / float64(node.MemoryCapacity)
 			}
 			workloadCosts[key].MonthlyCostUSD += nodeHourlyCost * cost.HoursPerMonth * fraction
 			workloadCosts[key].Replicas++
