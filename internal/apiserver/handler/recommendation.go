@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -27,6 +28,10 @@ func (h *RecommendationHandler) List(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var recList koptv1alpha1.RecommendationList
 	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err != nil {
+		if meta.IsNoMatchError(err) {
+			writeJSON(w, http.StatusOK, []interface{}{})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -116,6 +121,13 @@ func (h *RecommendationHandler) GetSummary(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 	var recList koptv1alpha1.RecommendationList
 	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err != nil {
+		if meta.IsNoMatchError(err) {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"total": 0, "pending": 0, "approved": 0, "dismissed": 0,
+				"totalEstimatedSavings": 0,
+			})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
