@@ -515,6 +515,36 @@ func computePriceForRegion(t *cloudprovider.InstanceType, region string) float64
 	return math.Round(basePrice*10000) / 10000
 }
 
+// EstimatePriceFromCapacity implements cloudprovider.FallbackPricer.
+// It computes an approximate hourly price using hardcoded component rates
+// and the node's actual CPU/memory capacity from Kubernetes, bypassing
+// the Compute Engine machine types API entirely.
+func (p *Provider) EstimatePriceFromCapacity(instanceType, region string, cpuMilli int64, memBytes int64) float64 {
+	family := extractSeriesPrefix(instanceType)
+	cp, ok := gcpFamilyPricing[family]
+	if !ok {
+		cp = gcpFamilyPricing["n2"] // safe default
+	}
+
+	cpuCores := float64(cpuMilli) / 1000.0
+	memGB := float64(memBytes) / (1024 * 1024 * 1024)
+	basePrice := cp.cpuPerHour*cpuCores + cp.memPerHour*memGB
+
+	// Add GPU pricing for known GPU machine types.
+	if spec, ok := gpuMachineTypes[instanceType]; ok {
+		if gpuRate, ok := gpuPricing[spec.gpuModel]; ok {
+			basePrice += gpuRate * float64(spec.gpuCount)
+		}
+	}
+
+	// Apply region multiplier.
+	if mult, ok := gcpRegionMultiplier[region]; ok {
+		basePrice *= mult
+	}
+
+	return math.Round(basePrice*10000) / 10000
+}
+
 // extractSeriesPrefix extracts the series prefix from a GCP machine type name.
 // "n2-standard-4" -> "n2", "e2-medium" -> "e2", "a2-highgpu-1g" -> "a2".
 func extractSeriesPrefix(machineType string) string {

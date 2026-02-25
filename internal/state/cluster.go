@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -128,12 +129,23 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	// GetNodeRegion returns the provider's default region for nodes without
 	// a region label, so a single call covers the common case.
 	var pricingMap map[string]float64
+	var defaultRegion string
 	if len(nodeList.Items) > 0 {
 		if region, err := s.provider.GetNodeRegion(ctx, &nodeList.Items[0]); err == nil {
+			defaultRegion = region
 			if pi, err := s.provider.GetCurrentPricing(ctx, region); err == nil {
 				pricingMap = pi.Prices
+			} else {
+				slog.Warn("pricing API unavailable, will use capacity-based fallback",
+					"region", region, "error", err)
 			}
 		}
+	}
+
+	// Detect if metrics server is available.
+	metricsAvailable := len(metricsMap) > 0
+	if !metricsAvailable && len(nodeList.Items) > 0 {
+		slog.Warn("metrics server unavailable, using resource requests as approximate utilization")
 	}
 
 	s.mu.Lock()
@@ -171,10 +183,15 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 			ns.MemoryRequested += memReq
 		}
 
-		// Apply metrics
+		// Apply metrics (actual usage from Metrics Server).
 		if m, ok := metricsMap[node.Name]; ok {
 			ns.CPUUsed = m.CPUUsage
 			ns.MemoryUsed = m.MemoryUsage
+		} else if !metricsAvailable && ns.CPURequested > 0 {
+			// When Metrics Server is unavailable, use resource requests
+			// as approximate utilization to avoid showing misleading zeros.
+			ns.CPUUsed = ns.CPURequested
+			ns.MemoryUsed = ns.MemoryRequested
 		}
 
 		// Compute cost from pre-fetched pricing (avoids per-node API call).
@@ -193,6 +210,31 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 					}
 				} else {
 					ns.HourlyCostUSD = price
+				}
+			}
+		}
+
+		// Fallback: estimate price from node capacity when pricing API is unavailable
+		// or the specific instance type is missing from the pricing map.
+		if ns.HourlyCostUSD == 0 && instanceType != "" && cpuCap > 0 {
+			if fp, ok := s.provider.(cloudprovider.FallbackPricer); ok {
+				region := defaultRegion
+				if r, err := s.provider.GetNodeRegion(ctx, node); err == nil {
+					region = r
+				}
+				price := fp.EstimatePriceFromCapacity(instanceType, region, cpuCap, memCap)
+				if price > 0 {
+					ns.IsSpot = cloudprovider.IsSpotNode(node)
+					if ns.IsSpot {
+						if sde, ok := s.provider.(cloudprovider.SpotDiscountEstimator); ok {
+							discount := sde.EstimateSpotDiscount(instanceType)
+							ns.HourlyCostUSD = price * (1 - discount)
+						} else {
+							ns.HourlyCostUSD = price * 0.35
+						}
+					} else {
+						ns.HourlyCostUSD = price
+					}
 				}
 			}
 		}

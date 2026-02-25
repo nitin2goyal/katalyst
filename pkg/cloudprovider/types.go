@@ -121,6 +121,13 @@ type SpotDiscountEstimator interface {
 	EstimateSpotDiscount(instanceType string) float64
 }
 
+// FallbackPricer estimates node cost from actual CPU/memory capacity when the
+// normal pricing API path is unavailable (e.g., Compute Engine machine types
+// API or Cloud Billing Catalog API unreachable).
+type FallbackPricer interface {
+	EstimatePriceFromCapacity(instanceType, region string, cpuMilli int64, memBytes int64) float64
+}
+
 type Commitment struct {
 	ID              string
 	Type            string  // "reserved-instance", "savings-plan", "cud", "reservation"
