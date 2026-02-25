@@ -69,28 +69,41 @@ func (h *GPUHandler) GetRecommendations(w http.ResponseWriter, r *http.Request) 
 
 		// Idle GPU detection
 		if n.GPUCapacity > 0 && n.GPUsUsed == 0 {
+			// Estimated monthly savings = full node cost if idle GPUs can be released.
+			idleSavings := n.HourlyCostUSD * 730
 			recommendations = append(recommendations, map[string]interface{}{
-				"type":         "gpu-idle",
-				"priority":     "high",
-				"nodeName":     n.Node.Name,
-				"instanceType": n.InstanceType,
-				"gpuCount":     n.GPUCapacity,
-				"summary":      fmt.Sprintf("GPU node %s has %d GPUs allocated but 0 in use", n.Node.Name, n.GPUCapacity),
-				"action":       "Consider enabling CPU fallback or scaling down",
+				"type":             "gpu-idle",
+				"priority":         "high",
+				"node":             n.Node.Name,
+				"nodeName":         n.Node.Name,
+				"target":           n.Node.Name,
+				"instanceType":     n.InstanceType,
+				"gpuCount":         n.GPUCapacity,
+				"description":      fmt.Sprintf("GPU node %s has %d GPUs allocated but 0 in use", n.Node.Name, n.GPUCapacity),
+				"summary":          fmt.Sprintf("GPU node %s has %d GPUs allocated but 0 in use", n.Node.Name, n.GPUCapacity),
+				"action":           "Consider enabling CPU fallback or scaling down",
+				"estimatedSavings": idleSavings,
 			})
 		}
 
 		// CPU scavenging opportunity
 		if gpuAllocated && cpuUtil < 30 && n.CPUCapacity > 2000 {
 			spareCPU := n.CPUCapacity - n.CPURequested
+			// Estimated savings from reclaiming spare CPU (fraction of node cost).
+			cpuFraction := float64(spareCPU) / float64(n.CPUCapacity)
+			scavengeSavings := n.HourlyCostUSD * 730 * cpuFraction * 0.5 // conservative estimate
 			recommendations = append(recommendations, map[string]interface{}{
-				"type":           "cpu-scavenging",
-				"priority":       "medium",
-				"nodeName":       n.Node.Name,
-				"instanceType":   n.InstanceType,
-				"spareCPUMillis": spareCPU,
-				"summary":        fmt.Sprintf("GPU node %s has %dm spare CPU available for scavenging", n.Node.Name, spareCPU),
-				"action":         "Enable CPU scavenging for low-priority workloads",
+				"type":             "cpu-scavenging",
+				"priority":         "medium",
+				"node":             n.Node.Name,
+				"nodeName":         n.Node.Name,
+				"target":           n.Node.Name,
+				"instanceType":     n.InstanceType,
+				"spareCPUMillis":   spareCPU,
+				"description":      fmt.Sprintf("GPU node %s has %dm spare CPU available for scavenging", n.Node.Name, spareCPU),
+				"summary":          fmt.Sprintf("GPU node %s has %dm spare CPU available for scavenging", n.Node.Name, spareCPU),
+				"action":           "Enable CPU scavenging for low-priority workloads",
+				"estimatedSavings": scavengeSavings,
 			})
 		}
 	}

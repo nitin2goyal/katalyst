@@ -50,25 +50,26 @@ type componentPricing struct {
 }
 
 // gcpFamilyPricing maps machine family prefixes to their component pricing rates (us-central1 base).
+// Rates reflect 3-YEAR COMMITTED USE DISCOUNT (CUD) pricing (~57% discount on compute).
 // Used as FALLBACK when the Cloud Billing Catalog API is unavailable.
 var gcpFamilyPricing = map[string]componentPricing{
-	"n2":  {cpuPerHour: 0.031611, memPerHour: 0.004237},
-	"n1":  {cpuPerHour: 0.031611, memPerHour: 0.004237},
-	"e2":  {cpuPerHour: 0.021811, memPerHour: 0.002923},
-	"n2d": {cpuPerHour: 0.027502, memPerHour: 0.003686},
-	"c2":  {cpuPerHour: 0.03398, memPerHour: 0.004554},
-	"c2d": {cpuPerHour: 0.02909, memPerHour: 0.003898},
-	"c3":  {cpuPerHour: 0.03616, memPerHour: 0.00484},
-	"c3d": {cpuPerHour: 0.03245, memPerHour: 0.00435},
-	"c4":  {cpuPerHour: 0.03810, memPerHour: 0.00510},
-	"h3":  {cpuPerHour: 0.03535, memPerHour: 0.00473},
-	"m3":  {cpuPerHour: 0.03710, memPerHour: 0.00890},
-	"n4":  {cpuPerHour: 0.02830, memPerHour: 0.00379},
-	"t2d": {cpuPerHour: 0.027502, memPerHour: 0.003686},
-	"t2a": {cpuPerHour: 0.0245, memPerHour: 0.00328},
-	"a2":  {cpuPerHour: 0.031611, memPerHour: 0.004237},
-	"a3":  {cpuPerHour: 0.031611, memPerHour: 0.004237},
-	"g2":  {cpuPerHour: 0.031611, memPerHour: 0.004237},
+	"n2":  {cpuPerHour: 0.013593, memPerHour: 0.001822}, // 3yr CUD
+	"n1":  {cpuPerHour: 0.013593, memPerHour: 0.001822}, // 3yr CUD
+	"e2":  {cpuPerHour: 0.009379, memPerHour: 0.001257}, // 3yr CUD
+	"n2d": {cpuPerHour: 0.011826, memPerHour: 0.001585}, // 3yr CUD
+	"c2":  {cpuPerHour: 0.014611, memPerHour: 0.001958}, // 3yr CUD
+	"c2d": {cpuPerHour: 0.012509, memPerHour: 0.001676}, // 3yr CUD
+	"c3":  {cpuPerHour: 0.015549, memPerHour: 0.002081}, // 3yr CUD
+	"c3d": {cpuPerHour: 0.013954, memPerHour: 0.001871}, // 3yr CUD
+	"c4":  {cpuPerHour: 0.016383, memPerHour: 0.002193}, // 3yr CUD
+	"h3":  {cpuPerHour: 0.015201, memPerHour: 0.002034}, // 3yr CUD
+	"m3":  {cpuPerHour: 0.015953, memPerHour: 0.003827}, // 3yr CUD
+	"n4":  {cpuPerHour: 0.012169, memPerHour: 0.001630}, // 3yr CUD
+	"t2d": {cpuPerHour: 0.011826, memPerHour: 0.001585}, // 3yr CUD
+	"t2a": {cpuPerHour: 0.010535, memPerHour: 0.001410}, // 3yr CUD
+	"a2":  {cpuPerHour: 0.013593, memPerHour: 0.001822}, // 3yr CUD
+	"a3":  {cpuPerHour: 0.013593, memPerHour: 0.001822}, // 3yr CUD
+	"g2":  {cpuPerHour: 0.013593, memPerHour: 0.001822}, // 3yr CUD
 }
 
 // gcpRegionMultiplier adjusts base pricing by region. Regions not listed use 1.0.
@@ -117,12 +118,13 @@ var gcpRegionMultiplier = map[string]float64{
 }
 
 // gpuPricing maps GPU model names to per-GPU hourly rates.
+// Rates reflect 3-YEAR COMMITTED USE DISCOUNT (CUD) pricing.
 var gpuPricing = map[string]float64{
-	"nvidia-tesla-a100": 2.934,
-	"nvidia-a100-80gb":  2.934,
-	"nvidia-tesla-v100": 2.48,
-	"nvidia-tesla-t4":   0.35,
-	"nvidia-l4":         0.70,
+	"nvidia-tesla-a100": 1.408, // 3yr CUD (~52% discount)
+	"nvidia-a100-80gb":  1.408, // 3yr CUD (~52% discount)
+	"nvidia-tesla-v100": 1.190, // 3yr CUD (~52% discount)
+	"nvidia-tesla-t4":   0.168, // 3yr CUD (~52% discount)
+	"nvidia-l4":         0.378, // 3yr CUD (~46% discount)
 }
 
 // gpuMachineSpecs defines GPU count and model for known GPU machine type prefixes.

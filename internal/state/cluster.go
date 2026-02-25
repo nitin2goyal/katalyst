@@ -13,7 +13,7 @@ import (
 	"github.com/koptimizer/koptimizer/internal/store"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
 	"github.com/koptimizer/koptimizer/pkg/familylock"
-	"github.com/koptimizer/koptimizer/pkg/metrics"
+	pkgmetrics "github.com/koptimizer/koptimizer/pkg/metrics"
 )
 
 // ClusterState maintains an in-memory cache of the cluster state.
@@ -21,7 +21,7 @@ type ClusterState struct {
 	mu         sync.RWMutex
 	client     client.Client
 	provider   cloudprovider.CloudProvider
-	metrics    metrics.MetricsCollector
+	metrics    pkgmetrics.MetricsCollector
 	nodes      map[string]*NodeState
 	pods       map[string]*PodState // key: namespace/name
 	nodeGroups *NodeGroupState
@@ -31,7 +31,7 @@ type ClusterState struct {
 
 // NewClusterState creates a new ClusterState. If db and writer are non-nil,
 // the audit log is backed by SQLite for persistence across restarts.
-func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc metrics.MetricsCollector, db *sql.DB, writer *store.Writer) *ClusterState {
+func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc pkgmetrics.MetricsCollector, db *sql.DB, writer *store.Writer) *ClusterState {
 	var auditLog *AuditLog
 	if db != nil && writer != nil {
 		auditLog = NewAuditLogWithDB(1000, db, writer)
@@ -108,7 +108,7 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 
 	// Get node metrics
 	nodeMetrics, _ := s.metrics.GetNodeMetrics(ctx) // Best effort
-	metricsMap := make(map[string]*metrics.NodeMetrics, len(nodeMetrics))
+	metricsMap := make(map[string]*pkgmetrics.NodeMetrics, len(nodeMetrics))
 	for i := range nodeMetrics {
 		metricsMap[nodeMetrics[i].Name] = &nodeMetrics[i]
 	}
@@ -176,11 +176,17 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 			ns.NodeGroupID = ngID
 		}
 
-		// Calculate requests
+		// Calculate requests and GPU allocation from pods
+		gpuResource := corev1.ResourceName("nvidia.com/gpu")
 		for _, pod := range ns.Pods {
 			cpuReq, memReq := ExtractPodRequests(pod)
 			ns.CPURequested += cpuReq
 			ns.MemoryRequested += memReq
+			for _, c := range pod.Spec.Containers {
+				if gpu, ok := c.Resources.Requests[gpuResource]; ok {
+					ns.GPUsUsed += int(gpu.Value())
+				}
+			}
 		}
 
 		// Apply metrics (actual usage from Metrics Server).
@@ -249,6 +255,26 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		pod := &podList.Items[i]
 		key := pod.Namespace + "/" + pod.Name
 		newPods[key] = NewPodState(pod)
+	}
+
+	// Apply pod metrics (actual usage from Metrics Server).
+	podMetrics, _ := s.metrics.GetPodMetrics(ctx, "") // best effort, all namespaces
+	podMetricsMap := make(map[string]*pkgmetrics.PodMetrics, len(podMetrics))
+	for i := range podMetrics {
+		key := podMetrics[i].Namespace + "/" + podMetrics[i].Name
+		podMetricsMap[key] = &podMetrics[i]
+	}
+	for key, ps := range newPods {
+		if pm, ok := podMetricsMap[key]; ok {
+			for _, cm := range pm.Containers {
+				ps.CPUUsage += cm.CPUUsage
+				ps.MemoryUsage += cm.MemoryUsage
+			}
+		} else if !metricsAvailable && ps.CPURequest > 0 {
+			// Fallback: use requests as approximate usage when Metrics Server unavailable.
+			ps.CPUUsage = ps.CPURequest
+			ps.MemoryUsage = ps.MemoryRequest
+		}
 	}
 	s.pods = newPods
 
