@@ -48,6 +48,12 @@ func (h *CostHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fallback: compute savings from engine when CRDs yield nothing
+	if potentialSavings == 0 {
+		computed := ComputeRecommendations(h.state)
+		potentialSavings = ComputeTotalPotentialSavings(computed)
+	}
+
 	resp := map[string]interface{}{
 		"totalMonthlyCostUSD":     totalHourly * cost.HoursPerMonth,
 		"projectedMonthlyCostUSD": totalHourly * cost.HoursPerMonth,
@@ -229,6 +235,19 @@ func (h *CostHandler) GetSavings(w http.ResponseWriter, r *http.Request) {
 				"name":             target,
 				"description":      rec.Spec.Summary,
 				"estimatedSavings": rec.Spec.EstimatedSaving.MonthlySavingsUSD,
+			})
+		}
+	}
+
+	// Fallback: compute savings opportunities from engine when CRDs yield nothing
+	if len(opportunities) == 0 {
+		computed := ComputeRecommendations(h.state)
+		for _, opp := range ComputeSavingsOpportunities(computed) {
+			opportunities = append(opportunities, map[string]interface{}{
+				"type":             opp.Type,
+				"name":             opp.Name,
+				"description":      opp.Description,
+				"estimatedSavings": opp.EstimatedSavings,
 			})
 		}
 	}
