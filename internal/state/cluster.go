@@ -113,11 +113,13 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		metricsMap[nodeMetrics[i].Name] = &nodeMetrics[i]
 	}
 
-	// Build pod-to-node mapping
+	// Build pod-to-node mapping — include ALL scheduled pods regardless of phase
+	// so that unhealthy pods (ImagePullBackOff, CrashLoopBackOff, etc.) appear
+	// on their node's detail page.
 	podsByNode := make(map[string][]*corev1.Pod)
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-		if pod.Spec.NodeName != "" && pod.Status.Phase == corev1.PodRunning {
+		if pod.Spec.NodeName != "" {
 			podsByNode[pod.Spec.NodeName] = append(podsByNode[pod.Spec.NodeName], pod)
 		}
 	}

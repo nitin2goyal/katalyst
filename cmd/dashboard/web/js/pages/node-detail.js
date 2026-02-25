@@ -100,11 +100,20 @@ export async function renderNodeDetail(params) {
       return v + 'B';
     };
 
-    // Pods table
+    // Pods table — color-code unhealthy statuses
+    const podStatusColor = (s) => {
+      if (!s) return 'gray';
+      const lower = s.toLowerCase();
+      if (lower === 'running' || lower === 'succeeded') return 'green';
+      if (lower === 'pending' || lower === 'containercreating') return 'blue';
+      if (lower.includes('backoff') || lower.includes('error') || lower.includes('oomkilled') || lower === 'failed') return 'red';
+      if (lower.includes('pull') || lower.includes('terminating')) return 'amber';
+      return 'amber';
+    };
     $('#node-pods-body').innerHTML = pods.length ? pods.map(p => `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
       <td>${fmtCPUm(p.cpuRequest)}</td><td>${fmtMemB(p.memRequest)}</td>
-      <td>${badge(p.status || 'Running', p.status === 'Running' ? 'green' : 'amber')}</td>
+      <td>${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
 
