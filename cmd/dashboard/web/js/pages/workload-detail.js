@@ -18,6 +18,18 @@ export async function renderWorkloadDetail(params) {
     const rs = rightsizing || {};
     const sc = scaling || {};
 
+    // Normalize API field names (List API uses totalCPU/totalMem; Get API uses totalCPURequestMilli/totalMemRequestBytes)
+    const cpuMillis = wl.totalCPURequestMilli ?? wl.totalCPU ?? 0;
+    const memBytes = wl.totalMemRequestBytes ?? wl.totalMem ?? 0;
+    const fmtCPU = (v) => typeof v === 'number' ? v + 'm' : (v || '0m');
+    const fmtMem = (v) => {
+      if (typeof v !== 'number') return v || '0Mi';
+      if (v >= 1073741824) return (v / 1073741824).toFixed(1) + 'Gi';
+      if (v >= 1048576) return Math.round(v / 1048576) + 'Mi';
+      if (v >= 1024) return Math.round(v / 1024) + 'Ki';
+      return v + 'B';
+    };
+
     container().innerHTML = `
       ${breadcrumbs([
         { label: 'Workloads', href: '#/workloads' },
@@ -26,8 +38,8 @@ export async function renderWorkloadDetail(params) {
       <div class="page-header"><h1>${name}</h1><p>${kind} in ${ns}</p></div>
       <div class="kpi-grid">
         <div class="kpi-card"><div class="label">Replicas</div><div class="value blue">${wl.replicas ?? '?'}</div></div>
-        <div class="kpi-card"><div class="label">Total CPU</div><div class="value">${wl.totalCPU || '0m'}</div></div>
-        <div class="kpi-card"><div class="label">Total Memory</div><div class="value">${wl.totalMem || '0Mi'}</div></div>
+        <div class="kpi-card"><div class="label">Total CPU</div><div class="value">${fmtCPU(cpuMillis)}</div></div>
+        <div class="kpi-card"><div class="label">Total Memory</div><div class="value">${fmtMem(memBytes)}</div></div>
         <div class="kpi-card"><div class="label">Namespace</div><div class="value">${ns}</div></div>
       </div>
       <div class="card" id="wl-tabs-card">
@@ -53,18 +65,18 @@ export async function renderWorkloadDetail(params) {
                 <div class="detail-item"><span class="detail-label">Kind</span><span>${kind}</span></div>
                 <div class="detail-item"><span class="detail-label">Namespace</span><span>${ns}</span></div>
                 <div class="detail-item"><span class="detail-label">Replicas</span><span>${wl.replicas ?? '?'}</span></div>
-                <div class="detail-item"><span class="detail-label">CPU Request</span><span>${wl.cpuRequest || wl.totalCPU || '?'}</span></div>
-                <div class="detail-item"><span class="detail-label">Memory Request</span><span>${wl.memRequest || wl.totalMem || '?'}</span></div>
-                <div class="detail-item"><span class="detail-label">CPU Limit</span><span>${wl.cpuLimit || '?'}</span></div>
-                <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${wl.memLimit || '?'}</span></div>
+                <div class="detail-item"><span class="detail-label">CPU Request</span><span>${wl.cpuRequest || fmtCPU(cpuMillis)}</span></div>
+                <div class="detail-item"><span class="detail-label">Memory Request</span><span>${wl.memRequest || fmtMem(memBytes)}</span></div>
+                <div class="detail-item"><span class="detail-label">CPU Limit</span><span>${wl.cpuLimit || '—'}</span></div>
+                <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${wl.memLimit || '—'}</span></div>
               </div>
             </div>
           </div>`;
 
-        const cpuReq = parseFloat(wl.cpuRequest || wl.totalCPU) || 0;
+        const cpuReq = parseFloat(wl.cpuRequest) || cpuMillis || 0;
         const cpuUsed = parseFloat(wl.cpuUsed || wl.cpuActual) || cpuReq * 0.6;
         const cpuLimit = parseFloat(wl.cpuLimit) || cpuReq * 1.5;
-        const memReq = parseFloat(wl.memRequest || wl.totalMem) || 0;
+        const memReq = parseFloat(wl.memRequest) || memBytes || 0;
         const memUsed = parseFloat(wl.memUsed || wl.memActual) || memReq * 0.7;
         const memLimit = parseFloat(wl.memLimit) || memReq * 1.5;
 

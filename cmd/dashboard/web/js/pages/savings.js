@@ -82,6 +82,9 @@ export async function renderSavings(targetEl) {
         },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
       });
+    } else {
+      const el = document.getElementById('savings-cat-chart');
+      if (el) el.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:200px;color:var(--text-muted);font-size:13px;">No savings categories identified yet</div>';
     }
 
     // Table

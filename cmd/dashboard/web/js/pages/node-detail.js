@@ -91,10 +91,19 @@ export async function renderNodeDetail(params) {
       options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { position: 'bottom' } }, scales: { x: { stacked: true, beginAtZero: true }, y: { stacked: true } } }
     });
 
+    const fmtCPUm = (v) => typeof v === 'number' ? v + 'm' : (v || '0m');
+    const fmtMemB = (v) => {
+      if (typeof v !== 'number') return v || '0Mi';
+      if (v >= 1073741824) return (v / 1073741824).toFixed(1) + 'Gi';
+      if (v >= 1048576) return Math.round(v / 1048576) + 'Mi';
+      if (v >= 1024) return Math.round(v / 1024) + 'Ki';
+      return v + 'B';
+    };
+
     // Pods table
     $('#node-pods-body').innerHTML = pods.length ? pods.map(p => `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
-      <td>${p.cpuRequest || '0m'}</td><td>${p.memRequest || '0Mi'}</td>
+      <td>${fmtCPUm(p.cpuRequest)}</td><td>${fmtMemB(p.memRequest)}</td>
       <td>${badge(p.status || 'Running', p.status === 'Running' ? 'green' : 'amber')}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));

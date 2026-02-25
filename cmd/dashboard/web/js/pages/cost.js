@@ -154,11 +154,15 @@ async function renderCostDashboard(targetEl) {
           const change = n.change || 0;
           const changeClass = change < 0 ? 'green' : change > 0 ? 'red' : '';
           const arrow = change < 0 ? '\u2193' : change > 0 ? '\u2191' : '';
+          const isNew = (!n.previousCost || n.previousCost === 0) && n.currentCost > 0;
+          const changeDisplay = isNew
+            ? '<span class="badge badge-blue">New</span>'
+            : `${arrow} ${fmtPct(Math.abs(change))}`;
           return `<tr>
             <td><strong>${n.namespace || ''}</strong></td>
             <td>${fmt$(n.previousCost)}</td>
             <td>${fmt$(n.currentCost)}</td>
-            <td class="${changeClass}">${arrow} ${fmtPct(Math.abs(change))}</td>
+            <td class="${changeClass}">${changeDisplay}</td>
           </tr>`;
         }).join('');
         makeSortable($('#mom-table'));

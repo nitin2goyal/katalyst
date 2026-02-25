@@ -50,6 +50,29 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	type podSummary struct {
+		Name       string `json:"name"`
+		Namespace  string `json:"namespace"`
+		CPURequest int64  `json:"cpuRequest"`
+		MemRequest int64  `json:"memRequest"`
+		Status     string `json:"status"`
+	}
+	pods := make([]podSummary, 0, len(node.Pods))
+	for _, pod := range node.Pods {
+		cpuMilli, memBytes := state.ExtractPodRequests(pod)
+		phase := string(pod.Status.Phase)
+		if phase == "" {
+			phase = "Unknown"
+		}
+		pods = append(pods, podSummary{
+			Name:       pod.Name,
+			Namespace:  pod.Namespace,
+			CPURequest: cpuMilli,
+			MemRequest: memBytes,
+			Status:     phase,
+		})
+	}
+
 	resp := map[string]interface{}{
 		"name":           node.Node.Name,
 		"instanceType":   node.InstanceType,
@@ -68,6 +91,7 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"isSpot":         node.IsSpot,
 		"isGPU":          node.IsGPUNode,
 		"podCount":       len(node.Pods),
+		"pods":           pods,
 	}
 
 	// Build pods array for the detail table

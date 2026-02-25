@@ -2,6 +2,23 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, exportCSV, cardHeader, badge } from '../components.js';
 
+function fmtCPUm(v) {
+  if (v == null) return '0m';
+  if (typeof v === 'number') return v + 'm';
+  return v;
+}
+
+function fmtMemB(v) {
+  if (v == null) return '0Mi';
+  if (typeof v === 'number') {
+    if (v >= 1073741824) return (v / 1073741824).toFixed(1) + 'Gi';
+    if (v >= 1048576) return Math.round(v / 1048576) + 'Mi';
+    if (v >= 1024) return Math.round(v / 1024) + 'Ki';
+    return v + 'B';
+  }
+  return v;
+}
+
 export async function renderWorkloads(targetEl) {
   const container = () => targetEl || $('#page-container');
   container().innerHTML = skeleton(5);
@@ -55,8 +72,8 @@ export async function renderWorkloads(targetEl) {
       return `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
         <td>${w.namespace || ''}</td><td>${w.kind || ''}</td><td>${w.name || ''}</td>
         <td>${w.replicas ?? ''}</td>
-        <td>${w.totalCPU || '0m'}</td>
-        <td>${w.totalMem || '0Mi'}</td>
+        <td>${fmtCPUm(w.totalCPU)}</td>
+        <td>${fmtMemB(w.totalMem)}</td>
         <td>${effBadge(eff?.cpuEfficiencyPct)}</td>
         <td>${effBadge(eff?.memEfficiencyPct)}</td>
         <td>${eff ? '<span class="red">' + fmt$(eff.wastedCostUSD) + '</span>' : '-'}</td>
