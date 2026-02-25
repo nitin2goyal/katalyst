@@ -3,6 +3,7 @@ import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
 import { makeBarChart, makeAreaChart, makeDonutChart, destroyCharts } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, cardHeader, dateRangePicker, badge, exportCSV } from '../components.js';
 import { renderSavings } from './savings.js';
+import { computeRecommendations } from '../recommendations-engine.js';
 
 const container = () => $('#page-container');
 
@@ -65,7 +66,12 @@ async function renderCostDashboard(targetEl) {
       api('/cost/comparison').catch(() => null),
     ]);
     const cs = summary || {};
-    const savingsList = savings ? toArray(savings, 'opportunities', 'savings') : [];
+    let savingsList = savings ? toArray(savings, 'opportunities', 'savings') : [];
+    // Fallback: compute from live node data when API returns empty
+    if (!savingsList.length) {
+      const computed = await computeRecommendations();
+      savingsList = computed.opportunities;
+    }
     const totalIdentified = savingsList.reduce((s, r) => s + (r.estimatedSavings || r.savings || 0), 0);
 
     const nsMap = (byNs && typeof byNs === 'object' && !Array.isArray(byNs)) ? byNs : {};

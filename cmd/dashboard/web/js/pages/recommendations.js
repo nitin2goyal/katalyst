@@ -1,6 +1,7 @@
 import { api, apiPost } from '../api.js';
 import { $, toArray, fmt$, errorMsg } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, exportCSV, badge, cardHeader, toast } from '../components.js';
+import { computeRecommendations } from '../recommendations-engine.js';
 
 export async function renderRecsTab(targetEl) {
   targetEl.innerHTML = skeleton(5);
@@ -9,7 +10,12 @@ export async function renderRecsTab(targetEl) {
       api('/recommendations'),
       api('/recommendations/summary').catch(() => null),
     ]);
-    const recList = toArray(recs, 'recommendations');
+    let recList = toArray(recs, 'recommendations');
+    // Fallback: compute from live node data when API returns empty
+    if (!recList.length) {
+      const computed = await computeRecommendations();
+      recList = computed.recommendations;
+    }
     const pending = recList.filter(r => (r.status || r.Status) === 'pending').length;
     const approved = recList.filter(r => (r.status || r.Status) === 'approved').length;
     const dismissed = recList.filter(r => (r.status || r.Status) === 'dismissed').length;

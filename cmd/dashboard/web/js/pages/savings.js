@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, cardHeader, badge, exportCSV } from '../components.js';
+import { computeRecommendations } from '../recommendations-engine.js';
 
 export async function renderSavings(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -10,7 +11,12 @@ export async function renderSavings(targetEl) {
     const [savings, costSummary] = await Promise.all([
       api('/cost/savings'), api('/cost/summary')
     ]);
-    const list = toArray(savings, 'opportunities', 'savings');
+    let list = toArray(savings, 'opportunities', 'savings');
+    // Fallback: compute from live node data when API returns empty
+    if (!list.length) {
+      const computed = await computeRecommendations();
+      list = computed.opportunities;
+    }
     const cs = costSummary || {};
     
     // Calculate category totals

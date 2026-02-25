@@ -4,6 +4,7 @@ import { renderGauge, destroyCharts } from '../charts.js';
 import { skeleton, makeSortable, badge, cardHeader } from '../components.js';
 import { renderEvents } from './events.js';
 import { renderAudit } from './audit.js';
+import { computeRecommendations } from '../recommendations-engine.js';
 
 const container = () => $('#page-container');
 
@@ -23,6 +24,11 @@ export async function renderOverview() {
       api('/cluster/score').catch(() => null),
     ]);
     const s = summary || {};
+    // Fallback: compute potentialSavings from live node data when API returns 0
+    if (!s.potentialSavings) {
+      const computed = await computeRecommendations();
+      s.potentialSavings = computed.totalSavings;
+    }
     const controllerStatuses = (health && health.controllers) || {};
     const eff = efficiency || {};
     const sc = score || {};
