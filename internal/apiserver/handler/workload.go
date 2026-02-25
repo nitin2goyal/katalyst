@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/go-chi/chi/v5"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cost"
@@ -194,6 +195,13 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 	workloads := make(map[string]*workloadInfo)
 
 	for _, p := range pods {
+		// Only include running pods for cost allocation and efficiency.
+		// Non-running pods (Succeeded Jobs, Failed pods) still have NodeName
+		// set but aren't counted in the node's CPURequested, which would
+		// cause their cost fraction to exceed 1.0 and inflate totals.
+		if p.Pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
 		ownerKind, ownerName := p.OwnerKind, p.OwnerName
 		if ownerName == "" {
 			ownerName = p.Name

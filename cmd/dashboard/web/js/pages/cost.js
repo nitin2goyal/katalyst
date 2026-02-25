@@ -9,10 +9,14 @@ const container = () => $('#page-container');
 const tabDefs = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'savings', label: 'Savings' },
+  { id: 'namespace', label: 'Namespace' },
+  { id: 'workload', label: 'Workload' },
 ];
 
 const subRenderers = {
   savings: renderSavings,
+  namespace: renderNamespaceBreakdown,
+  workload: renderWorkloadBreakdown,
 };
 
 export async function renderCost(params) {
@@ -198,5 +202,99 @@ async function renderCostDashboard(targetEl) {
 
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load cost data: ' + e.message);
+  }
+}
+
+async function renderNamespaceBreakdown(targetEl) {
+  targetEl.innerHTML = skeleton(3);
+  try {
+    const byNs = await api('/cost/by-namespace');
+    const nsMap = (byNs && typeof byNs === 'object' && !Array.isArray(byNs)) ? byNs : {};
+    const nsEntries = Object.entries(nsMap).filter(([_, v]) => typeof v === 'number').sort((a, b) => b[1] - a[1]);
+    const total = nsEntries.reduce((s, [_, v]) => s + v, 0);
+
+    targetEl.innerHTML = `
+      <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr)">
+        <div class="kpi-card"><div class="label">Total Monthly Cost</div><div class="value">${fmt$(total)}</div></div>
+        <div class="kpi-card"><div class="label">Namespaces</div><div class="value">${nsEntries.length}</div></div>
+      </div>
+      <div class="card">
+        <h2>Cost by namespace</h2>
+        <div class="chart-container" id="ns-breakdown-chart"></div>
+      </div>
+      <div class="card">
+        ${cardHeader('Namespace Breakdown', '<button class="btn btn-gray btn-sm" onclick="window.__exportNsCSV()">Export CSV</button>')}
+        <div class="table-wrap"><table id="ns-cost-table">
+          <thead><tr><th>Namespace</th><th>Monthly Cost</th><th>% of Total</th></tr></thead>
+          <tbody id="ns-cost-body"></tbody>
+        </table></div>
+      </div>`;
+
+    if (nsEntries.length) {
+      const topNs = nsEntries.slice(0, 8);
+      const nsColors = ['#6366f1', '#8b5cf6', '#a78bfa', '#06b6d4', '#14b8a6', '#10b981', '#f59e0b', '#64748b'];
+      makeDonutChart('ns-breakdown-chart', {
+        labels: topNs.map(([k]) => k),
+        series: topNs.map(([_, v]) => v),
+        colors: nsColors.slice(0, topNs.length),
+      });
+    }
+
+    $('#ns-cost-body').innerHTML = nsEntries.length ? nsEntries.map(([ns, cost]) => `<tr>
+      <td><strong>${ns}</strong></td>
+      <td>${fmt$(cost)}</td>
+      <td>${fmtPct(total > 0 ? cost / total * 100 : 0)}</td>
+    </tr>`).join('') : '<tr><td colspan="3" style="color:var(--text-muted)">No namespace cost data</td></tr>';
+    makeSortable($('#ns-cost-table'));
+
+    window.__exportNsCSV = () => {
+      exportCSV(['Namespace', 'Monthly Cost', '% of Total'],
+        nsEntries.map(([ns, cost]) => [ns, cost.toFixed(2), total > 0 ? (cost / total * 100).toFixed(1) : '0']),
+        'koptimizer-namespace-costs.csv');
+    };
+  } catch (e) {
+    targetEl.innerHTML = errorMsg('Failed to load namespace cost data: ' + e.message);
+  }
+}
+
+async function renderWorkloadBreakdown(targetEl) {
+  targetEl.innerHTML = skeleton(3);
+  try {
+    const byWl = await api('/cost/by-workload');
+    const wlList = Array.isArray(byWl) ? byWl : (byWl && byWl.workloads ? byWl.workloads : []);
+    wlList.sort((a, b) => (b.monthlyCostUSD || 0) - (a.monthlyCostUSD || 0));
+    const total = wlList.reduce((s, w) => s + (w.monthlyCostUSD || 0), 0);
+
+    targetEl.innerHTML = `
+      <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr)">
+        <div class="kpi-card"><div class="label">Total Monthly Cost</div><div class="value">${fmt$(total)}</div></div>
+        <div class="kpi-card"><div class="label">Workloads</div><div class="value">${wlList.length}</div></div>
+      </div>
+      <div class="card">
+        ${cardHeader('Cost by Workload', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlBreakdownCSV()">Export CSV</button>')}
+        ${filterBar({ placeholder: 'Search workloads...', filters: [] })}
+        <div class="table-wrap"><table id="wl-breakdown-table">
+          <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Monthly Cost</th><th>% of Total</th></tr></thead>
+          <tbody id="wl-breakdown-body"></tbody>
+        </table></div>
+      </div>`;
+
+    $('#wl-breakdown-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
+      <td>${w.namespace || ''}</td><td>${w.kind || ''}</td><td>${w.name || ''}</td>
+      <td><strong>${fmt$(w.monthlyCostUSD)}</strong></td>
+      <td>${fmtPct(total > 0 ? (w.monthlyCostUSD || 0) / total * 100 : 0)}</td>
+    </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No workload cost data</td></tr>';
+    makeSortable($('#wl-breakdown-table'));
+
+    const fb = targetEl.querySelector('.filter-bar');
+    if (fb) attachFilterHandlers(fb, $('#wl-breakdown-table'));
+
+    window.__exportWlBreakdownCSV = () => {
+      exportCSV(['Namespace', 'Kind', 'Name', 'Monthly Cost', '% of Total'],
+        wlList.map(w => [w.namespace, w.kind, w.name, (w.monthlyCostUSD || 0).toFixed(2), total > 0 ? ((w.monthlyCostUSD || 0) / total * 100).toFixed(1) : '0']),
+        'koptimizer-workload-costs.csv');
+    };
+  } catch (e) {
+    targetEl.innerHTML = errorMsg('Failed to load workload cost data: ' + e.message);
   }
 }

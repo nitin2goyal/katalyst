@@ -2,17 +2,20 @@ import { $ } from '../utils.js';
 import { destroyCharts } from '../charts.js';
 import { renderGPU } from './gpu.js';
 import { renderCommitments } from './commitments.js';
+import { renderSpot } from './spot.js';
 
 const container = () => $('#page-container');
 
 const tabDefs = [
   { id: 'gpu', label: 'GPU' },
   { id: 'commitments', label: 'Commitments' },
+  { id: 'spot', label: 'Spot' },
 ];
 
 const renderers = {
   gpu: renderGPU,
   commitments: renderCommitments,
+  spot: renderSpot,
 };
 
 export async function renderInfrastructure(params) {
