@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	koptv1alpha1 "github.com/koptimizer/koptimizer/api/v1alpha1"
@@ -71,27 +72,24 @@ func (h *CostHandler) GetByNamespace(w http.ResponseWriter, r *http.Request) {
 		if n.CPUCapacity == 0 && n.MemoryCapacity == 0 {
 			continue
 		}
-		for _, pod := range n.Pods {
-			ns := pod.Namespace
-			cpuReq := int64(0)
-			memReq := int64(0)
-			for _, c := range pod.Spec.Containers {
-				if cpu, ok := c.Resources.Requests["cpu"]; ok {
-					cpuReq += cpu.MilliValue()
-				}
-				if mem, ok := c.Resources.Requests["memory"]; ok {
-					memReq += mem.Value()
-				}
-			}
-			// Capacity-based allocation: 50/50 CPU+memory fraction of node capacity.
-			fraction := 0.0
-			if n.CPUCapacity > 0 {
-				fraction += 0.5 * float64(cpuReq) / float64(n.CPUCapacity)
-			}
-			if n.MemoryCapacity > 0 {
-				fraction += 0.5 * float64(memReq) / float64(n.MemoryCapacity)
-			}
-			costs[ns] += n.HourlyCostUSD * cost.HoursPerMonth * fraction
+		nodeCost := n.HourlyCostUSD * cost.HoursPerMonth
+		if nodeCost == 0 {
+			continue
+		}
+		// Two-pass: compute per-pod weights then distribute full node cost
+		// proportionally so namespace costs sum to total cluster cost.
+		weights := make([]float64, len(n.Pods))
+		totalW := 0.0
+		for i, pod := range n.Pods {
+			w := podWeight(pod.Spec.Containers, n.CPUCapacity, n.MemoryCapacity)
+			weights[i] = w
+			totalW += w
+		}
+		if totalW == 0 {
+			continue
+		}
+		for i, pod := range n.Pods {
+			costs[pod.Namespace] += nodeCost * weights[i] / totalW
 		}
 	}
 	writeJSON(w, http.StatusOK, costs)
@@ -111,7 +109,21 @@ func (h *CostHandler) GetByWorkload(w http.ResponseWriter, r *http.Request) {
 		if n.CPUCapacity == 0 && n.MemoryCapacity == 0 {
 			continue
 		}
-		for _, pod := range n.Pods {
+		nodeCost := n.HourlyCostUSD * cost.HoursPerMonth
+		if nodeCost == 0 {
+			continue
+		}
+		weights := make([]float64, len(n.Pods))
+		totalW := 0.0
+		for i, pod := range n.Pods {
+			w := podWeight(pod.Spec.Containers, n.CPUCapacity, n.MemoryCapacity)
+			weights[i] = w
+			totalW += w
+		}
+		if totalW == 0 {
+			continue
+		}
+		for i, pod := range n.Pods {
 			ownerKind, ownerName := "", ""
 			if len(pod.OwnerReferences) > 0 {
 				ownerKind = pod.OwnerReferences[0].Kind
@@ -122,26 +134,7 @@ func (h *CostHandler) GetByWorkload(w http.ResponseWriter, r *http.Request) {
 				ownerKind = "Pod"
 			}
 			key := pod.Namespace + "/" + ownerKind + "/" + ownerName
-			cpuReq := int64(0)
-			memReq := int64(0)
-			for _, c := range pod.Spec.Containers {
-				if cpu, ok := c.Resources.Requests["cpu"]; ok {
-					cpuReq += cpu.MilliValue()
-				}
-				if mem, ok := c.Resources.Requests["memory"]; ok {
-					memReq += mem.Value()
-				}
-			}
-			// Capacity-based allocation: fraction of node capacity, blended 50/50 CPU+memory.
-			// This prevents cost inflation on underutilized nodes where CPURequested is tiny.
-			fraction := 0.0
-			if n.CPUCapacity > 0 {
-				fraction += 0.5 * float64(cpuReq) / float64(n.CPUCapacity)
-			}
-			if n.MemoryCapacity > 0 {
-				fraction += 0.5 * float64(memReq) / float64(n.MemoryCapacity)
-			}
-			monthlyCost := n.HourlyCostUSD * cost.HoursPerMonth * fraction
+			monthlyCost := nodeCost * weights[i] / totalW
 			if existing, ok := costs[key]; ok {
 				existing.MonthlyCostUSD += monthlyCost
 			} else {
@@ -172,19 +165,25 @@ func (h *CostHandler) GetByLabel(w http.ResponseWriter, r *http.Request) {
 	costs := make(map[string]map[string]float64)
 
 	for _, n := range nodes {
-		if n.CPURequested == 0 {
+		if n.CPUCapacity == 0 && n.MemoryCapacity == 0 {
 			continue
 		}
-		for _, pod := range n.Pods {
-			cpuReq := int64(0)
-			for _, c := range pod.Spec.Containers {
-				if cpu, ok := c.Resources.Requests["cpu"]; ok {
-					cpuReq += cpu.MilliValue()
-				}
-			}
-			fraction := float64(cpuReq) / float64(n.CPURequested)
-			monthlyCost := n.HourlyCostUSD * cost.HoursPerMonth * fraction
-
+		nodeCost := n.HourlyCostUSD * cost.HoursPerMonth
+		if nodeCost == 0 {
+			continue
+		}
+		weights := make([]float64, len(n.Pods))
+		totalW := 0.0
+		for i, pod := range n.Pods {
+			w := podWeight(pod.Spec.Containers, n.CPUCapacity, n.MemoryCapacity)
+			weights[i] = w
+			totalW += w
+		}
+		if totalW == 0 {
+			continue
+		}
+		for i, pod := range n.Pods {
+			monthlyCost := nodeCost * weights[i] / totalW
 			for labelKey, labelValue := range pod.Labels {
 				if isInternalLabel(labelKey) {
 					continue
@@ -340,18 +339,25 @@ func (h *CostHandler) GetComparison(w http.ResponseWriter, r *http.Request) {
 	if len(currentByNS) == 0 {
 		currentByNS = make(map[string]float64)
 		for _, n := range nodes {
-			if n.CPURequested == 0 {
+			if n.CPUCapacity == 0 && n.MemoryCapacity == 0 {
 				continue
 			}
-			for _, pod := range n.Pods {
-				cpuReq := int64(0)
-				for _, c := range pod.Spec.Containers {
-					if cpu, ok := c.Resources.Requests["cpu"]; ok {
-						cpuReq += cpu.MilliValue()
-					}
-				}
-				fraction := float64(cpuReq) / float64(n.CPURequested)
-				currentByNS[pod.Namespace] += n.HourlyCostUSD * cost.HoursPerMonth * fraction
+			nodeCost := n.HourlyCostUSD * cost.HoursPerMonth
+			if nodeCost == 0 {
+				continue
+			}
+			weights := make([]float64, len(n.Pods))
+			totalW := 0.0
+			for i, pod := range n.Pods {
+				w := podWeight(pod.Spec.Containers, n.CPUCapacity, n.MemoryCapacity)
+				weights[i] = w
+				totalW += w
+			}
+			if totalW == 0 {
+				continue
+			}
+			for i, pod := range n.Pods {
+				currentByNS[pod.Namespace] += nodeCost * weights[i] / totalW
 				allNS[pod.Namespace] = true
 			}
 		}
@@ -620,6 +626,28 @@ func (h *CostHandler) GetImpact(w http.ResponseWriter, r *http.Request) {
 		"byCategory":    categories,
 		"recentActions": recentActions,
 	})
+}
+
+// podWeight computes a blended CPU+memory weight for a pod relative to node capacity.
+func podWeight(containers []corev1.Container, cpuCap, memCap int64) float64 {
+	cpuReq := int64(0)
+	memReq := int64(0)
+	for _, c := range containers {
+		if cpu, ok := c.Resources.Requests["cpu"]; ok {
+			cpuReq += cpu.MilliValue()
+		}
+		if mem, ok := c.Resources.Requests["memory"]; ok {
+			memReq += mem.Value()
+		}
+	}
+	w := 0.0
+	if cpuCap > 0 {
+		w += 0.5 * float64(cpuReq) / float64(cpuCap)
+	}
+	if memCap > 0 {
+		w += 0.5 * float64(memReq) / float64(memCap)
+	}
+	return w
 }
 
 // containsAction checks if the action string matches any of the given prefixes.

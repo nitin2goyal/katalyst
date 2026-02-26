@@ -18,11 +18,19 @@ export async function renderNodes(targetEl) {
     const nodeGroups = [...new Set(nodeList.map(n => n.nodeGroup).filter(Boolean))];
     const spotTypes = ['Spot', 'On-Demand'];
 
+    // Compute cluster totals from node list
+    const totalCPU = nodeList.reduce((s, n) => s + (n.cpuCapacity || 0), 0);
+    const totalMem = nodeList.reduce((s, n) => s + (n.memCapacity || 0), 0);
+    const fmtCPU = totalCPU >= 1000000 ? (totalCPU / 1000).toFixed(0) : (totalCPU / 1000).toFixed(1);
+    const fmtMem = totalMem >= 1024*1024*1024*1024 ? (totalMem / (1024*1024*1024*1024)).toFixed(1) + ' TiB' : (totalMem / (1024*1024*1024)).toFixed(1) + ' GiB';
+
     container().innerHTML = `
       ${!targetEl ? '<div class="page-header"><h1>Nodes & Node Groups</h1><p>Cluster node infrastructure</p></div>' : ''}
       <div class="kpi-grid">
         <div class="kpi-card"><div class="label">Node Groups</div><div class="value blue">${ngList.length}</div></div>
         <div class="kpi-card"><div class="label">Total Nodes</div><div class="value">${nodeList.length}</div></div>
+        <div class="kpi-card"><div class="label">Total CPU</div><div class="value">${fmtCPU} cores</div></div>
+        <div class="kpi-card"><div class="label">Total Memory</div><div class="value">${fmtMem}</div></div>
         <div class="kpi-card"><div class="label">Empty Groups</div><div class="value ${emptyList.length ? 'amber' : ''}">${emptyList.length}</div></div>
       </div>
       <div class="card">

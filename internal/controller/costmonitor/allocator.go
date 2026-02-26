@@ -4,6 +4,8 @@ import (
 	"context"
 	"sort"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
 	"github.com/koptimizer/koptimizer/pkg/cost"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
@@ -23,38 +25,33 @@ func (a *Allocator) AllocateByNamespace(ctx context.Context, snapshot *optimizer
 	costs := make(map[string]float64)
 
 	for _, node := range snapshot.Nodes {
-		nodeHourlyCost := node.HourlyCostUSD
-		if nodeHourlyCost == 0 {
+		nodeCost := node.HourlyCostUSD * cost.HoursPerMonth
+		if nodeCost == 0 {
 			continue
 		}
 		if node.CPUCapacity == 0 && node.MemoryCapacity == 0 {
 			continue
 		}
 
-		for _, pod := range node.Pods {
+		// Two-pass: compute weights then distribute full node cost proportionally.
+		weights := make([]float64, len(node.Pods))
+		totalW := 0.0
+		for i, pod := range node.Pods {
 			if pod.Status.Phase != "Running" {
 				continue
 			}
-			ns := pod.Namespace
-			podCPUReq := int64(0)
-			podMemReq := int64(0)
-			for _, c := range pod.Spec.Containers {
-				if cpu, ok := c.Resources.Requests["cpu"]; ok {
-					podCPUReq += cpu.MilliValue()
-				}
-				if mem, ok := c.Resources.Requests["memory"]; ok {
-					podMemReq += mem.Value()
-				}
+			w := allocPodWeight(pod.Spec.Containers, node.CPUCapacity, node.MemoryCapacity)
+			weights[i] = w
+			totalW += w
+		}
+		if totalW == 0 {
+			continue
+		}
+		for i, pod := range node.Pods {
+			if weights[i] == 0 {
+				continue
 			}
-			// Capacity-based allocation: 50% CPU + 50% memory as fraction of node capacity.
-			fraction := 0.0
-			if node.CPUCapacity > 0 {
-				fraction += 0.5 * float64(podCPUReq) / float64(node.CPUCapacity)
-			}
-			if node.MemoryCapacity > 0 {
-				fraction += 0.5 * float64(podMemReq) / float64(node.MemoryCapacity)
-			}
-			costs[ns] += nodeHourlyCost * cost.HoursPerMonth * fraction
+			costs[pod.Namespace] += nodeCost * weights[i] / totalW
 		}
 	}
 
@@ -77,15 +74,25 @@ func (a *Allocator) TopWorkloads(ctx context.Context, snapshot *optimizer.Cluste
 	workloadCosts := make(map[string]*cost.WorkloadCost)
 
 	for _, node := range snapshot.Nodes {
-		nodeHourlyCost := node.HourlyCostUSD
-		if nodeHourlyCost == 0 {
+		nodeCost := node.HourlyCostUSD * cost.HoursPerMonth
+		if nodeCost == 0 {
 			continue
 		}
 		if node.CPUCapacity == 0 && node.MemoryCapacity == 0 {
 			continue
 		}
 
-		for _, pod := range node.Pods {
+		weights := make([]float64, len(node.Pods))
+		totalW := 0.0
+		for i, pod := range node.Pods {
+			w := allocPodWeight(pod.Spec.Containers, node.CPUCapacity, node.MemoryCapacity)
+			weights[i] = w
+			totalW += w
+		}
+		if totalW == 0 {
+			continue
+		}
+		for i, pod := range node.Pods {
 			ownerKind, ownerName := "", ""
 			if len(pod.OwnerReferences) > 0 {
 				ownerKind = pod.OwnerReferences[0].Kind
@@ -104,27 +111,7 @@ func (a *Allocator) TopWorkloads(ctx context.Context, snapshot *optimizer.Cluste
 					Name:      ownerName,
 				}
 			}
-
-			podCPUReq := int64(0)
-			podMemReq := int64(0)
-			for _, c := range pod.Spec.Containers {
-				if cpu, ok := c.Resources.Requests["cpu"]; ok {
-					podCPUReq += cpu.MilliValue()
-				}
-				if mem, ok := c.Resources.Requests["memory"]; ok {
-					podMemReq += mem.Value()
-				}
-			}
-
-			// Capacity-based allocation: 50% CPU + 50% memory as fraction of node capacity.
-			fraction := 0.0
-			if node.CPUCapacity > 0 {
-				fraction += 0.5 * float64(podCPUReq) / float64(node.CPUCapacity)
-			}
-			if node.MemoryCapacity > 0 {
-				fraction += 0.5 * float64(podMemReq) / float64(node.MemoryCapacity)
-			}
-			workloadCosts[key].MonthlyCostUSD += nodeHourlyCost * cost.HoursPerMonth * fraction
+			workloadCosts[key].MonthlyCostUSD += nodeCost * weights[i] / totalW
 			workloadCosts[key].Replicas++
 		}
 	}
@@ -142,4 +129,26 @@ func (a *Allocator) TopWorkloads(ctx context.Context, snapshot *optimizer.Cluste
 		result = result[:limit]
 	}
 	return result, nil
+}
+
+// allocPodWeight computes a blended CPU+memory weight for a pod relative to node capacity.
+func allocPodWeight(containers []corev1.Container, cpuCap, memCap int64) float64 {
+	cpuReq := int64(0)
+	memReq := int64(0)
+	for _, c := range containers {
+		if cpu, ok := c.Resources.Requests["cpu"]; ok {
+			cpuReq += cpu.MilliValue()
+		}
+		if mem, ok := c.Resources.Requests["memory"]; ok {
+			memReq += mem.Value()
+		}
+	}
+	w := 0.0
+	if cpuCap > 0 {
+		w += 0.5 * float64(cpuReq) / float64(cpuCap)
+	}
+	if memCap > 0 {
+		w += 0.5 * float64(memReq) / float64(memCap)
+	}
+	return w
 }

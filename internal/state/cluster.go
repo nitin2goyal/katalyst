@@ -147,6 +147,15 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		}
 	}
 
+	// Get pod metrics BEFORE acquiring the lock to avoid blocking readers
+	// during this network call.
+	podMetrics, _ := s.metrics.GetPodMetrics(ctx, "") // best effort, all namespaces
+	podMetricsMap := make(map[string]*pkgmetrics.PodMetrics, len(podMetrics))
+	for i := range podMetrics {
+		key := podMetrics[i].Namespace + "/" + podMetrics[i].Name
+		podMetricsMap[key] = &podMetrics[i]
+	}
+
 	// Detect if metrics server is available.
 	metricsAvailable := len(metricsMap) > 0
 	if !metricsAvailable && len(nodeList.Items) > 0 {
@@ -202,16 +211,11 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		}
 
 		// Apply metrics (actual usage from Metrics Server).
-		// Use per-node check: if this node has metrics, use them;
-		// otherwise fall back to requests as approximate utilization.
+		// Never fall back to requests — that conflates utilization with allocation.
+		// If metrics are unavailable, usage stays at 0.
 		if m, ok := metricsMap[node.Name]; ok {
 			ns.CPUUsed = m.CPUUsage
 			ns.MemoryUsed = m.MemoryUsage
-		} else if ns.CPURequested > 0 {
-			// Per-node fallback: use requests as approximate utilization
-			// when this specific node has no metrics data.
-			ns.CPUUsed = ns.CPURequested
-			ns.MemoryUsed = ns.MemoryRequested
 		}
 
 		// Compute cost from pre-fetched pricing (avoids per-node API call).
@@ -271,13 +275,7 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		newPods[key] = NewPodState(pod)
 	}
 
-	// Apply pod metrics (actual usage from Metrics Server).
-	podMetrics, _ := s.metrics.GetPodMetrics(ctx, "") // best effort, all namespaces
-	podMetricsMap := make(map[string]*pkgmetrics.PodMetrics, len(podMetrics))
-	for i := range podMetrics {
-		key := podMetrics[i].Namespace + "/" + podMetrics[i].Name
-		podMetricsMap[key] = &podMetrics[i]
-	}
+	// Apply pod metrics (actual usage from Metrics Server, fetched above without lock).
 	podsWithMetrics := 0
 	for key, ps := range newPods {
 		if pm, ok := podMetricsMap[key]; ok {
