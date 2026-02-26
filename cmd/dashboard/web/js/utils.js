@@ -30,7 +30,8 @@ export function utilClass(pct) {
 
 export function utilBar(pct) {
   const p = Math.min(100, Math.max(0, pct || 0));
-  return `<span class="util-bar"><span class="util-bar-fill ${utilClass(p)}" style="width:${p}%"></span></span> ${fmtPct(p)}`;
+  // Compact: colored percentage only, no progress bar (fits narrow table columns)
+  return `<span class="util-pct ${utilClass(p)}">${fmtPct(p)}</span>`;
 }
 
 export function healthDot(status) {

@@ -314,6 +314,50 @@ func (h *ClusterHandler) GetScore(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// GetDiagnostics returns debug information about data sources and metrics.
+func (h *ClusterHandler) GetDiagnostics(w http.ResponseWriter, r *http.Request) {
+	nodes := h.state.GetAllNodes()
+	pods := h.state.GetAllPods()
+
+	nodesWithoutMetrics := 0
+	podsWithoutMetrics := 0
+	var anomalies []string
+
+	for _, n := range nodes {
+		// Node with CPUUsed == CPURequested means metrics fallback was used
+		if n.CPUUsed == n.CPURequested && n.CPURequested > 0 {
+			nodesWithoutMetrics++
+		}
+		// Detect impossible values
+		if n.CPUUsed > n.CPUCapacity*2 {
+			anomalies = append(anomalies, fmt.Sprintf("Node %s: CPUUsed=%dm exceeds 2x capacity=%dm", n.Node.Name, n.CPUUsed, n.CPUCapacity))
+		}
+	}
+	for _, p := range pods {
+		if p.CPUUsage == 0 && p.CPURequest > 0 {
+			podsWithoutMetrics++
+		}
+	}
+
+	resp := map[string]interface{}{
+		"metricsServer": map[string]interface{}{
+			"available":          h.state.MetricsAvailable,
+			"nodesWithMetrics":   h.state.NodesWithMetrics,
+			"totalNodes":         len(nodes),
+			"nodesWithoutMetrics": nodesWithoutMetrics,
+			"podsWithMetrics":    h.state.PodsWithMetrics,
+			"totalPods":          len(pods),
+			"podsWithoutMetrics": podsWithoutMetrics,
+		},
+		"costAllocation": map[string]interface{}{
+			"method": "capacity-based (50% CPU + 50% memory)",
+			"note":   "Cost = node_monthly_cost × (0.5 × cpuReq/cpuCapacity + 0.5 × memReq/memCapacity)",
+		},
+		"anomalies": anomalies,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func boolToStatus(b bool) string {
 	if b {
 		return "enabled"

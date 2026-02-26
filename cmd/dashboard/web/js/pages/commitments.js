@@ -53,7 +53,7 @@ export async function renderCommitments(targetEl) {
         <td>${c.expiresAt || ''}</td><td>${fmt$(c.hourlyCostUSD)}</td>
         <td>${flags}</td>
       </tr>`;
-    }).join('') : '<tr><td colspan="7" style="color:var(--text-muted)">No commitments</td></tr>';
+    }).join('') : '<tr><td colspan="7" style="color:var(--text-muted)">No commitments found. GCP Committed Use Discounts (CUDs) are managed via the GCP Console. Configure the CUD integration in Settings to import commitment data.</td></tr>';
 
     makeSortable($('#commit-table'));
 

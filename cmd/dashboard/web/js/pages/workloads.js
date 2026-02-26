@@ -37,9 +37,14 @@ export async function renderWorkloads(targetEl) {
     const avgCpuEff = effData?.summary?.avgCPUEfficiency || 0;
     const avgMemEff = effData?.summary?.avgMemEfficiency || 0;
     const totalWasted = effData?.summary?.totalWastedCostUSD || 0;
+    const metricsAvail = effData?.summary?.metricsAvailable;
+    const podsWithMetrics = effData?.summary?.podsWithMetrics || 0;
+    const totalPods = effData?.summary?.totalPods || 0;
 
     container().innerHTML = `
       ${!targetEl ? '<div class="page-header"><h1>Workloads</h1><p>Workload resource usage, efficiency, and scaling status</p></div>' : ''}
+      ${metricsAvail === false ? '<div class="info-banner">Metrics Server unavailable — efficiency data is estimated from resource requests. Install metrics-server for accurate usage data.</div>' : ''}
+      ${metricsAvail && podsWithMetrics < totalPods ? `<div class="info-banner">Metrics available for ${podsWithMetrics}/${totalPods} pods. Pods without metrics show 0% efficiency.</div>` : ''}
       <div class="kpi-grid">
         <div class="kpi-card"><div class="label">Total Workloads</div><div class="value blue">${wlList.length}</div></div>
         <div class="kpi-card"><div class="label">Avg CPU Efficiency</div><div class="value ${avgCpuEff >= 70 ? 'green' : avgCpuEff >= 40 ? 'amber' : 'red'}">${fmtPct(avgCpuEff)}</div></div>
@@ -61,8 +66,9 @@ export async function renderWorkloads(targetEl) {
         </table></div>
       </div>`;
 
-    const effBadge = (pct) => {
+    const effBadge = (pct, hasMetrics) => {
       if (pct == null) return '<span style="color:var(--text-muted)">-</span>';
+      if (hasMetrics === false) return '<span style="color:var(--text-muted)" title="No metrics data">N/A</span>';
       const cls = pct >= 70 ? 'green' : pct >= 40 ? 'amber' : 'red';
       return badge(fmtPct(pct), cls);
     };
@@ -74,8 +80,8 @@ export async function renderWorkloads(targetEl) {
         <td>${w.replicas ?? ''}</td>
         <td>${fmtCPUm(w.totalCPU)}</td>
         <td>${fmtMemB(w.totalMem)}</td>
-        <td>${effBadge(eff?.cpuEfficiencyPct)}</td>
-        <td>${effBadge(eff?.memEfficiencyPct)}</td>
+        <td>${effBadge(eff?.cpuEfficiencyPct, eff?.hasMetrics)}</td>
+        <td>${effBadge(eff?.memEfficiencyPct, eff?.hasMetrics)}</td>
         <td>${eff ? '<span class="red">' + fmt$(eff.wastedCostUSD) + '</span>' : '-'}</td>
       </tr>`;
     }).join('') : '<tr><td colspan="9" style="color:var(--text-muted)">No workloads</td></tr>';

@@ -483,6 +483,12 @@ strong.low, .text-low { color: #10b981; }
 strong.mid, .text-mid { color: #f59e0b; }
 strong.high, .text-high { color: #ef4444; }
 
+/* Compact colored percentage for table cells */
+.util-pct { font-weight: 600; font-size: 13px; white-space: nowrap; }
+.util-pct.low { color: #10b981; }
+.util-pct.mid { color: #f59e0b; }
+.util-pct.high { color: #ef4444; }
+
 /* === Buttons === */
 .btn {
   display: inline-block;
@@ -594,6 +600,13 @@ strong.high, .text-high { color: #ef4444; }
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* Recommendation description: truncate in table, expand on click */
+.rec-desc { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.rec-desc-expanded { white-space: normal; overflow: visible; }
+
+/* Info banner for computed recommendations */
+.info-banner { padding: 10px 16px; background: rgba(99,102,241,0.15); color: #a5b4fc; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
 
 .error-msg {
   padding: 12px;

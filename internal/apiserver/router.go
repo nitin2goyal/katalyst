@@ -111,6 +111,9 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		// Audit
 		r.Get("/audit", auditHandler.List)
 
+		// Diagnostics
+		r.Get("/diagnostics", clusterHandler.GetDiagnostics)
+
 		// New endpoints
 		r.Get("/events", auditHandler.ListEvents)
 		r.Get("/clusters", clusterHandler.GetClusters)

@@ -68,18 +68,29 @@ func (h *CostHandler) GetByNamespace(w http.ResponseWriter, r *http.Request) {
 	costs := make(map[string]float64)
 
 	for _, n := range nodes {
-		if n.CPURequested == 0 {
+		if n.CPUCapacity == 0 && n.MemoryCapacity == 0 {
 			continue
 		}
 		for _, pod := range n.Pods {
 			ns := pod.Namespace
 			cpuReq := int64(0)
+			memReq := int64(0)
 			for _, c := range pod.Spec.Containers {
 				if cpu, ok := c.Resources.Requests["cpu"]; ok {
 					cpuReq += cpu.MilliValue()
 				}
+				if mem, ok := c.Resources.Requests["memory"]; ok {
+					memReq += mem.Value()
+				}
 			}
-			fraction := float64(cpuReq) / float64(n.CPURequested)
+			// Capacity-based allocation: 50/50 CPU+memory fraction of node capacity.
+			fraction := 0.0
+			if n.CPUCapacity > 0 {
+				fraction += 0.5 * float64(cpuReq) / float64(n.CPUCapacity)
+			}
+			if n.MemoryCapacity > 0 {
+				fraction += 0.5 * float64(memReq) / float64(n.MemoryCapacity)
+			}
 			costs[ns] += n.HourlyCostUSD * cost.HoursPerMonth * fraction
 		}
 	}

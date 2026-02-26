@@ -186,15 +186,16 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 
 	// Group pods by owner
 	type workloadInfo struct {
-		Namespace  string
-		Kind       string
-		Name       string
-		Replicas   int
-		CPUReq     int64
-		CPUUsed    int64
-		MemReq     int64
-		MemUsed    int64
+		Namespace   string
+		Kind        string
+		Name        string
+		Replicas    int
+		CPUReq      int64
+		CPUUsed     int64
+		MemReq      int64
+		MemUsed     int64
 		MonthlyCost float64
+		HasMetrics  bool
 	}
 	workloads := make(map[string]*workloadInfo)
 
@@ -226,6 +227,9 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 		wl.CPUUsed += p.CPUUsage
 		wl.MemReq += p.MemoryRequest
 		wl.MemUsed += p.MemoryUsage
+		if p.CPUUsage > 0 || p.MemoryUsage > 0 {
+			wl.HasMetrics = true
+		}
 
 		// Capacity-based cost allocation: blended 50/50 CPU+memory fraction of node capacity.
 		fraction := 0.0
@@ -255,6 +259,7 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 		WastedMem        string  `json:"wastedMem"`
 		MonthlyCostUSD   float64 `json:"monthlyCostUSD"`
 		WastedCostUSD    float64 `json:"wastedCostUSD"`
+		HasMetrics       bool    `json:"hasMetrics"`
 	}
 
 	var result []workloadEfficiency
@@ -307,6 +312,7 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 			WastedMem:        formatMem(wastedMem),
 			MonthlyCostUSD:   wl.MonthlyCost,
 			WastedCostUSD:    wastedCost,
+			HasMetrics:       wl.HasMetrics,
 		})
 		sumCPUEff += cpuEff
 		sumMemEff += memEff
@@ -330,6 +336,9 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 			"avgCPUEfficiency":   avgCPUEff,
 			"avgMemEfficiency":   avgMemEff,
 			"totalWastedCostUSD": totalWastedCost,
+			"metricsAvailable":   h.state.MetricsAvailable,
+			"podsWithMetrics":    h.state.PodsWithMetrics,
+			"totalPods":          len(pods),
 		},
 		"workloads": result,
 	})

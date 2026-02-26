@@ -18,15 +18,18 @@ import (
 
 // ClusterState maintains an in-memory cache of the cluster state.
 type ClusterState struct {
-	mu         sync.RWMutex
-	client     client.Client
-	provider   cloudprovider.CloudProvider
-	metrics    pkgmetrics.MetricsCollector
-	nodes      map[string]*NodeState
-	pods       map[string]*PodState // key: namespace/name
-	nodeGroups *NodeGroupState
-	AuditLog   *AuditLog
-	NodeLock   *NodeLock
+	mu               sync.RWMutex
+	client           client.Client
+	provider         cloudprovider.CloudProvider
+	metrics          pkgmetrics.MetricsCollector
+	nodes            map[string]*NodeState
+	pods             map[string]*PodState // key: namespace/name
+	nodeGroups       *NodeGroupState
+	AuditLog         *AuditLog
+	NodeLock         *NodeLock
+	MetricsAvailable bool // true if Metrics Server returned data on last refresh
+	NodesWithMetrics int  // count of nodes with actual metrics data
+	PodsWithMetrics  int  // count of pods with actual metrics data
 }
 
 // NewClusterState creates a new ClusterState. If db and writer are non-nil,
@@ -153,6 +156,9 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.MetricsAvailable = metricsAvailable
+	s.NodesWithMetrics = len(metricsMap)
+
 	// Update nodes
 	newNodes := make(map[string]*NodeState, len(nodeList.Items))
 	for i := range nodeList.Items {
@@ -178,12 +184,16 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 			ns.NodeGroupID = ngID
 		}
 
-		// Calculate requests and GPU allocation from pods
+		// Calculate requests and GPU allocation from pods.
+		// Only count Running pods for resource accounting — completed/failed
+		// Job pods still have spec.nodeName set and would inflate CPURequested.
 		gpuResource := corev1.ResourceName("nvidia.com/gpu")
 		for _, pod := range ns.Pods {
-			cpuReq, memReq := ExtractPodRequests(pod)
-			ns.CPURequested += cpuReq
-			ns.MemoryRequested += memReq
+			if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodPending {
+				cpuReq, memReq := ExtractPodRequests(pod)
+				ns.CPURequested += cpuReq
+				ns.MemoryRequested += memReq
+			}
 			for _, c := range pod.Spec.Containers {
 				if gpu, ok := c.Resources.Requests[gpuResource]; ok {
 					ns.GPUsUsed += int(gpu.Value())
@@ -192,12 +202,14 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		}
 
 		// Apply metrics (actual usage from Metrics Server).
+		// Use per-node check: if this node has metrics, use them;
+		// otherwise fall back to requests as approximate utilization.
 		if m, ok := metricsMap[node.Name]; ok {
 			ns.CPUUsed = m.CPUUsage
 			ns.MemoryUsed = m.MemoryUsage
-		} else if !metricsAvailable && ns.CPURequested > 0 {
-			// When Metrics Server is unavailable, use resource requests
-			// as approximate utilization to avoid showing misleading zeros.
+		} else if ns.CPURequested > 0 {
+			// Per-node fallback: use requests as approximate utilization
+			// when this specific node has no metrics data.
 			ns.CPUUsed = ns.CPURequested
 			ns.MemoryUsed = ns.MemoryRequested
 		}
@@ -266,19 +278,21 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		key := podMetrics[i].Namespace + "/" + podMetrics[i].Name
 		podMetricsMap[key] = &podMetrics[i]
 	}
+	podsWithMetrics := 0
 	for key, ps := range newPods {
 		if pm, ok := podMetricsMap[key]; ok {
 			for _, cm := range pm.Containers {
 				ps.CPUUsage += cm.CPUUsage
 				ps.MemoryUsage += cm.MemoryUsage
 			}
-		} else if !metricsAvailable && ps.CPURequest > 0 {
-			// Fallback: use requests as approximate usage when Metrics Server unavailable.
-			ps.CPUUsage = ps.CPURequest
-			ps.MemoryUsage = ps.MemoryRequest
+			podsWithMetrics++
 		}
+		// No fallback: if metrics are unavailable for this pod, leave
+		// CPUUsage/MemoryUsage at 0 so efficiency calculations show
+		// accurate data instead of a misleading 100%.
 	}
 	s.pods = newPods
+	s.PodsWithMetrics = podsWithMetrics
 
 	// Update node groups
 	nodeStates := make([]*NodeState, 0, len(s.nodes))
