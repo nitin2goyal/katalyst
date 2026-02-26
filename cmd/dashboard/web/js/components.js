@@ -223,7 +223,7 @@ export function exportButton(onClick) {
 
 // ── Pagination ──
 
-const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 25;
 
 /**
  * Attach pagination to an existing table.
