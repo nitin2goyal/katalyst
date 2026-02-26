@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -69,6 +70,21 @@ func writePaginatedJSON(w http.ResponseWriter, r *http.Request, items []map[stri
 	start, end, resp := paginateSlice(len(items), page, pageSize)
 	resp.Data = items[start:end]
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// IsSystemPod returns true if the pod is an infrastructure/system pod rather
+// than an application workload. A pod is considered "system" if its namespace
+// starts with "kube-" or if it is owned by a DaemonSet.
+func IsSystemPod(pod *corev1.Pod) bool {
+	if strings.HasPrefix(pod.Namespace, "kube-") {
+		return true
+	}
+	for _, ref := range pod.OwnerReferences {
+		if ref.Kind == "DaemonSet" {
+			return true
+		}
+	}
+	return false
 }
 
 // computePodStatus returns a descriptive status that surfaces container-level

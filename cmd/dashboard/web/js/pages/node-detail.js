@@ -26,7 +26,7 @@ export async function renderNodeDetail(params) {
         <div class="kpi-card"><div class="label">Node Group</div><div class="value"><a href="#/nodegroups/${node.nodeGroupId || node.nodeGroup || ''}" class="link">${node.nodeGroup || ''}</a></div></div>
         <div class="kpi-card"><div class="label">CPU Utilization</div><div class="value">${fmtPct(node.cpuUtilPct)}</div></div>
         <div class="kpi-card"><div class="label">Memory Utilization</div><div class="value">${fmtPct(node.memUtilPct)}</div></div>
-        <div class="kpi-card"><div class="label">Pod Count</div><div class="value blue">${node.podCount ?? pods.length}</div></div>
+        <div class="kpi-card"><div class="label">Pod Count</div><div class="value blue">${node.appPodCount != null ? node.appPodCount + ' <span style="font-size:0.6em;color:var(--text-muted)">+ ' + (node.systemPodCount || 0) + ' sys</span>' : (node.podCount ?? pods.length)}</div></div>
         <div class="kpi-card"><div class="label">Hourly Cost</div><div class="value">${fmt$(node.hourlyCostUSD)}</div></div>
         <div class="kpi-card"><div class="label">Spot</div><div class="value">${node.isSpot ? badge('Spot', 'blue') : badge('On-Demand', 'gray')}</div></div>
       </div>
@@ -57,7 +57,7 @@ export async function renderNodeDetail(params) {
       <div class="card">
         <h2>Pods on this Node</h2>
         <div class="table-wrap"><table id="node-pods-table">
-          <thead><tr><th>Name</th><th>Namespace</th><th>CPU Request</th><th>Memory Request</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>CPU Request</th><th>Memory Request</th><th>Status</th></tr></thead>
           <tbody id="node-pods-body"></tbody>
         </table></div>
       </div>`;
@@ -110,11 +110,14 @@ export async function renderNodeDetail(params) {
       if (lower.includes('pull') || lower.includes('terminating')) return 'amber';
       return 'amber';
     };
-    $('#node-pods-body').innerHTML = pods.length ? pods.map(p => `<tr>
+    // Sort: app pods first, system pods second
+    const sortedPods = [...pods].sort((a, b) => (a.isSystem ? 1 : 0) - (b.isSystem ? 1 : 0));
+    $('#node-pods-body').innerHTML = sortedPods.length ? sortedPods.map(p => `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
+      <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
       <td>${fmtCPUm(p.cpuRequest)}</td><td>${fmtMemB(p.memRequest)}</td>
       <td>${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
-    </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No pods found</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="6" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
 
   } catch (e) {

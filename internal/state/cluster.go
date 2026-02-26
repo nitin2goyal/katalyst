@@ -22,6 +22,7 @@ import (
 type ClusterState struct {
 	mu               sync.RWMutex
 	client           client.Client
+	reader           client.Reader // direct (non-cached) reader for listing pods/nodes
 	provider         cloudprovider.CloudProvider
 	metrics          pkgmetrics.MetricsCollector
 	nodes            map[string]*NodeState
@@ -45,15 +46,22 @@ type ClusterState struct {
 
 // NewClusterState creates a new ClusterState. If db and writer are non-nil,
 // the audit log is backed by SQLite for persistence across restarts.
-func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc pkgmetrics.MetricsCollector, db *sql.DB, writer *store.Writer, metricsStore *intmetrics.Store) *ClusterState {
+// An optional direct reader can be passed to bypass the controller-runtime
+// informer cache for pod/node listing (which can return incomplete results).
+func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc pkgmetrics.MetricsCollector, db *sql.DB, writer *store.Writer, metricsStore *intmetrics.Store, reader ...client.Reader) *ClusterState {
 	var auditLog *AuditLog
 	if db != nil && writer != nil {
 		auditLog = NewAuditLogWithDB(1000, db, writer)
 	} else {
 		auditLog = NewAuditLog(1000)
 	}
+	var r client.Reader = c
+	if len(reader) > 0 && reader[0] != nil {
+		r = reader[0]
+	}
 	return &ClusterState{
 		client:       c,
+		reader:       r,
 		provider:     provider,
 		metrics:      mc,
 		metricsStore: metricsStore,
@@ -72,7 +80,7 @@ func (s *ClusterState) listAllNodes(ctx context.Context) (*corev1.NodeList, erro
 	opts := &client.ListOptions{Limit: 500}
 	for {
 		page := &corev1.NodeList{}
-		if err := s.client.List(ctx, page, opts); err != nil {
+		if err := s.reader.List(ctx, page, opts); err != nil {
 			return nil, err
 		}
 		result.Items = append(result.Items, page.Items...)
@@ -90,7 +98,7 @@ func (s *ClusterState) listAllPods(ctx context.Context) (*corev1.PodList, error)
 	opts := &client.ListOptions{Limit: 500}
 	for {
 		page := &corev1.PodList{}
-		if err := s.client.List(ctx, page, opts); err != nil {
+		if err := s.reader.List(ctx, page, opts); err != nil {
 			return nil, err
 		}
 		result.Items = append(result.Items, page.Items...)

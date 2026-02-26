@@ -77,7 +77,7 @@ export async function renderNodes(targetEl) {
       <td>${n.name || ''}</td><td>${n.nodeGroup || ''}</td><td>${n.instanceType || ''}</td>
       <td><strong class="${utilClass(n.cpuUtilPct || 0)}">${fmtPct(n.cpuUtilPct)}</strong></td>
       <td><strong class="${utilClass(n.memUtilPct || 0)}">${fmtPct(n.memUtilPct)}</strong></td>
-      <td>${n.podCount ?? ''}</td>
+      <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span style="color:var(--text-muted)">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
       <td>${n.isSpot ? badge('Spot', 'blue') : badge('On-Demand', 'gray')}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
     </tr>`).join('') : '<tr><td colspan="8" style="color:var(--text-muted)">No nodes</td></tr>';
@@ -97,8 +97,8 @@ export async function renderNodes(targetEl) {
         'koptimizer-nodegroups.csv');
     };
     window.__exportNodesCSV = () => {
-      exportCSV(['Name', 'Node Group', 'Instance Type', 'CPU Util %', 'Mem Util %', 'Pods', 'Spot', 'Cost/hr'],
-        nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), n.podCount, n.isSpot ? 'Yes' : 'No', n.hourlyCostUSD]),
+      exportCSV(['Name', 'Node Group', 'Instance Type', 'CPU Util %', 'Mem Util %', 'App Pods', 'System Pods', 'Total Pods', 'Spot', 'Cost/hr'],
+        nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.isSpot ? 'Yes' : 'No', n.hourlyCostUSD]),
         'koptimizer-nodes.csv');
     };
 

@@ -151,6 +151,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create a direct (non-cached) client for listing pods/nodes.
+	// The controller-runtime informer cache can return incomplete subsets
+	// of pods on each sync, so we bypass it for listing operations.
+	directClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "Unable to create direct client")
+		os.Exit(1)
+	}
+
 	// Initialize cloud provider (pass sqlDBRef for SQLite-backed pricing cache)
 	provider, err := cloud.NewProvider(cfg.CloudProvider, cfg.Region, sqlDBRef)
 	if err != nil {
@@ -177,7 +186,7 @@ func main() {
 	}
 
 	// Initialize cluster state (audit log backed by SQLite when available)
-	clusterState := state.NewClusterState(mgr.GetClient(), provider, metricsCollector, sqlDBRef, dbWriter, metricsStore)
+	clusterState := state.NewClusterState(mgr.GetClient(), provider, metricsCollector, sqlDBRef, dbWriter, metricsStore, directClient)
 
 	// Initialize cost store (nil-safe)
 	costStore := store.NewCostStore(sqlDBRef)

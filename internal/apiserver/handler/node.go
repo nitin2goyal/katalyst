@@ -22,6 +22,14 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 	nodes := h.state.GetAllNodes()
 	var result []map[string]interface{}
 	for _, n := range nodes {
+		appCount, sysCount := 0, 0
+		for _, pod := range n.Pods {
+			if IsSystemPod(pod) {
+				sysCount++
+			} else {
+				appCount++
+			}
+		}
 		result = append(result, map[string]interface{}{
 			"name":           n.Node.Name,
 			"instanceType":   n.InstanceType,
@@ -41,6 +49,8 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 			"isSpot":         n.IsSpot,
 			"isGPU":          n.IsGPUNode,
 			"podCount":       len(n.Pods),
+			"appPodCount":    appCount,
+			"systemPodCount": sysCount,
 		})
 	}
 	writePaginatedJSON(w, r, result)
@@ -76,18 +86,28 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	// Build pods array for the detail table
 	pods := make([]map[string]interface{}, 0, len(node.Pods))
+	appCount, sysCount := 0, 0
 	for _, pod := range node.Pods {
 		cpuMilli, memBytes := state.ExtractPodRequests(pod)
 		status := computePodStatus(pod)
+		isSys := IsSystemPod(pod)
+		if isSys {
+			sysCount++
+		} else {
+			appCount++
+		}
 		pods = append(pods, map[string]interface{}{
 			"name":       pod.Name,
 			"namespace":  pod.Namespace,
 			"cpuRequest": fmt.Sprintf("%dm", cpuMilli),
 			"memRequest": formatMemory(memBytes),
 			"status":     status,
+			"isSystem":   isSys,
 		})
 	}
 	resp["pods"] = pods
+	resp["appPodCount"] = appCount
+	resp["systemPodCount"] = sysCount
 
 	writeJSON(w, http.StatusOK, resp)
 }
