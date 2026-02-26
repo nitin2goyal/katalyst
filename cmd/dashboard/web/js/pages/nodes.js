@@ -46,11 +46,11 @@ export async function renderNodes(targetEl) {
           placeholder: 'Search nodes...',
           filters: [
             { key: '1', label: 'Node Group', options: nodeGroups },
-            { key: '6', label: 'Type', options: spotTypes },
+            { key: '8', label: 'Type', options: spotTypes },
           ]
         })}
         <div class="table-wrap"><table id="node-table">
-          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>Pods</th><th>Spot</th><th>Cost/hr</th></tr></thead>
+          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Spot</th><th>Cost/hr</th></tr></thead>
           <tbody id="node-body"></tbody>
         </table></div>
       </div>`;
@@ -77,10 +77,12 @@ export async function renderNodes(targetEl) {
       <td>${n.name || ''}</td><td>${n.nodeGroup || ''}</td><td>${n.instanceType || ''}</td>
       <td><strong class="${utilClass(n.cpuUtilPct || 0)}">${fmtPct(n.cpuUtilPct)}</strong></td>
       <td><strong class="${utilClass(n.memUtilPct || 0)}">${fmtPct(n.memUtilPct)}</strong></td>
+      <td><strong class="${utilClass(n.cpuAllocPct || 0)}">${fmtPct(n.cpuAllocPct)}</strong></td>
+      <td><strong class="${utilClass(n.memAllocPct || 0)}">${fmtPct(n.memAllocPct)}</strong></td>
       <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span style="color:var(--text-muted)">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
       <td>${n.isSpot ? badge('Spot', 'blue') : badge('On-Demand', 'gray')}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
-    </tr>`).join('') : '<tr><td colspan="8" style="color:var(--text-muted)">No nodes</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="10" style="color:var(--text-muted)">No nodes</td></tr>';
 
     makeSortable($('#ng-table'));
     makeSortable($('#node-table'));
@@ -97,8 +99,8 @@ export async function renderNodes(targetEl) {
         'koptimizer-nodegroups.csv');
     };
     window.__exportNodesCSV = () => {
-      exportCSV(['Name', 'Node Group', 'Instance Type', 'CPU Util %', 'Mem Util %', 'App Pods', 'System Pods', 'Total Pods', 'Spot', 'Cost/hr'],
-        nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.isSpot ? 'Yes' : 'No', n.hourlyCostUSD]),
+      exportCSV(['Name', 'Node Group', 'Instance Type', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'App Pods', 'System Pods', 'Total Pods', 'Spot', 'Cost/hr'],
+        nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), (n.cpuAllocPct||0).toFixed(1), (n.memAllocPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.isSpot ? 'Yes' : 'No', n.hourlyCostUSD]),
         'koptimizer-nodes.csv');
     };
 

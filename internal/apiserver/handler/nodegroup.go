@@ -25,15 +25,24 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 		// Use actual node count from K8s (len(g.Nodes)) instead of cloud
 		// provider's reported count (g.CurrentCount) which can be stale.
 		nodeCount := len(g.Nodes)
-		// Format taints for display
+
+		// Get labels and taints from actual K8s nodes in the cluster,
+		// not from the cloud provider's ASG tags. Use the first node
+		// as representative since all nodes in a group share the same
+		// labels and taints.
+		var labels map[string]string
 		var taints []map[string]string
-		for _, t := range g.Taints {
-			taints = append(taints, map[string]string{
-				"key":    t.Key,
-				"value":  t.Value,
-				"effect": string(t.Effect),
-			})
+		if len(g.Nodes) > 0 {
+			labels = FilterNodeLabels(g.Nodes[0].Node.Labels)
+			for _, t := range g.Nodes[0].Node.Spec.Taints {
+				taints = append(taints, map[string]string{
+					"key":    t.Key,
+					"value":  t.Value,
+					"effect": string(t.Effect),
+				})
+			}
 		}
+
 		result = append(result, map[string]interface{}{
 			"id":             g.ID,
 			"name":           g.Name,
@@ -52,7 +61,7 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			"totalPods":      g.TotalPods,
 			"monthlyCostUSD": g.MonthlyCostUSD,
 			"isEmpty":        g.IsEmpty(),
-			"labels":         g.Labels,
+			"labels":         labels,
 			"taints":         taints,
 		})
 	}
