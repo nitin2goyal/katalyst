@@ -110,6 +110,7 @@ func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) m
 
 	var mu sync.Mutex
 	diskMap := make(map[string][2]int64, len(nodeNames))
+	var firstErr error // capture first error for logging
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 10) // limit concurrency
@@ -128,6 +129,11 @@ func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) m
 				SubResource("proxy", "stats", "summary").
 				DoRaw(ctx)
 			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("node %s: %w", nodeName, err)
+				}
+				mu.Unlock()
 				return
 			}
 
@@ -144,6 +150,9 @@ func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) m
 	}
 
 	wg.Wait()
+	if firstErr != nil && len(diskMap) == 0 {
+		slog.Warn("kubelet disk stats fetch failed", "error", firstErr, "nodes", len(nodeNames))
+	}
 	return diskMap
 }
 

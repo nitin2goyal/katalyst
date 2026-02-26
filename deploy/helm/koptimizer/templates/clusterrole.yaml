@@ -5,10 +5,10 @@ metadata:
   labels:
     {{- include "koptimizer.labels" . | nindent 4 }}
 rules:
-  # Read nodes, pods, namespaces, PVs, PVCs
+  # Read nodes, pods, namespaces, PVs, PVCs (pods also need delete for purge action)
   - apiGroups: [""]
     resources: ["nodes", "pods", "namespaces", "services", "events", "persistentvolumes", "persistentvolumeclaims"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "delete"]
   # Read/write ConfigMaps (hibernation state persistence)
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -25,6 +25,10 @@ rules:
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Proxy to kubelet for disk stats (/stats/summary)
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
   # Evict pods
   - apiGroups: [""]
     resources: ["pods/eviction"]

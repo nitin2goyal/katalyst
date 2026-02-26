@@ -183,7 +183,9 @@ function parseNum(s) {
 
 function applySortToTable(tableEl, headers, colIdx, asc) {
   const tbody = $('tbody', tableEl);
-  const rows = $$('tr', tbody).filter(r => r.style.display !== 'none');
+  // Sort ALL rows (including those hidden by pagination) so sort applies globally.
+  // Only skip rows explicitly filtered out by the filter system.
+  const rows = $$('tr', tbody).filter(r => r.dataset.filtered !== 'hide');
   headers.forEach(h => { h.classList.remove('sorted-asc', 'sorted-desc'); });
   headers[colIdx].classList.add(asc ? 'sorted-asc' : 'sorted-desc');
   rows.sort((a, b) => {
@@ -197,6 +199,9 @@ function applySortToTable(tableEl, headers, colIdx, asc) {
   rows.forEach(r => tbody.appendChild(r));
 }
 
+// Pagination controller linked to each table (set by attachPagination)
+const paginationMap = new Map();
+
 export function makeSortable(tableEl) {
   if (!tableEl) return;
   const tableId = tableEl.id;
@@ -206,6 +211,9 @@ export function makeSortable(tableEl) {
       const asc = !th.classList.contains('sorted-asc');
       applySortToTable(tableEl, headers, idx, asc);
       if (tableId) sortState.set(tableId, { colIdx: idx, asc });
+      // Re-paginate after sort so page 1 shows the top sorted rows
+      const pag = paginationMap.get(tableEl);
+      if (pag) pag.refresh();
     });
   });
   // Restore saved sort state after re-render
@@ -321,10 +329,15 @@ export function attachPagination(tableEl, opts = {}) {
 
   render();
 
-  return {
+  const controller = {
     refresh() {
       currentPage = 1;
       render();
     }
   };
+
+  // Register so makeSortable can trigger re-pagination after sort
+  paginationMap.set(tableEl, controller);
+
+  return controller;
 }
