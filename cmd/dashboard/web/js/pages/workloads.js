@@ -61,7 +61,7 @@ export async function renderWorkloads(targetEl) {
           ]
         })}
         <div class="table-wrap"><table id="wl-table">
-          <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Replicas</th><th>CPU</th><th>Memory</th><th>CPU Eff.</th><th>Mem Eff.</th><th>Wasted</th></tr></thead>
+          <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Replicas</th><th>CPU Req</th><th>CPU Lim</th><th>Mem Req</th><th>Mem Lim</th><th>Total CPU</th><th>Total Mem</th><th>Image</th><th>CPU Eff.</th><th>Mem Eff.</th><th>Wasted</th></tr></thead>
           <tbody id="wl-body"></tbody>
         </table></div>
       </div>`;
@@ -73,18 +73,31 @@ export async function renderWorkloads(targetEl) {
       return badge(fmtPct(pct), cls);
     };
 
+    const shortImg = (img) => {
+      if (!img) return '';
+      // Show last path segment + short digest/tag
+      const parts = img.split('/');
+      const last = parts[parts.length - 1];
+      return last.length > 40 ? last.substring(0, 37) + '...' : last;
+    };
+
     $('#wl-body').innerHTML = wlList.length ? wlList.map(w => {
       const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
       return `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
         <td>${w.namespace || ''}</td><td>${w.kind || ''}</td><td>${w.name || ''}</td>
         <td>${w.replicas ?? ''}</td>
+        <td>${fmtCPUm(w.cpuRequest)}</td>
+        <td>${fmtCPUm(w.cpuLimit)}</td>
+        <td>${fmtMemB(w.memRequest)}</td>
+        <td>${fmtMemB(w.memLimit)}</td>
         <td>${fmtCPUm(w.totalCPU)}</td>
         <td>${fmtMemB(w.totalMem)}</td>
+        <td title="${w.image || ''}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)">${shortImg(w.image)}</td>
         <td>${effBadge(eff?.cpuEfficiencyPct, eff?.hasMetrics)}</td>
         <td>${effBadge(eff?.memEfficiencyPct, eff?.hasMetrics)}</td>
         <td>${eff ? '<span class="red">' + fmt$(eff.wastedCostUSD) + '</span>' : '-'}</td>
       </tr>`;
-    }).join('') : '<tr><td colspan="9" style="color:var(--text-muted)">No workloads</td></tr>';
+    }).join('') : '<tr><td colspan="14" style="color:var(--text-muted)">No workloads</td></tr>';
 
     makeSortable($('#wl-table'));
     const pag = attachPagination($('#wl-table'));
@@ -95,10 +108,10 @@ export async function renderWorkloads(targetEl) {
 
     // CSV export
     window.__exportWlCSV = () => {
-      exportCSV(['Namespace', 'Kind', 'Name', 'Replicas', 'CPU', 'Memory', 'CPU Eff %', 'Mem Eff %', 'Wasted Cost'],
+      exportCSV(['Namespace', 'Kind', 'Name', 'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim', 'Total CPU', 'Total Mem', 'Image', 'CPU Eff %', 'Mem Eff %', 'Wasted Cost'],
         wlList.map(w => {
           const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
-          return [w.namespace, w.kind, w.name, w.replicas, w.totalCPU, w.totalMem,
+          return [w.namespace, w.kind, w.name, w.replicas, w.cpuRequest, w.cpuLimit, w.memRequest, w.memLimit, w.totalCPU, w.totalMem, w.image || '',
             eff?.cpuEfficiencyPct ?? '', eff?.memEfficiencyPct ?? '', eff?.wastedCostUSD ?? ''];
         }),
         'koptimizer-workloads.csv');

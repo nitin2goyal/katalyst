@@ -23,27 +23,64 @@ func NewWorkloadHandler(st *state.ClusterState) *WorkloadHandler {
 func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 	pods := h.state.GetAllPods()
 	// Group by owner
-	workloads := make(map[string]map[string]interface{})
+	type wlInfo struct {
+		Namespace string
+		Kind      string
+		Name      string
+		Replicas  int
+		TotalCPU  int64
+		TotalMem  int64
+		TotalCPULim int64
+		TotalMemLim int64
+		Image     string
+	}
+	workloads := make(map[string]*wlInfo)
 	for _, p := range pods {
 		key := p.Namespace + "/" + p.OwnerKind + "/" + p.OwnerName
-		if _, ok := workloads[key]; !ok {
-			workloads[key] = map[string]interface{}{
-				"namespace": p.Namespace,
-				"kind":      p.OwnerKind,
-				"name":      p.OwnerName,
-				"replicas":  0,
-				"totalCPU":  int64(0),
-				"totalMem":  int64(0),
+		wl, ok := workloads[key]
+		if !ok {
+			// Use image from first pod's first container
+			img := ""
+			if p.Pod != nil && len(p.Pod.Spec.Containers) > 0 {
+				img = p.Pod.Spec.Containers[0].Image
 			}
+			wl = &wlInfo{
+				Namespace: p.Namespace,
+				Kind:      p.OwnerKind,
+				Name:      p.OwnerName,
+				Image:     img,
+			}
+			workloads[key] = wl
 		}
-		workloads[key]["replicas"] = workloads[key]["replicas"].(int) + 1
-		workloads[key]["totalCPU"] = workloads[key]["totalCPU"].(int64) + p.CPURequest
-		workloads[key]["totalMem"] = workloads[key]["totalMem"].(int64) + p.MemoryRequest
+		wl.Replicas++
+		wl.TotalCPU += p.CPURequest
+		wl.TotalMem += p.MemoryRequest
+		wl.TotalCPULim += p.CPULimit
+		wl.TotalMemLim += p.MemoryLimit
 	}
 
 	var result []map[string]interface{}
 	for _, wl := range workloads {
-		result = append(result, wl)
+		cpuReq, memReq, cpuLim, memLim := int64(0), int64(0), int64(0), int64(0)
+		if wl.Replicas > 0 {
+			cpuReq = wl.TotalCPU / int64(wl.Replicas)
+			memReq = wl.TotalMem / int64(wl.Replicas)
+			cpuLim = wl.TotalCPULim / int64(wl.Replicas)
+			memLim = wl.TotalMemLim / int64(wl.Replicas)
+		}
+		result = append(result, map[string]interface{}{
+			"namespace":  wl.Namespace,
+			"kind":       wl.Kind,
+			"name":       wl.Name,
+			"replicas":   wl.Replicas,
+			"cpuRequest": cpuReq,
+			"cpuLimit":   cpuLim,
+			"memRequest": memReq,
+			"memLimit":   memLim,
+			"totalCPU":   wl.TotalCPU,
+			"totalMem":   wl.TotalMem,
+			"image":      wl.Image,
+		})
 	}
 	writeJSON(w, http.StatusOK, result)
 }
