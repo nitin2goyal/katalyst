@@ -36,6 +36,8 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			"desiredCount":   g.DesiredCount,
 			"cpuUtilPct":     g.CPUUtilization(),
 			"memUtilPct":     g.MemoryUtilization(),
+			"cpuAllocPct":    g.CPUAllocation(),
+			"memAllocPct":    g.MemoryAllocation(),
 			"totalCPU":       g.TotalCPU,
 			"totalMemory":    g.TotalMemory,
 			"totalPods":      g.TotalPods,

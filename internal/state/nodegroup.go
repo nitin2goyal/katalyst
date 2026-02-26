@@ -119,6 +119,22 @@ func (i *NodeGroupInfo) MemoryUtilization() float64 {
 	return float64(i.UsedMemory) / float64(i.TotalMemory) * 100
 }
 
+// CPUAllocation returns CPU requests as a percentage of capacity for a node group.
+func (i *NodeGroupInfo) CPUAllocation() float64 {
+	if i.TotalCPU == 0 {
+		return 0
+	}
+	return float64(i.RequestedCPU) / float64(i.TotalCPU) * 100
+}
+
+// MemoryAllocation returns memory requests as a percentage of capacity for a node group.
+func (i *NodeGroupInfo) MemoryAllocation() float64 {
+	if i.TotalMemory == 0 {
+		return 0
+	}
+	return float64(i.RequestedMemory) / float64(i.TotalMemory) * 100
+}
+
 // IsEmpty returns true if the node group has no non-daemonset pods.
 func (i *NodeGroupInfo) IsEmpty() bool {
 	return i.TotalPods == 0

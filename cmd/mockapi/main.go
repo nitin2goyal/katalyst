@@ -400,10 +400,10 @@ func configHandler() any {
 
 // ── Node Groups ──
 var nodeGroupData = []map[string]any{
-	{"id": "ng-general-1", "name": "general-purpose", "instanceType": "m5.xlarge", "instanceFamily": "m5", "currentCount": 4, "minCount": 2, "maxCount": 8, "desiredCount": 4, "cpuUtilPct": 58.0, "memUtilPct": 72.0, "totalPods": 18, "monthlyCostUSD": 2803.0, "isEmpty": false},
-	{"id": "ng-compute-1", "name": "compute-optimized", "instanceType": "c5.2xlarge", "instanceFamily": "c5", "currentCount": 3, "minCount": 1, "maxCount": 6, "desiredCount": 3, "cpuUtilPct": 78.0, "memUtilPct": 55.0, "totalPods": 14, "monthlyCostUSD": 2978.0, "isEmpty": false},
-	{"id": "ng-memory-1", "name": "memory-optimized", "instanceType": "r5.xlarge", "instanceFamily": "r5", "currentCount": 3, "minCount": 1, "maxCount": 5, "desiredCount": 3, "cpuUtilPct": 42.0, "memUtilPct": 81.0, "totalPods": 10, "monthlyCostUSD": 2199.0, "isEmpty": false},
-	{"id": "ng-spot-1", "name": "spot-workers", "instanceType": "m5.large", "instanceFamily": "m5", "currentCount": 2, "minCount": 0, "maxCount": 10, "desiredCount": 2, "cpuUtilPct": 85.0, "memUtilPct": 67.0, "totalPods": 5, "monthlyCostUSD": 267.0, "isEmpty": false},
+	{"id": "ng-general-1", "name": "general-purpose", "instanceType": "m5.xlarge", "instanceFamily": "m5", "currentCount": 4, "minCount": 2, "maxCount": 8, "desiredCount": 4, "cpuUtilPct": 58.0, "memUtilPct": 72.0, "cpuAllocPct": 75.0, "memAllocPct": 87.5, "totalPods": 18, "monthlyCostUSD": 2803.0, "isEmpty": false},
+	{"id": "ng-compute-1", "name": "compute-optimized", "instanceType": "c5.2xlarge", "instanceFamily": "c5", "currentCount": 3, "minCount": 1, "maxCount": 6, "desiredCount": 3, "cpuUtilPct": 78.0, "memUtilPct": 55.0, "cpuAllocPct": 92.0, "memAllocPct": 68.0, "totalPods": 14, "monthlyCostUSD": 2978.0, "isEmpty": false},
+	{"id": "ng-memory-1", "name": "memory-optimized", "instanceType": "r5.xlarge", "instanceFamily": "r5", "currentCount": 3, "minCount": 1, "maxCount": 5, "desiredCount": 3, "cpuUtilPct": 42.0, "memUtilPct": 81.0, "cpuAllocPct": 55.0, "memAllocPct": 90.0, "totalPods": 10, "monthlyCostUSD": 2199.0, "isEmpty": false},
+	{"id": "ng-spot-1", "name": "spot-workers", "instanceType": "m5.large", "instanceFamily": "m5", "currentCount": 2, "minCount": 0, "maxCount": 10, "desiredCount": 2, "cpuUtilPct": 85.0, "memUtilPct": 67.0, "cpuAllocPct": 95.0, "memAllocPct": 80.0, "totalPods": 5, "monthlyCostUSD": 267.0, "isEmpty": false},
 }
 
 func nodeGroups() any {
@@ -418,6 +418,12 @@ func nodeGroups() any {
 		}
 		if f, ok := cp["memUtilPct"].(float64); ok {
 			cp["memUtilPct"] = jitter(f, 0.08)
+		}
+		if f, ok := cp["cpuAllocPct"].(float64); ok {
+			cp["cpuAllocPct"] = jitter(f, 0.04)
+		}
+		if f, ok := cp["memAllocPct"].(float64); ok {
+			cp["memAllocPct"] = jitter(f, 0.04)
 		}
 		if f, ok := cp["monthlyCostUSD"].(float64); ok {
 			cp["monthlyCostUSD"] = jitter(f, 0.02)
