@@ -604,14 +604,14 @@ func discoverZone(ctx context.Context, project, region string, client *http.Clie
 		}
 	}
 
-	// Fallback: try common zone suffixes and log a warning.
+	// Fallback: try common zone suffixes.
 	suffixes := []string{"-a", "-b", "-c", "-d", "-f"}
 	for _, suffix := range suffixes {
 		zone := region + suffix
 		// Try a lightweight API call to verify the zone exists
 		testURL := fmt.Sprintf("https://compute.googleapis.com/compute/v1/projects/%s/zones/%s/machineTypes?maxResults=1", project, zone)
-		resp, err := client.Get(testURL)
-		if err == nil {
+		resp, testErr := client.Get(testURL)
+		if testErr == nil {
 			resp.Body.Close()
 			if resp.StatusCode == 200 {
 				return zone, nil
@@ -619,7 +619,8 @@ func discoverZone(ctx context.Context, project, region string, client *http.Clie
 		}
 	}
 
-	return "", fmt.Errorf("could not discover any valid zone for region %s", region)
+	// Last resort: return region + "-a" so callers can proceed with capacity-based pricing.
+	return region + "-a", nil
 }
 
 // fetchMachineTypesFromAPI fetches all machine types from Compute Engine, handling pagination.
