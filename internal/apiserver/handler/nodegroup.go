@@ -36,6 +36,8 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			"desiredCount":   g.DesiredCount,
 			"cpuUtilPct":     g.CPUUtilization(),
 			"memUtilPct":     g.MemoryUtilization(),
+			"totalCPU":       g.TotalCPU,
+			"totalMemory":    g.TotalMemory,
 			"totalPods":      g.TotalPods,
 			"monthlyCostUSD": g.MonthlyCostUSD,
 			"isEmpty":        g.IsEmpty(),
@@ -62,6 +64,8 @@ func (h *NodeGroupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"desiredCount":   g.DesiredCount,
 		"cpuUtilPct":     g.CPUUtilization(),
 		"memUtilPct":     g.MemoryUtilization(),
+		"totalCPU":       g.TotalCPU,
+		"totalMemory":    g.TotalMemory,
 		"monthlyCostUSD": g.MonthlyCostUSD,
 	})
 }

@@ -28,7 +28,7 @@ export async function renderNodes(targetEl) {
       <div class="card">
         ${cardHeader('Node Groups', '<button class="btn btn-gray btn-sm" onclick="window.__exportNgCSV()">Export CSV</button>')}
         <div class="table-wrap"><table id="ng-table">
-          <thead><tr><th>Name</th><th>Instance Type</th><th>Family</th><th>Count</th><th>Min</th><th>Max</th><th>CPU Util</th><th>Mem Util</th><th>Cost/mo</th></tr></thead>
+          <thead><tr><th>Name</th><th>Instance Type</th><th>Family</th><th>Count</th><th>Min</th><th>Max</th><th>Total Cores</th><th>Total Memory</th><th>CPU Util</th><th>Mem Util</th><th>Cost/mo</th></tr></thead>
           <tbody id="ng-body"></tbody>
         </table></div>
       </div>
@@ -53,11 +53,13 @@ export async function renderNodes(targetEl) {
         <td>${ng.name || ng.id || ''}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}</td>
         <td>${ng.instanceType || ''}</td><td>${ng.instanceFamily || ''}</td>
         <td>${ng.currentCount ?? 0}</td><td>${ng.minCount ?? ''}</td><td>${ng.maxCount ?? ''}</td>
+        <td>${ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0}</td>
+        <td>${ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) + ' Gi' : '0 Gi'}</td>
         <td><strong class="${utilClass(ng.cpuUtilPct || 0)}">${fmtPct(ng.cpuUtilPct)}</strong></td>
         <td><strong class="${utilClass(ng.memUtilPct || 0)}">${fmtPct(ng.memUtilPct)}</strong></td>
         <td>${fmt$(ng.monthlyCostUSD)}</td>
       </tr>`;
-    }).join('') : '<tr><td colspan="9" style="color:var(--text-muted)">No node groups</td></tr>';
+    }).join('') : '<tr><td colspan="11" style="color:var(--text-muted)">No node groups</td></tr>';
 
     $('#node-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${n.name || ''}'">
       <td>${n.name || ''}</td><td>${n.nodeGroup || ''}</td><td>${n.instanceType || ''}</td>
@@ -77,8 +79,8 @@ export async function renderNodes(targetEl) {
 
     // CSV exports
     window.__exportNgCSV = () => {
-      exportCSV(['Name', 'Instance Type', 'Family', 'Count', 'Min', 'Max', 'CPU Util %', 'Mem Util %', 'Cost/mo'],
-        ngList.map(ng => [ng.name, ng.instanceType, ng.instanceFamily, ng.currentCount, ng.minCount, ng.maxCount, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), ng.monthlyCostUSD]),
+      exportCSV(['Name', 'Instance Type', 'Family', 'Count', 'Min', 'Max', 'Total Cores', 'Total Memory (GiB)', 'CPU Util %', 'Mem Util %', 'Cost/mo'],
+        ngList.map(ng => [ng.name, ng.instanceType, ng.instanceFamily, ng.currentCount, ng.minCount, ng.maxCount, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), ng.monthlyCostUSD]),
         'koptimizer-nodegroups.csv');
     };
     window.__exportNodesCSV = () => {
