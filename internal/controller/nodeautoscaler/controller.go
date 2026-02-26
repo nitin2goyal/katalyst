@@ -105,12 +105,9 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
-	// AI Gate validation for risky changes — fail-closed: if the gate is nil
-	// and the recommendation requires validation, block execution.
-	if rec.RequiresAIGate {
-		if c.gate == nil {
-			return nil // AI Gate required but not configured; fall back to recommendation mode
-		}
+	// AI Gate validation — fail-closed: use RequiresValidation which checks
+	// both the RequiresAIGate flag AND actual impact metrics (cost, nodes affected).
+	if c.gate.RequiresValidation(rec) {
 		valReq := aigate.ValidationRequest{
 			Action:         rec.Summary,
 			Recommendation: rec,
@@ -197,6 +194,21 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 				"no nodes drained successfully, scale-down aborted for safety")
 			return nil
 		}
+
+		// Adjust desired count if fewer nodes were drained than planned.
+		// Without this, the cloud provider would terminate un-drained nodes
+		// whose pods were never gracefully evicted.
+		if drained < nodesToRemove {
+			// Only remove the nodes we actually drained:
+			// original count = desired + nodesToRemove, so new target = original - drained
+			adjustedDesired := desired + (nodesToRemove - drained)
+			logger.Info("Partial drain: adjusting desired count",
+				"nodeGroup", nodeGroupID, "originalDesired", desired,
+				"adjustedDesired", adjustedDesired, "drained", drained, "planned", nodesToRemove)
+			c.state.AuditLog.Record("scale-down-adjusted", nodeGroupID, "nodeautoscaler",
+				fmt.Sprintf("only %d/%d nodes drained, adjusting desired from %d to %d", drained, nodesToRemove, desired, adjustedDesired))
+			desired = adjustedDesired
+		}
 	}
 
 	err := c.provider.ScaleNodeGroup(ctx, nodeGroupID, desired)
@@ -217,15 +229,23 @@ func (c *Controller) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			if c.state.Breaker.IsTripped(c.Name()) {
+				logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
+				continue
+			}
 			snapshot := c.state.Snapshot()
 			recs, err := c.Analyze(ctx, snapshot)
 			if err != nil {
 				logger.Error(err, "Analysis failed")
+				c.state.Breaker.RecordFailure(c.Name())
 				continue
 			}
 			for _, rec := range recs {
 				if err := c.Execute(ctx, rec); err != nil {
 					logger.Error(err, "Execution failed", "recommendation", rec.ID)
+					c.state.Breaker.RecordFailure(c.Name())
+				} else {
+					c.state.Breaker.RecordSuccess(c.Name())
 				}
 			}
 		case <-ctx.Done():

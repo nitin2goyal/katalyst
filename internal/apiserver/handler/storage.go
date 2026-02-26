@@ -136,5 +136,11 @@ func (h *StorageHandler) GetPVCs(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	if result == nil {
+		result = []pvcInfo{}
+	}
+	page, pageSize := parsePagination(r)
+	start, end, resp := paginateSlice(len(result), page, pageSize)
+	resp.Data = result[start:end]
+	writeJSON(w, http.StatusOK, resp)
 }

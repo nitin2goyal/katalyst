@@ -103,6 +103,7 @@ func (c *Controller) Analyze(ctx context.Context, _ *optimizer.ClusterSnapshot) 
 	var totalStorageCostMonthly float64
 	overprovisionedCount := 0
 	unusedCount := 0
+	unusedPVCNames := make(map[string]bool) // Track unused PVCs to avoid double-counting with overprovisioned
 
 	// Build PV capacity map for bound PVCs
 	pvCapacity := make(map[string]resource.Quantity)
@@ -135,6 +136,7 @@ func (c *Controller) Analyze(ctx context.Context, _ *optimizer.ClusterSnapshot) 
 		// Check if unused (bound but not mounted by any running pod)
 		if pvc.Status.Phase == corev1.ClaimBound && !mountedPVCs[pvcKey] {
 			unusedCount++
+			unusedPVCNames[pvcKey] = true
 			recs = append(recs, optimizer.Recommendation{
 				ID:             fmt.Sprintf("storage-unused-%s-%s", pvc.Namespace, pvc.Name),
 				Type:           optimizer.RecommendationStorage,
@@ -165,7 +167,8 @@ func (c *Controller) Analyze(ctx context.Context, _ *optimizer.ClusterSnapshot) 
 		}
 
 		// Check for overprovisioning (PV capacity >> PVC request)
-		if pvc.Status.Phase == corev1.ClaimBound && pvc.Spec.VolumeName != "" {
+		// Skip PVCs already flagged as unused to avoid double-counting savings.
+		if pvc.Status.Phase == corev1.ClaimBound && pvc.Spec.VolumeName != "" && !unusedPVCNames[pvcKey] {
 			if pvCap, ok := pvCapacity[pvc.Spec.VolumeName]; ok {
 				pvGB := float64(pvCap.Value()) / (1024 * 1024 * 1024)
 				if requestedGB > 0 && pvGB > requestedGB*1.5 {

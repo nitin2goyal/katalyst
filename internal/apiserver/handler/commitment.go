@@ -55,7 +55,23 @@ func (h *CommitmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	all := h.collectCommitments(ctx)
-	writeJSON(w, http.StatusOK, all)
+	items := make([]map[string]interface{}, 0, len(all))
+	for _, c := range all {
+		items = append(items, map[string]interface{}{
+			"id":              c.ID,
+			"type":            c.Type,
+			"instanceFamily":  c.InstanceFamily,
+			"instanceType":    c.InstanceType,
+			"region":          c.Region,
+			"count":           c.Count,
+			"hourlyCostUSD":   c.HourlyCostUSD,
+			"onDemandCostUSD": c.OnDemandCostUSD,
+			"utilizationPct":  c.UtilizationPct,
+			"expiresAt":       c.ExpiresAt.Format(time.RFC3339),
+			"status":          c.Status,
+		})
+	}
+	writePaginatedJSON(w, r, items)
 }
 
 func (h *CommitmentHandler) GetUnderutilized(w http.ResponseWriter, r *http.Request) {

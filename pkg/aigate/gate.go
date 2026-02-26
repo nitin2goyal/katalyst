@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
@@ -45,7 +46,11 @@ func NewAIGate(cfg Config) (*AIGate, error) {
 		return &AIGate{enabled: false}, nil
 	}
 
-	client := anthropic.NewClient()
+	var opts []option.RequestOption
+	if cfg.APIKey != "" {
+		opts = append(opts, option.WithAPIKey(cfg.APIKey))
+	}
+	client := anthropic.NewClient(opts...)
 	clientPtr := &client
 
 	model := cfg.Model

@@ -75,15 +75,7 @@ func (h *SpotHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 func (h *SpotHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	nodes := h.state.GetAllNodes()
 
-	type spotNode struct {
-		Name         string  `json:"name"`
-		InstanceType string  `json:"instanceType"`
-		Lifecycle    string  `json:"lifecycle"`
-		Zone         string  `json:"zone"`
-		HourlyCost   float64 `json:"hourlyCostUSD"`
-	}
-
-	var result []spotNode
+	var result []map[string]interface{}
 	for _, n := range nodes {
 		lifecycle := "on-demand"
 		if n.IsSpot || cloudprovider.IsSpotNode(n.Node) {
@@ -95,14 +87,17 @@ func (h *SpotHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 			zone = z
 		}
 
-		result = append(result, spotNode{
-			Name:         n.Node.Name,
-			InstanceType: n.InstanceType,
-			Lifecycle:    lifecycle,
-			Zone:         zone,
-			HourlyCost:   n.HourlyCostUSD,
+		result = append(result, map[string]interface{}{
+			"name":          n.Node.Name,
+			"instanceType":  n.InstanceType,
+			"lifecycle":     lifecycle,
+			"zone":          zone,
+			"hourlyCostUSD": n.HourlyCostUSD,
 		})
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	if result == nil {
+		result = []map[string]interface{}{}
+	}
+	writePaginatedJSON(w, r, result)
 }

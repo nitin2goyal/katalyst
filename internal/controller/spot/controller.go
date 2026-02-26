@@ -10,7 +10,9 @@ import (
 
 	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/internal/state"
+	"github.com/koptimizer/koptimizer/pkg/aigate"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
+	"github.com/koptimizer/koptimizer/pkg/familylock"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
@@ -20,18 +22,22 @@ type Controller struct {
 	client       client.Client
 	provider     cloudprovider.CloudProvider
 	state        *state.ClusterState
+	guard        *familylock.FamilyLockGuard
+	gate         *aigate.AIGate
 	config       *config.Config
 	mixer        *Mixer
 	interruption *InterruptionHandler
 	diversity    *DiversityManager
 }
 
-func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *state.ClusterState, cfg *config.Config) *Controller {
+func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
 	c := mgr.GetClient()
 	return &Controller{
 		client:       c,
 		provider:     provider,
 		state:        st,
+		guard:        guard,
+		gate:         gate,
 		config:       cfg,
 		mixer:        NewMixer(provider, cfg),
 		interruption: NewInterruptionHandler(c, provider, cfg),
@@ -86,6 +92,18 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
+	// AI Gate validation — fail-closed
+	if c.gate.RequiresValidation(rec) {
+		valReq := aigate.ValidationRequest{
+			Action:         rec.Summary,
+			Recommendation: rec,
+		}
+		result, err := c.gate.Validate(ctx, valReq)
+		if err != nil || !result.Approved {
+			return nil // Falls back to recommendation mode
+		}
+	}
+
 	action := rec.Details["action"]
 	switch action {
 	case "convert-to-spot", "convert-to-ondemand", "adjust-spot-mix":
@@ -107,15 +125,23 @@ func (c *Controller) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			if c.state.Breaker.IsTripped(c.Name()) {
+				logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
+				continue
+			}
 			snapshot := c.state.Snapshot()
 			recs, err := c.Analyze(ctx, snapshot)
 			if err != nil {
 				logger.Error(err, "Spot analysis failed")
+				c.state.Breaker.RecordFailure(c.Name())
 				continue
 			}
 			for _, rec := range recs {
 				if err := c.Execute(ctx, rec); err != nil {
 					logger.Error(err, "Spot execution failed", "recommendation", rec.ID)
+					c.state.Breaker.RecordFailure(c.Name())
+				} else {
+					c.state.Breaker.RecordSuccess(c.Name())
 				}
 			}
 		case <-ctx.Done():

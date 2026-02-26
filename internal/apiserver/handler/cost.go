@@ -92,7 +92,22 @@ func (h *CostHandler) GetByNamespace(w http.ResponseWriter, r *http.Request) {
 			costs[pod.Namespace] += nodeCost * weights[i] / totalW
 		}
 	}
-	writeJSON(w, http.StatusOK, costs)
+
+	type nsCost struct {
+		Namespace      string  `json:"namespace"`
+		MonthlyCostUSD float64 `json:"monthlyCostUSD"`
+	}
+	result := make([]nsCost, 0, len(costs))
+	for ns, c := range costs {
+		result = append(result, nsCost{Namespace: ns, MonthlyCostUSD: c})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].MonthlyCostUSD > result[j].MonthlyCostUSD
+	})
+	page, pageSize := parsePagination(r)
+	start, end, resp := paginateSlice(len(result), page, pageSize)
+	resp.Data = result[start:end]
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *CostHandler) GetByWorkload(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +167,13 @@ func (h *CostHandler) GetByWorkload(w http.ResponseWriter, r *http.Request) {
 	for _, wc := range costs {
 		result = append(result, wc)
 	}
-	writeJSON(w, http.StatusOK, result)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].MonthlyCostUSD > result[j].MonthlyCostUSD
+	})
+	page, pageSize := parsePagination(r)
+	start, end, resp := paginateSlice(len(result), page, pageSize)
+	resp.Data = result[start:end]
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // GetByLabel returns cost breakdown grouped by pod labels.

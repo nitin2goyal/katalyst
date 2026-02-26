@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/koptimizer/koptimizer/internal/state"
+	"github.com/koptimizer/koptimizer/pkg/cost"
 )
 
 type GPUHandler struct {
@@ -31,7 +32,10 @@ func (h *GPUHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, gpuNodes)
+	if gpuNodes == nil {
+		gpuNodes = []map[string]interface{}{}
+	}
+	writePaginatedJSON(w, r, gpuNodes)
 }
 
 func (h *GPUHandler) GetUtilization(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +74,7 @@ func (h *GPUHandler) GetRecommendations(w http.ResponseWriter, r *http.Request) 
 		// Idle GPU detection
 		if n.GPUCapacity > 0 && n.GPUsUsed == 0 {
 			// Estimated monthly savings = full node cost if idle GPUs can be released.
-			idleSavings := n.HourlyCostUSD * 730
+			idleSavings := n.HourlyCostUSD * cost.HoursPerMonth
 			recommendations = append(recommendations, map[string]interface{}{
 				"type":             "gpu-idle",
 				"priority":         "high",
@@ -89,9 +93,11 @@ func (h *GPUHandler) GetRecommendations(w http.ResponseWriter, r *http.Request) 
 		// CPU scavenging opportunity
 		if gpuAllocated && cpuUtil < 30 && n.CPUCapacity > 2000 {
 			spareCPU := n.CPUCapacity - n.CPURequested
-			// Estimated savings from reclaiming spare CPU (fraction of node cost).
-			cpuFraction := float64(spareCPU) / float64(n.CPUCapacity)
-			scavengeSavings := n.HourlyCostUSD * 730 * cpuFraction * 0.5 // conservative estimate
+			// Estimated savings from reclaiming spare CPU. On GPU nodes, CPU is ~5% of
+			// total node cost, so use EstimateCPUCostFraction to avoid gross overestimate.
+			cpuCostFraction := cost.EstimateCPUCostFraction(n.CPUCapacity, n.IsGPUNode)
+			cpuShareFraction := float64(spareCPU) / float64(n.CPUCapacity)
+			scavengeSavings := n.HourlyCostUSD * cost.HoursPerMonth * cpuCostFraction * cpuShareFraction * 0.5
 			recommendations = append(recommendations, map[string]interface{}{
 				"type":             "cpu-scavenging",
 				"priority":         "medium",
@@ -108,5 +114,8 @@ func (h *GPUHandler) GetRecommendations(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	writeJSON(w, http.StatusOK, recommendations)
+	if recommendations == nil {
+		recommendations = []map[string]interface{}{}
+	}
+	writePaginatedJSON(w, r, recommendations)
 }

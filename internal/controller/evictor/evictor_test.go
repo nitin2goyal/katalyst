@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/koptimizer/koptimizer/internal/config"
@@ -21,6 +22,19 @@ func makePod(name, namespace string, cpuMilli, memBytes int64) *corev1.Pod {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "main",
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    *resource.NewMilliQuantity(cpuMilli, resource.DecimalSI),
+							corev1.ResourceMemory: *resource.NewQuantity(memBytes, resource.BinarySI),
+						},
+					},
+				},
+			},
 		},
 	}
 }
@@ -41,6 +55,12 @@ func makeNode(name string, cpuCap, cpuReq, memCap, memReq int64, hourlyCost floa
 	return optimizer.NodeInfo{
 		Node: &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: corev1.NodeStatus{
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:    *resource.NewMilliQuantity(cpuCap, resource.DecimalSI),
+					corev1.ResourceMemory: *resource.NewQuantity(memCap, resource.BinarySI),
+				},
+			},
 		},
 		CPUCapacity:     cpuCap,
 		MemoryCapacity:  memCap,

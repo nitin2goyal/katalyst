@@ -22,7 +22,10 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []state.AuditEvent{}
 	}
-	writeJSON(w, http.StatusOK, events)
+	page, pageSize := parsePagination(r)
+	start, end, resp := paginateSlice(len(events), page, pageSize)
+	resp.Data = events[start:end]
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ListEvents returns audit events wrapped in an object matching the dashboard format.
@@ -31,7 +34,10 @@ func (h *AuditHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []state.AuditEvent{}
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"events": events,
-	})
+	page, pageSize := parsePagination(r)
+	start, end, resp := paginateSlice(len(events), page, pageSize)
+	resp.Data = map[string]interface{}{
+		"events": events[start:end],
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

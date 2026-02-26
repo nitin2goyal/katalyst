@@ -17,8 +17,10 @@ import (
 	"github.com/koptimizer/koptimizer/internal/config"
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
+	"github.com/koptimizer/koptimizer/pkg/aigate"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
 	"github.com/koptimizer/koptimizer/pkg/cost"
+	"github.com/koptimizer/koptimizer/pkg/familylock"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
@@ -32,6 +34,8 @@ type Controller struct {
 	client   client.Client
 	provider cloudprovider.CloudProvider
 	state    *state.ClusterState
+	guard    *familylock.FamilyLockGuard
+	gate     *aigate.AIGate
 	config   *config.Config
 
 	mu              sync.Mutex
@@ -48,11 +52,13 @@ type SavedState struct {
 	MinCount     int
 }
 
-func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *state.ClusterState, cfg *config.Config) *Controller {
+func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
 	return &Controller{
 		client:       mgr.GetClient(),
 		provider:     provider,
 		state:        st,
+		guard:        guard,
+		gate:         gate,
 		config:       cfg,
 		savedDesired: make(map[string]int),
 		savedMin:     make(map[string]int),
@@ -139,8 +145,17 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 		for _, node := range snapshot.Nodes {
 			totalHourlyCost += node.HourlyCostUSD
 		}
-		// Estimate: if hibernating 12 hours/day on weekdays = ~36% time savings
-		monthlySavings := totalHourlyCost * cost.HoursPerMonth * 0.36
+		// Estimate: if hibernating 12 hours/day on weekdays = ~36% time savings.
+		// Subtract cost of nodes kept alive during hibernation (1 per group for safety).
+		keptAliveHourly := float64(0)
+		if len(snapshot.NodeGroups) > 0 && len(snapshot.Nodes) > 0 {
+			avgNodeHourly := totalHourlyCost / float64(len(snapshot.Nodes))
+			keptAliveHourly = avgNodeHourly * float64(len(snapshot.NodeGroups))
+		}
+		monthlySavings := (totalHourlyCost - keptAliveHourly) * cost.HoursPerMonth * 0.36
+		if monthlySavings < 0 {
+			monthlySavings = 0
+		}
 		intmetrics.HibernationSavingsUSD.Set(monthlySavings)
 	}
 
@@ -174,6 +189,37 @@ func (c *Controller) Hibernate(ctx context.Context) error {
 	if c.config.Mode != "active" {
 		logger.Info("Not in active mode, skipping hibernate")
 		return nil
+	}
+
+	// Family lock guard validation
+	if c.guard != nil {
+		if err := c.guard.ValidateNodeGroupAction(familylock.NodeGroupScale); err != nil {
+			logger.Info("Family lock guard blocked hibernation", "error", err)
+			return err
+		}
+	}
+
+	// AI Gate validation for hibernation (high-impact operation)
+	if c.gate != nil {
+		rec := optimizer.Recommendation{
+			Summary:        "Hibernate cluster: scale all non-excluded node groups to minimum",
+			RequiresAIGate: true,
+			EstimatedImpact: optimizer.ImpactEstimate{
+				RiskLevel: "high",
+			},
+		}
+		if c.gate.RequiresValidation(rec) {
+			valReq := aigate.ValidationRequest{
+				Action:         rec.Summary,
+				Recommendation: rec,
+				RiskFactors:    []string{"Cluster hibernation scales most node groups to minimum"},
+			}
+			result, err := c.gate.Validate(ctx, valReq)
+			if err != nil || !result.Approved {
+				logger.Info("AI Gate rejected hibernation", "reasoning", result.Reasoning)
+				return nil
+			}
+		}
 	}
 
 	groups, err := c.provider.DiscoverNodeGroups(ctx)
@@ -345,13 +391,17 @@ func (c *Controller) loadState(ctx context.Context) error {
 		if strings.HasPrefix(key, "desired-") {
 			id := strings.TrimPrefix(key, "desired-")
 			var count int
-			fmt.Sscanf(val, "%d", &count)
+			if n, _ := fmt.Sscanf(val, "%d", &count); n != 1 || count <= 0 {
+				continue // Skip corrupt or zero values to prevent restoring groups to 0
+			}
 			c.savedDesired[id] = count
 		}
 		if strings.HasPrefix(key, "min-") {
 			id := strings.TrimPrefix(key, "min-")
 			var count int
-			fmt.Sscanf(val, "%d", &count)
+			if n, _ := fmt.Sscanf(val, "%d", &count); n != 1 || count < 0 {
+				continue // Skip corrupt values
+			}
 			c.savedMin[id] = count
 		}
 	}
@@ -366,9 +416,16 @@ func (c *Controller) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			if c.state.Breaker.IsTripped(c.Name()) {
+				logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
+				continue
+			}
 			snapshot := c.state.Snapshot()
 			if _, err := c.Analyze(ctx, snapshot); err != nil {
 				logger.Error(err, "Hibernation analysis failed")
+				c.state.Breaker.RecordFailure(c.Name())
+			} else {
+				c.state.Breaker.RecordSuccess(c.Name())
 			}
 		case <-ctx.Done():
 			c.cron.Stop()

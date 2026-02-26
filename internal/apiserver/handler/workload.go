@@ -82,7 +82,7 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 			"image":      wl.Image,
 		})
 	}
-	writeJSON(w, http.StatusOK, result)
+	writePaginatedJSON(w, r, result)
 }
 
 func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {

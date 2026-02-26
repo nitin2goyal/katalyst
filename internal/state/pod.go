@@ -46,9 +46,25 @@ func (p *PodState) MemoryEfficiency() float64 {
 	return float64(p.MemoryUsage) / float64(p.MemoryRequest)
 }
 
-// IsOverProvisioned returns true if the pod is using less than the threshold of its requests.
+// IsOverProvisioned returns true if the pod is using less than the threshold
+// in at least one dimension (CPU or memory). Using OR logic catches single-dimension
+// over-provisioning that AND logic would miss.
 func (p *PodState) IsOverProvisioned(threshold float64) bool {
-	return p.CPUEfficiency() < threshold && p.MemoryEfficiency() < threshold
+	cpuEff := p.CPUEfficiency()
+	memEff := p.MemoryEfficiency()
+	// Require both dimensions to have valid data (non-zero request)
+	hasCPU := p.CPURequest > 0
+	hasMem := p.MemoryRequest > 0
+	if hasCPU && hasMem {
+		return cpuEff < threshold || memEff < threshold
+	}
+	if hasCPU {
+		return cpuEff < threshold
+	}
+	if hasMem {
+		return memEff < threshold
+	}
+	return false
 }
 
 // IsUnderProvisioned returns true if the pod is using more than the threshold of its requests.

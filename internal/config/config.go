@@ -147,10 +147,11 @@ type StorageMonitorConfig struct {
 }
 
 type NetworkMonitorConfig struct {
-	Enabled                bool    `yaml:"enabled"`
-	CrossAZCostPerGBUSD    float64 `yaml:"crossAZCostPerGBUSD"`    // Cost per GB cross-AZ (default 0.01)
+	Enabled                 bool    `yaml:"enabled"`
+	CrossAZCostPerGBUSD     float64 `yaml:"crossAZCostPerGBUSD"`     // Cost per GB cross-AZ (default 0.01)
 	TrafficPerNodeGBPerHour float64 `yaml:"trafficPerNodeGBPerHour"` // Estimated cross-AZ traffic per node per hour (default 5.0)
-	EnablePodAnnotations   bool    `yaml:"enablePodAnnotations"`    // Annotate pods with network cost
+	TrafficPerPodGBPerHour  float64 `yaml:"trafficPerPodGBPerHour"`  // Estimated cross-AZ traffic per pod per hour (default 0.1)
+	EnablePodAnnotations    bool    `yaml:"enablePodAnnotations"`    // Annotate pods with network cost
 }
 
 type AlertsConfig struct {
@@ -277,6 +278,7 @@ func DefaultConfig() *Config {
 			Enabled:                 true,
 			CrossAZCostPerGBUSD:     0.01,
 			TrafficPerNodeGBPerHour: 5.0,
+			TrafficPerPodGBPerHour:  0.1,
 		},
 		Alerts: AlertsConfig{
 			Enabled:            false,
@@ -373,6 +375,42 @@ func (c *Config) Validate() error {
 
 	if c.WorkloadScaler.SurgeThreshold < 1.0 {
 		return fmt.Errorf("surgeThreshold must be >= 1.0, got %.1f", c.WorkloadScaler.SurgeThreshold)
+	}
+
+	return nil
+}
+
+// ValidateDetailed performs extended validation beyond basic Validate().
+// This checks cross-field constraints that are important for safety.
+func (c *Config) ValidateDetailed() error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
+	// Active mode requires AI Gate to be enabled for safety
+	if c.Mode == "active" && !c.AIGate.Enabled {
+		return fmt.Errorf("AI Gate must be enabled when mode is \"active\" to prevent unsafe automated changes")
+	}
+
+	// Validate network monitor traffic estimate
+	if c.NetworkMonitor.Enabled && c.NetworkMonitor.TrafficPerPodGBPerHour < 0 {
+		return fmt.Errorf("trafficPerPodGBPerHour must be >= 0, got %.2f", c.NetworkMonitor.TrafficPerPodGBPerHour)
+	}
+
+	// Validate spot percentage bounds to prevent all nodes becoming spot
+	if c.Spot.Enabled {
+		if c.Spot.MaxSpotPercentage > 90 {
+			return fmt.Errorf("maxSpotPercentage must be <= 90, got %d (100%% spot is dangerous for cluster stability)", c.Spot.MaxSpotPercentage)
+		}
+		if c.Spot.MaxSpotPct > 90 {
+			return fmt.Errorf("maxSpotPct must be <= 90, got %.0f", c.Spot.MaxSpotPct)
+		}
+		// Reconcile dual fields: use whichever is set, prefer MaxSpotPercentage
+		if c.Spot.MaxSpotPct == 0 && c.Spot.MaxSpotPercentage > 0 {
+			c.Spot.MaxSpotPct = float64(c.Spot.MaxSpotPercentage)
+		} else if c.Spot.MaxSpotPercentage == 0 && c.Spot.MaxSpotPct > 0 {
+			c.Spot.MaxSpotPercentage = int(c.Spot.MaxSpotPct)
+		}
 	}
 
 	return nil

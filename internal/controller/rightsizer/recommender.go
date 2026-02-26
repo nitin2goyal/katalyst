@@ -22,7 +22,19 @@ func NewRecommender(cfg *config.Config) *Recommender {
 func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendation {
 	var recs []optimizer.Recommendation
 
+	// Require at least 6 data points before making recommendations to avoid
+	// acting on insufficient data (e.g., a pod that just started).
+	if analysis.DataPoints < 6 {
+		return nil
+	}
+
 	pod := analysis.PodInfo
+
+	// Determine replica count for scaling per-pod savings
+	replicaCount := int64(1)
+	if pod.ReplicaCount > 1 {
+		replicaCount = int64(pod.ReplicaCount)
+	}
 
 	// CPU rightsizing
 	if analysis.IsOverProvCPU && analysis.CPUP95 > 0 {
@@ -33,7 +45,8 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 		}
 
 		if suggestedCPU < analysis.CPURequestMilli {
-			savings := estimateCPUSavings(analysis.CPURequestMilli, suggestedCPU, r.config.CloudProvider)
+			perPodSavings := estimateCPUSavings(analysis.CPURequestMilli, suggestedCPU, r.config.CloudProvider)
+			savings := perPodSavings * float64(replicaCount)
 			recs = append(recs, optimizer.Recommendation{
 				ID:              fmt.Sprintf("rightsize-cpu-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
 				Type:            optimizer.RecommendationPodRightsize,
@@ -42,12 +55,13 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 				TargetKind:      pod.OwnerKind,
 				TargetName:      pod.OwnerName,
 				TargetNamespace: pod.Pod.Namespace,
-				Summary:         fmt.Sprintf("Reduce CPU request for %s/%s from %dm to %dm", pod.Pod.Namespace, pod.OwnerName, analysis.CPURequestMilli, suggestedCPU),
+				Summary:         fmt.Sprintf("Reduce CPU request for %s/%s from %dm to %dm (%d replicas)", pod.Pod.Namespace, pod.OwnerName, analysis.CPURequestMilli, suggestedCPU, replicaCount),
 				ActionSteps: []string{
 					fmt.Sprintf("Patch CPU request from %dm to %dm", analysis.CPURequestMilli, suggestedCPU),
 				},
 				EstimatedSaving: optimizer.SavingEstimate{
 					MonthlySavingsUSD: savings,
+					AnnualSavingsUSD:  savings * 12,
 					Currency:          "USD",
 				},
 				Details: map[string]string{
@@ -55,6 +69,7 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 					"currentRequest":   fmt.Sprintf("%dm", analysis.CPURequestMilli),
 					"suggestedRequest": fmt.Sprintf("%dm", suggestedCPU),
 					"p95Usage":         fmt.Sprintf("%dm", analysis.CPUP95),
+					"replicaCount":     fmt.Sprintf("%d", replicaCount),
 				},
 				CreatedAt: time.Now(),
 			})
@@ -70,7 +85,8 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 		}
 
 		if suggestedMem < analysis.MemRequestBytes {
-			savings := estimateMemorySavings(analysis.MemRequestBytes, suggestedMem, r.config.CloudProvider)
+			perPodSavings := estimateMemorySavings(analysis.MemRequestBytes, suggestedMem, r.config.CloudProvider)
+			savings := perPodSavings * float64(replicaCount)
 			recs = append(recs, optimizer.Recommendation{
 				ID:              fmt.Sprintf("rightsize-mem-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
 				Type:            optimizer.RecommendationPodRightsize,
@@ -79,12 +95,13 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 				TargetKind:      pod.OwnerKind,
 				TargetName:      pod.OwnerName,
 				TargetNamespace: pod.Pod.Namespace,
-				Summary:         fmt.Sprintf("Reduce memory request for %s/%s from %s to %s", pod.Pod.Namespace, pod.OwnerName, formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem)),
+				Summary:         fmt.Sprintf("Reduce memory request for %s/%s from %s to %s (%d replicas)", pod.Pod.Namespace, pod.OwnerName, formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem), replicaCount),
 				ActionSteps: []string{
 					fmt.Sprintf("Patch memory request from %s to %s", formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem)),
 				},
 				EstimatedSaving: optimizer.SavingEstimate{
 					MonthlySavingsUSD: savings,
+					AnnualSavingsUSD:  savings * 12,
 					Currency:          "USD",
 				},
 				Details: map[string]string{
@@ -92,6 +109,7 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 					"currentRequest":   formatBytes(analysis.MemRequestBytes),
 					"suggestedRequest": formatBytes(suggestedMem),
 					"p95Usage":         formatBytes(analysis.MemP95),
+					"replicaCount":     fmt.Sprintf("%d", replicaCount),
 				},
 				CreatedAt: time.Now(),
 			})

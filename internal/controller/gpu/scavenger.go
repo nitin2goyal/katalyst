@@ -8,11 +8,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/koptimizer/koptimizer/internal/config"
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
+	"github.com/koptimizer/koptimizer/pkg/cost"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
@@ -104,9 +106,14 @@ func (s *Scavenger) estimateSavings(node *optimizer.NodeInfo, headroomMillis int
 	if allocMillis == 0 {
 		return optimizer.SavingEstimate{}
 	}
-	monthlyCost := node.HourlyCostUSD * 24 * 30
+	monthlyCost := node.HourlyCostUSD * cost.HoursPerMonth
+	// Attribute savings only to the CPU cost fraction of the node, not the
+	// full node cost (which on GPU nodes includes the expensive GPU).
+	// Use vCPU-based pricing: approximate CPU fraction as allocMillis / totalNodeMillis.
+	// For GPU nodes the GPU is the dominant cost; CPU is typically <5% of total.
+	cpuFraction := cost.EstimateCPUCostFraction(allocMillis, node.IsGPUNode)
 	// Conservative 30% assumed utilization of scavenged CPU
-	monthly := float64(headroomMillis) / float64(allocMillis) * monthlyCost * 0.3
+	monthly := float64(headroomMillis) / float64(allocMillis) * monthlyCost * cpuFraction * 0.3
 	return optimizer.SavingEstimate{
 		MonthlySavingsUSD: monthly,
 		AnnualSavingsUSD:  monthly * 12,
@@ -203,18 +210,23 @@ func (s *Scavenger) Execute(ctx context.Context, rec optimizer.Recommendation) e
 }
 
 func (s *Scavenger) enableScavenging(ctx context.Context, node *corev1.Node, headroomMillis string, logger interface{ Info(string, ...interface{}) }) error {
-	if node.Labels == nil {
-		node.Labels = make(map[string]string)
-	}
-	node.Labels[GPUScavengerLabel] = "true"
-
-	if node.Annotations == nil {
-		node.Annotations = make(map[string]string)
-	}
-	node.Annotations[GPUScavengerAnnotation] = "true"
-	node.Annotations[GPUScavengerHeadroom] = headroomMillis
-
-	if err := s.client.Update(ctx, node); err != nil {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		fresh := &corev1.Node{}
+		if err := s.client.Get(ctx, types.NamespacedName{Name: node.Name}, fresh); err != nil {
+			return err
+		}
+		if fresh.Labels == nil {
+			fresh.Labels = make(map[string]string)
+		}
+		fresh.Labels[GPUScavengerLabel] = "true"
+		if fresh.Annotations == nil {
+			fresh.Annotations = make(map[string]string)
+		}
+		fresh.Annotations[GPUScavengerAnnotation] = "true"
+		fresh.Annotations[GPUScavengerHeadroom] = headroomMillis
+		return s.client.Update(ctx, fresh)
+	})
+	if err != nil {
 		return fmt.Errorf("enabling CPU scavenging on %s: %w", node.Name, err)
 	}
 
@@ -226,11 +238,17 @@ func (s *Scavenger) enableScavenging(ctx context.Context, node *corev1.Node, hea
 }
 
 func (s *Scavenger) disableScavenging(ctx context.Context, node *corev1.Node, logger interface{ Info(string, ...interface{}) }) error {
-	delete(node.Labels, GPUScavengerLabel)
-	delete(node.Annotations, GPUScavengerAnnotation)
-	delete(node.Annotations, GPUScavengerHeadroom)
-
-	if err := s.client.Update(ctx, node); err != nil {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		fresh := &corev1.Node{}
+		if err := s.client.Get(ctx, types.NamespacedName{Name: node.Name}, fresh); err != nil {
+			return err
+		}
+		delete(fresh.Labels, GPUScavengerLabel)
+		delete(fresh.Annotations, GPUScavengerAnnotation)
+		delete(fresh.Annotations, GPUScavengerHeadroom)
+		return s.client.Update(ctx, fresh)
+	})
+	if err != nil {
 		return fmt.Errorf("disabling CPU scavenging on %s: %w", node.Name, err)
 	}
 
@@ -239,12 +257,18 @@ func (s *Scavenger) disableScavenging(ctx context.Context, node *corev1.Node, lo
 }
 
 func (s *Scavenger) updateScavenging(ctx context.Context, node *corev1.Node, headroomMillis string, logger interface{ Info(string, ...interface{}) }) error {
-	if node.Annotations == nil {
-		node.Annotations = make(map[string]string)
-	}
-	node.Annotations[GPUScavengerHeadroom] = headroomMillis
-
-	if err := s.client.Update(ctx, node); err != nil {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		fresh := &corev1.Node{}
+		if err := s.client.Get(ctx, types.NamespacedName{Name: node.Name}, fresh); err != nil {
+			return err
+		}
+		if fresh.Annotations == nil {
+			fresh.Annotations = make(map[string]string)
+		}
+		fresh.Annotations[GPUScavengerHeadroom] = headroomMillis
+		return s.client.Update(ctx, fresh)
+	})
+	if err != nil {
 		return fmt.Errorf("updating CPU scavenging headroom on %s: %w", node.Name, err)
 	}
 

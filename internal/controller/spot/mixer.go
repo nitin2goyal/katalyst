@@ -7,6 +7,7 @@ import (
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
+	"github.com/koptimizer/koptimizer/pkg/cost"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
@@ -82,14 +83,14 @@ func (m *Mixer) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnapshot
 			it, _ := m.provider.GetNodeInstanceType(ctx, node.Node)
 			if onDemandPricingMap != nil {
 				if odPrice, ok := onDemandPricingMap[it]; ok {
-					spotSavingsMonthly += (odPrice - node.HourlyCostUSD) * 730
+					spotSavingsMonthly += (odPrice - node.HourlyCostUSD) * cost.HoursPerMonth
 				} else {
 					// No on-demand price — reverse-engineer from spot cost using
 					// per-provider, per-family discount estimate.
 					discount := m.estimateDiscount(it)
 					if discount > 0 && discount < 1 {
 						odEquiv := node.HourlyCostUSD / (1 - discount)
-						spotSavingsMonthly += (odEquiv - node.HourlyCostUSD) * 730
+						spotSavingsMonthly += (odEquiv - node.HourlyCostUSD) * cost.HoursPerMonth
 					}
 				}
 			} else {
@@ -98,7 +99,7 @@ func (m *Mixer) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnapshot
 				discount := m.estimateDiscount(it)
 				if discount > 0 && discount < 1 {
 					odEquiv := node.HourlyCostUSD / (1 - discount)
-					spotSavingsMonthly += (odEquiv - node.HourlyCostUSD) * 730
+					spotSavingsMonthly += (odEquiv - node.HourlyCostUSD) * cost.HoursPerMonth
 				}
 			}
 		} else {
@@ -161,7 +162,7 @@ func (m *Mixer) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnapshot
 			} else {
 				avgHourlySavingsPerNode = avgHourlyCost * m.estimateDiscount("")
 			}
-			monthlySavings := float64(additionalSpot) * avgHourlySavingsPerNode * 730
+			monthlySavings := float64(additionalSpot) * avgHourlySavingsPerNode * cost.HoursPerMonth
 
 			recs = append(recs, optimizer.Recommendation{
 				ID:             "spot-mix-increase",

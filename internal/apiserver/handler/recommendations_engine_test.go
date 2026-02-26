@@ -417,13 +417,26 @@ func TestComputeSavingsOpportunities(t *testing.T) {
 
 func TestComputeTotalPotentialSavings(t *testing.T) {
 	recs := []ComputedRecommendation{
-		{EstimatedSavings: 100.50},
-		{EstimatedSavings: 200.25},
-		{EstimatedSavings: 50.00},
+		{Type: "consolidation", Target: "node-1", EstimatedSavings: 100.50},
+		{Type: "spot", Target: "ng-1", EstimatedSavings: 200.25},
+		{Type: "rightsizing", Target: "wl-1", EstimatedSavings: 50.00},
 	}
 	total := ComputeTotalPotentialSavings(recs)
 	if total != 350.75 {
 		t.Errorf("total savings: got %.2f, want 350.75", total)
+	}
+}
+
+func TestComputeTotalPotentialSavings_Dedup(t *testing.T) {
+	// Two recommendations for the same target should be deduped (keep highest)
+	recs := []ComputedRecommendation{
+		{Type: "consolidation", Target: "node-1", EstimatedSavings: 100.00},
+		{Type: "consolidation", Target: "node-1", EstimatedSavings: 150.00},
+		{Type: "spot", Target: "ng-1", EstimatedSavings: 200.00},
+	}
+	total := ComputeTotalPotentialSavings(recs)
+	if total != 350.00 {
+		t.Errorf("total savings with dedup: got %.2f, want 350.00", total)
 	}
 }
 

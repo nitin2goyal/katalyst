@@ -95,8 +95,9 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return rec, false, nil
 	}
 
-	// AI Gate validation
-	if rec.RequiresAIGate && c.gate != nil {
+	// AI Gate validation — fail-closed: use RequiresValidation which checks
+	// both the RequiresAIGate flag AND actual impact metrics.
+	if c.gate.RequiresValidation(rec) {
 		valReq := aigate.ValidationRequest{
 			Action:         rec.Summary,
 			Recommendation: rec,
@@ -132,16 +133,25 @@ func (c *Controller) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			if c.state.Breaker.IsTripped(c.Name()) {
+				logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
+				continue
+			}
 			snapshot := c.state.Snapshot()
 			recs, err := c.Analyze(ctx, snapshot)
 			if err != nil {
 				logger.Error(err, "Analysis failed")
+				c.state.Breaker.RecordFailure(c.Name())
 				continue
 			}
 			for _, rec := range recs {
 				updatedRec, executed, err := c.Execute(ctx, rec)
 				if err != nil {
 					logger.Error(err, "Execution failed", "recommendation", rec.ID)
+					c.state.Breaker.RecordFailure(c.Name())
+				}
+				if executed {
+					c.state.Breaker.RecordSuccess(c.Name())
 				}
 
 				// Persist non-executed recommendations as CRDs so they are visible

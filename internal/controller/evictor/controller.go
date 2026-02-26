@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -91,19 +92,13 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
-	// AI Gate for large evictions — fail-closed: if the gate is nil and the
-	// threshold is exceeded, block execution rather than proceeding unsafely.
-	nodesAffected := rec.EstimatedImpact.NodesAffected
-	if nodesAffected > c.config.AIGate.MaxEvictNodes {
-		if c.gate == nil {
-			logger.Info("AI Gate required but not configured, blocking eviction for safety",
-				"nodesAffected", nodesAffected, "threshold", c.config.AIGate.MaxEvictNodes)
-			return nil
-		}
+	// AI Gate validation — fail-closed: use RequiresValidation which checks
+	// both the RequiresAIGate flag AND actual impact metrics (cost, nodes affected).
+	if c.gate.RequiresValidation(rec) {
 		valReq := aigate.ValidationRequest{
 			Action:         rec.Summary,
 			Recommendation: rec,
-			RiskFactors:    []string{fmt.Sprintf("Evicting from %d nodes simultaneously", nodesAffected)},
+			RiskFactors:    []string{fmt.Sprintf("Evicting from %d nodes simultaneously", rec.EstimatedImpact.NodesAffected)},
 		}
 		result, err := c.gate.Validate(ctx, valReq)
 		if err != nil || !result.Approved {
@@ -144,6 +139,11 @@ func (c *Controller) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			if c.state.Breaker.IsTripped(c.Name()) {
+				logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
+				continue
+			}
+
 			// Reconcile partially-drained nodes first — auto-uncordon if TTL expired.
 			c.reconcilePartialDrains(ctx)
 
@@ -151,6 +151,7 @@ func (c *Controller) run(ctx context.Context) {
 			recs, err := c.Analyze(ctx, snapshot)
 			if err != nil {
 				logger.Error(err, "Analysis failed")
+				c.state.Breaker.RecordFailure(c.Name())
 				continue
 			}
 			// Enforce MaxConcurrentEvictions: only execute up to the
@@ -165,8 +166,10 @@ func (c *Controller) run(ctx context.Context) {
 				}
 				if err := c.Execute(ctx, rec); err != nil {
 					logger.Error(err, "Execution failed", "recommendation", rec.ID)
+					c.state.Breaker.RecordFailure(c.Name())
 				} else {
 					executed++
+					c.state.Breaker.RecordSuccess(c.Name())
 				}
 			}
 		case <-ctx.Done():
@@ -210,11 +213,17 @@ func (c *Controller) reconcilePartialDrains(ctx context.Context) {
 			"ttl", ttl,
 		)
 
-		// Fetch fresh copy of the node to avoid stale resource version.
-		node := ns.Node.DeepCopy()
+		// Fetch fresh copy from the API server to avoid stale resourceVersion.
+		node := &corev1.Node{}
+		if err := c.client.Get(ctx, client.ObjectKeyFromObject(ns.Node), node); err != nil {
+			logger.Error(err, "Failed to fetch fresh node for uncordon", "node", ns.Node.Name)
+			continue
+		}
 		node.Spec.Unschedulable = false
-		delete(node.Annotations, "koptimizer.io/partial-drain-at")
-		delete(node.Annotations, "koptimizer.io/partial-drain-reason")
+		if node.Annotations != nil {
+			delete(node.Annotations, "koptimizer.io/partial-drain-at")
+			delete(node.Annotations, "koptimizer.io/partial-drain-reason")
+		}
 
 		if err := c.client.Update(ctx, node); err != nil {
 			logger.Error(err, "Failed to auto-uncordon partially drained node", "node", ns.Node.Name)

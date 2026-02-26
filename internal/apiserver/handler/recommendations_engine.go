@@ -59,7 +59,7 @@ func computedID(recType, target string) string {
 }
 
 // ComputeRecommendations generates recommendations from live ClusterState.
-// Results are cached for 60s to avoid redundant computation across endpoints.
+// Results are cached for 5 minutes to avoid redundant computation across endpoints.
 func ComputeRecommendations(cs *state.ClusterState) []ComputedRecommendation {
 	recsCache.Lock()
 	defer recsCache.Unlock()
@@ -244,6 +244,12 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		if systemNamespaces[p.Namespace] || p.CPURequest == 0 {
 			continue
 		}
+		// Skip pods younger than 10 minutes — insufficient metrics history
+		if p.Pod != nil && p.Pod.Status.StartTime != nil {
+			if time.Since(p.Pod.Status.StartTime.Time) < 10*time.Minute {
+				continue
+			}
+		}
 		if !p.IsOverProvisioned(0.5) {
 			continue
 		}
@@ -399,11 +405,21 @@ func ComputeSavingsOpportunities(recs []ComputedRecommendation) []ComputedOpport
 	return opps
 }
 
-// ComputeTotalPotentialSavings sums estimated savings across all recommendations.
+// ComputeTotalPotentialSavings sums estimated savings across all recommendations,
+// deduplicating by target key (type/target) to avoid double-counting when multiple
+// recommendation algorithms flag the same resource.
 func ComputeTotalPotentialSavings(recs []ComputedRecommendation) float64 {
 	total := 0.0
+	// Deduplicate: keep highest savings per target
+	bestByTarget := make(map[string]float64)
 	for _, r := range recs {
-		total += r.EstimatedSavings
+		key := r.Type + "/" + r.Target
+		if r.EstimatedSavings > bestByTarget[key] {
+			bestByTarget[key] = r.EstimatedSavings
+		}
+	}
+	for _, v := range bestByTarget {
+		total += v
 	}
 	return total
 }

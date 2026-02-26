@@ -39,7 +39,7 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 			"podCount":       len(n.Pods),
 		})
 	}
-	writeJSON(w, http.StatusOK, result)
+	writePaginatedJSON(w, r, result)
 }
 
 func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {

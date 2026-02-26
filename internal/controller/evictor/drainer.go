@@ -71,8 +71,11 @@ func (d *Drainer) DrainNode(ctx context.Context, nodeName string) error {
 			pdbList := &policyv1.PodDisruptionBudgetList{}
 			if err := d.client.List(drainCtx, pdbList, client.InNamespace(ns)); err != nil {
 				logger.Error(err, "Failed to list PDBs, treating all pods in namespace as protected", "namespace", ns)
+				// Set nil so checkPDBSafeWithCache returns false (fail-safe)
+				pdbByNamespace[ns] = nil
+			} else {
+				pdbByNamespace[ns] = pdbList
 			}
-			pdbByNamespace[ns] = pdbList
 		}
 	}
 
@@ -241,6 +244,17 @@ func shouldSkipPod(pod *corev1.Pod) bool {
 	// Skip pods with koptimizer.io/exclude annotation
 	if v, ok := pod.Annotations["koptimizer.io/exclude"]; ok && v == "true" {
 		return true
+	}
+	// Skip pods with local storage (EmptyDir without safe-to-evict, HostPath)
+	safeToEvict := pod.Annotations["koptimizer.io/safe-to-evict"] == "true" ||
+		pod.Annotations["cluster-autoscaler.kubernetes.io/safe-to-evict"] == "true"
+	for _, vol := range pod.Spec.Volumes {
+		if vol.EmptyDir != nil && !safeToEvict {
+			return true
+		}
+		if vol.HostPath != nil {
+			return true
+		}
 	}
 	return false
 }

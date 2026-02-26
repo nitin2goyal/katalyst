@@ -45,7 +45,10 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			"isEmpty":        g.IsEmpty(),
 		})
 	}
-	writeJSON(w, http.StatusOK, result)
+	if result == nil {
+		result = []map[string]interface{}{}
+	}
+	writePaginatedJSON(w, r, result)
 }
 
 func (h *NodeGroupHandler) Get(w http.ResponseWriter, r *http.Request) {

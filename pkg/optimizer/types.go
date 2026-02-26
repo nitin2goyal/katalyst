@@ -119,4 +119,5 @@ type PodInfo struct {
 	OwnerName     string
 	IsGPUWorkload bool
 	GPURequest    int
+	ReplicaCount  int // Number of replicas for the owning workload (0 = unknown)
 }

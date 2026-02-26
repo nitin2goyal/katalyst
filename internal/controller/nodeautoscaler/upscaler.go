@@ -44,18 +44,26 @@ func (u *Upscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnaps
 		return nil, nil
 	}
 
+	// Track how many pending pods have been "claimed" by earlier node group
+	// recommendations so we don't recommend scaling every group by the full
+	// pending count (which would cause N× over-provisioning).
+	remainingPending := len(pendingPods)
+
 	// For each node group, check if adding a node would help
 	for _, ng := range snapshot.NodeGroups {
+		if remainingPending <= 0 {
+			break
+		}
 		if ng.DesiredCount >= ng.MaxCount {
 			continue // Already at max
 		}
 
-		// Calculate how many nodes to add (capped by MaxScaleUpNodes)
+		// Calculate how many nodes to add (capped by MaxScaleUpNodes and remaining pending)
 		maxUp := u.config.NodeAutoscaler.MaxScaleUpNodes
 		if maxUp <= 0 {
 			maxUp = 1 // safety: at least cap to 1 if misconfigured
 		}
-		nodesToAdd := min(len(pendingPods), maxUp)
+		nodesToAdd := min(remainingPending, maxUp)
 		newDesired := ng.DesiredCount + nodesToAdd
 		if newDesired > ng.MaxCount {
 			newDesired = ng.MaxCount
@@ -73,6 +81,7 @@ func (u *Upscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnaps
 		}
 		requiresAIGate := scalePct > u.config.AIGate.ScaleThresholdPct
 
+		nodesAdded := newDesired - ng.DesiredCount
 		recs = append(recs, optimizer.Recommendation{
 			ID:             fmt.Sprintf("scaleup-%s-%d", ng.ID, time.Now().Unix()),
 			Type:           optimizer.RecommendationNodeScale,
@@ -81,13 +90,13 @@ func (u *Upscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnaps
 			RequiresAIGate: requiresAIGate,
 			TargetKind:     "NodeGroup",
 			TargetName:     ng.Name,
-			Summary:        fmt.Sprintf("Scale up node group %s from %d to %d nodes (%d pending pods)", ng.Name, ng.DesiredCount, newDesired, len(pendingPods)),
+			Summary:        fmt.Sprintf("Scale up node group %s from %d to %d nodes (%d pending pods)", ng.Name, ng.DesiredCount, newDesired, remainingPending),
 			ActionSteps: []string{
 				fmt.Sprintf("Increase desired count of ASG %s from %d to %d", ng.ID, ng.DesiredCount, newDesired),
 			},
 			EstimatedImpact: optimizer.ImpactEstimate{
-				NodesAffected: newDesired - ng.DesiredCount,
-				PodsAffected:  len(pendingPods),
+				NodesAffected: nodesAdded,
+				PodsAffected:  min(remainingPending, nodesAdded),
 				RiskLevel:     "low",
 			},
 			Details: map[string]string{
@@ -97,6 +106,9 @@ func (u *Upscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnaps
 			},
 			CreatedAt: time.Now(),
 		})
+
+		// Deduct claimed pods so subsequent groups don't double-count
+		remainingPending -= nodesAdded
 	}
 
 	return recs, nil

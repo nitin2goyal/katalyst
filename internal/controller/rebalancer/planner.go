@@ -6,16 +6,20 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/koptimizer/koptimizer/internal/scheduler"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
 // Planner computes optimal workload distribution using bin-packing.
 type Planner struct {
 	imbalanceThresholdPct float64
+	simulator             *scheduler.Simulator
 }
 
 func NewPlanner() *Planner {
-	return &Planner{imbalanceThresholdPct: 40.0}
+	return &Planner{imbalanceThresholdPct: 40.0, simulator: scheduler.NewSimulator()}
 }
 
 // NewPlannerWithThreshold creates a Planner with a configurable imbalance threshold.
@@ -23,7 +27,7 @@ func NewPlannerWithThreshold(thresholdPct float64) *Planner {
 	if thresholdPct <= 0 {
 		thresholdPct = 40.0
 	}
-	return &Planner{imbalanceThresholdPct: thresholdPct}
+	return &Planner{imbalanceThresholdPct: thresholdPct, simulator: scheduler.NewSimulator()}
 }
 
 // nodeUtil pairs a node with its CPU utilization percentage.
@@ -88,7 +92,20 @@ func (p *Planner) ComputePlan(snapshot *optimizer.ClusterSnapshot) ([]optimizer.
 		}
 	}
 
+	// Build pods-by-node map and underloaded node list for simulator
+	podsByNode := make(map[string][]*corev1.Pod)
+	for _, n := range snapshot.Nodes {
+		podsByNode[n.Node.Name] = n.Pods
+	}
+	var underloadedK8sNodes []*corev1.Node
+	for _, u := range underloaded {
+		if u.node.Node != nil {
+			underloadedK8sNodes = append(underloadedK8sNodes, u.node.Node)
+		}
+	}
+
 	// Bin-packing: identify specific pods on overloaded nodes that could fit on underloaded nodes
+	// Uses the scheduler simulator to check taints, tolerations, affinity, and memory in addition to CPU.
 	var movablePods []string
 	var targetNodes []string
 	podsAffected := 0
@@ -97,7 +114,6 @@ func (p *Planner) ComputePlan(snapshot *optimizer.ClusterSnapshot) ([]optimizer.
 		if over.node.Node == nil {
 			continue
 		}
-		nodeName := over.node.Node.Name
 		for _, pod := range over.node.Pods {
 			if pod == nil {
 				continue
@@ -114,36 +130,16 @@ func (p *Planner) ComputePlan(snapshot *optimizer.ClusterSnapshot) ([]optimizer.
 				continue
 			}
 
-			// Calculate pod's CPU request
-			var podCPU int64
-			for _, c := range pod.Spec.Containers {
-				podCPU += c.Resources.Requests.Cpu().MilliValue()
-			}
-			if podCPU == 0 {
-				continue
-			}
-
-			// Find an underloaded node with enough free capacity
-			for j := range underloaded {
-				if underloaded[j].freeCPU > 0 && underloaded[j].freeCPU >= podCPU {
-					targetName := ""
-					if underloaded[j].node.Node != nil {
-						targetName = underloaded[j].node.Node.Name
-					}
-
-					movablePods = append(movablePods, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
-					if targetName != "" {
-						targetNodes = append(targetNodes, targetName)
-					}
-					// Reduce free capacity on the target node
-					underloaded[j].freeCPU -= podCPU
-					podsAffected++
-					break
-				}
+			// Use simulator to find fitting underloaded nodes
+			fitting := p.simulator.FindFittingNodes(pod, underloadedK8sNodes, podsByNode)
+			if len(fitting) > 0 {
+				movablePods = append(movablePods, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
+				targetNodes = append(targetNodes, fitting[0])
+				// Add pod to the target node's existing pods for subsequent checks
+				podsByNode[fitting[0]] = append(podsByNode[fitting[0]], pod)
+				podsAffected++
 			}
 		}
-
-		_ = nodeName // nodeName is included via overloadedNames below
 	}
 
 	// Build the overloaded/underloaded node name lists

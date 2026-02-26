@@ -35,8 +35,14 @@ func (h *RecommendationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Fallback: compute recommendations on-the-fly when no CRDs exist
 	if crdErr != nil || len(recList.Items) == 0 {
-		computed := ComputeRecommendations(h.state)
-		writeJSON(w, http.StatusOK, computed)
+		recs := ComputeRecommendations(h.state)
+		if recs == nil {
+			recs = []ComputedRecommendation{}
+		}
+		page, pageSize := parsePagination(r)
+		start, end, resp := paginateSlice(len(recs), page, pageSize)
+		resp.Data = recs[start:end]
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
@@ -63,7 +69,7 @@ func (h *RecommendationHandler) List(w http.ResponseWriter, r *http.Request) {
 			"confidence":       0.90,
 		})
 	}
-	writeJSON(w, http.StatusOK, result)
+	writePaginatedJSON(w, r, result)
 }
 
 func (h *RecommendationHandler) Get(w http.ResponseWriter, r *http.Request) {

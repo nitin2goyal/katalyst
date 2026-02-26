@@ -28,6 +28,7 @@ type ClusterState struct {
 	nodeGroups       *NodeGroupState
 	AuditLog         *AuditLog
 	NodeLock         *NodeLock
+	Breaker          *CircuitBreaker
 	MetricsAvailable bool // true if Metrics Server returned data on last refresh
 	NodesWithMetrics int  // count of nodes with actual metrics data
 	PodsWithMetrics  int  // count of pods with actual metrics data
@@ -55,6 +56,7 @@ func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc p
 		nodeGroups: NewNodeGroupState(),
 		AuditLog:   auditLog,
 		NodeLock:   NewNodeLock(),
+		Breaker:    NewCircuitBreaker(0.5, 5*time.Minute),
 	}
 }
 
@@ -154,22 +156,29 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	// Build node group lookup
 	nodeGroupByNode := buildNodeGroupMapping(nodeList, groups)
 
-	// Pre-fetch pricing once to avoid N+1 GetNodeCost calls per node.
-	// GetNodeRegion returns the provider's default region for nodes without
-	// a region label, so a single call covers the common case.
-	var pricingMap map[string]float64
+	// Pre-fetch pricing for all unique node regions to support multi-region clusters.
+	// Collect unique regions first, then fetch pricing for each.
+	pricingByRegion := make(map[string]map[string]float64)
 	var defaultRegion string
-	if len(nodeList.Items) > 0 {
-		if region, err := s.provider.GetNodeRegion(ctx, &nodeList.Items[0]); err == nil {
-			defaultRegion = region
-			if pi, err := s.provider.GetCurrentPricing(ctx, region); err == nil {
-				pricingMap = pi.Prices
-			} else {
-				slog.Warn("pricing API unavailable, will use capacity-based fallback",
-					"region", region, "error", err)
+	regionSet := make(map[string]bool)
+	for i := range nodeList.Items {
+		if region, err := s.provider.GetNodeRegion(ctx, &nodeList.Items[i]); err == nil {
+			if defaultRegion == "" {
+				defaultRegion = region
 			}
+			regionSet[region] = true
 		}
 	}
+	for region := range regionSet {
+		if pi, err := s.provider.GetCurrentPricing(ctx, region); err == nil {
+			pricingByRegion[region] = pi.Prices
+		} else {
+			slog.Warn("pricing API unavailable for region, will use capacity-based fallback",
+				"region", region, "error", err)
+		}
+	}
+	// Default pricingMap for backward compatibility
+	pricingMap := pricingByRegion[defaultRegion]
 
 	// Get pod metrics BEFORE acquiring the lock to avoid blocking readers
 	// during this network call. Retry up to 5 times for resilience.
@@ -266,8 +275,15 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		}
 
 		// Compute cost from pre-fetched pricing (avoids per-node API call).
-		if pricingMap != nil && instanceType != "" {
-			if price, ok := pricingMap[instanceType]; ok {
+		// Use per-region pricing when available for multi-region cluster support.
+		nodePricingMap := pricingMap
+		if nodeRegion, err := s.provider.GetNodeRegion(ctx, node); err == nil {
+			if rp, ok := pricingByRegion[nodeRegion]; ok {
+				nodePricingMap = rp
+			}
+		}
+		if nodePricingMap != nil && instanceType != "" {
+			if price, ok := nodePricingMap[instanceType]; ok {
 				ns.IsSpot = cloudprovider.IsSpotNode(node)
 				if ns.IsSpot {
 					// Use per-provider, per-family spot discount estimates instead

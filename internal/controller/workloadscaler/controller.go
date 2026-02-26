@@ -4,12 +4,16 @@ import (
 	"context"
 	"time"
 
+	"fmt"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/internal/state"
+	"github.com/koptimizer/koptimizer/pkg/aigate"
+	"github.com/koptimizer/koptimizer/pkg/familylock"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
@@ -17,6 +21,8 @@ import (
 type Controller struct {
 	client      client.Client
 	state       *state.ClusterState
+	guard       *familylock.FamilyLockGuard
+	gate        *aigate.AIGate
 	config      *config.Config
 	horizontal  *HorizontalScaler
 	vertical    *VerticalScaler
@@ -24,11 +30,13 @@ type Controller struct {
 	surge       *SurgeDetector
 }
 
-func NewController(mgr ctrl.Manager, st *state.ClusterState, cfg *config.Config) *Controller {
+func NewController(mgr ctrl.Manager, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
 	c := mgr.GetClient()
 	return &Controller{
 		client:      c,
 		state:       st,
+		guard:       guard,
+		gate:        gate,
 		config:      cfg,
 		horizontal:  NewHorizontalScaler(c, cfg),
 		vertical:    NewVerticalScaler(c, cfg),
@@ -86,11 +94,26 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 }
 
 func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) error {
+	logger := log.FromContext(ctx).WithName("workloadscaler")
 	if c.config.Mode != "active" {
 		return nil
 	}
 	if !rec.AutoExecutable {
 		return nil
+	}
+
+	// AI Gate validation — fail-closed for workload scaling changes
+	if c.gate.RequiresValidation(rec) {
+		valReq := aigate.ValidationRequest{
+			Action:         rec.Summary,
+			Recommendation: rec,
+			RiskFactors:    []string{fmt.Sprintf("Workload scaling: %s", rec.Details["scalingType"])},
+		}
+		result, err := c.gate.Validate(ctx, valReq)
+		if err != nil || !result.Approved {
+			logger.Info("AI Gate rejected workload scaling", "recommendation", rec.ID)
+			return nil
+		}
 	}
 
 	switch rec.Details["scalingType"] {
@@ -110,15 +133,23 @@ func (c *Controller) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			if c.state.Breaker.IsTripped(c.Name()) {
+				logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
+				continue
+			}
 			snapshot := c.state.Snapshot()
 			recs, err := c.Analyze(ctx, snapshot)
 			if err != nil {
 				logger.Error(err, "Analysis failed")
+				c.state.Breaker.RecordFailure(c.Name())
 				continue
 			}
 			for _, rec := range recs {
 				if err := c.Execute(ctx, rec); err != nil {
 					logger.Error(err, "Execution failed", "recommendation", rec.ID)
+					c.state.Breaker.RecordFailure(c.Name())
+				} else {
+					c.state.Breaker.RecordSuccess(c.Name())
 				}
 			}
 		case <-ctx.Done():

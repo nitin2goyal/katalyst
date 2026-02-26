@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +18,12 @@ import (
 	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
+
+type ownerRef struct {
+	namespace string
+	kind      string // "ReplicaSet", "Deployment", or "StatefulSet"
+	name      string
+}
 
 // Executor performs the actual pod migrations for rebalancing.
 type Executor struct {
@@ -72,16 +79,15 @@ func (e *Executor) Execute(ctx context.Context, rec optimizer.Recommendation) er
 			pdbList := &policyv1.PodDisruptionBudgetList{}
 			if err := e.client.List(ctx, pdbList, client.InNamespace(ns)); err != nil {
 				logger.Error(err, "Failed to list PDBs, treating all pods in namespace as protected", "namespace", ns)
+				// Set nil so checkPDBSafeWithCache returns false (fail-safe)
+				pdbByNamespace[ns] = nil
+			} else {
+				pdbByNamespace[ns] = pdbList
 			}
-			pdbByNamespace[ns] = pdbList
 		}
 	}
 
-	type evictedPod struct {
-		name      string
-		namespace string
-	}
-	var evictedPods []evictedPod
+	ownerSet := make(map[ownerRef]bool)
 	var evicted, failed int
 	var evictErrs []error
 
@@ -115,7 +121,12 @@ func (e *Executor) Execute(ctx context.Context, rec optimizer.Recommendation) er
 				evictErrs = append(evictErrs, fmt.Errorf("evicting %s/%s: %w", pod.Namespace, pod.Name, err))
 			} else {
 				evicted++
-				evictedPods = append(evictedPods, evictedPod{name: pod.Name, namespace: pod.Namespace})
+				// Track owners (Deployment/ReplicaSet) for rescheduling verification
+				for _, ref := range pod.OwnerReferences {
+					if ref.Kind == "ReplicaSet" || ref.Kind == "Deployment" || ref.Kind == "StatefulSet" {
+						ownerSet[ownerRef{namespace: pod.Namespace, kind: ref.Kind, name: ref.Name}] = true
+					}
+				}
 			}
 		}
 	}
@@ -137,10 +148,10 @@ func (e *Executor) Execute(ctx context.Context, rec optimizer.Recommendation) er
 		logger.Info("Some evictions failed", "node", nodeName, "evicted", evicted, "failed", failed)
 	}
 
-	// Wait for evicted pods to be rescheduled before uncordoning.
-	// Poll every 5 seconds for up to the configured timeout to verify pods have moved off.
-	if len(evictedPods) > 0 {
-		logger.Info("Waiting for evicted pods to be rescheduled", "count", len(evictedPods))
+	// Wait for evicted pods' owners to reach desired ready replicas before uncordoning.
+	// This verifies replacement pods are actually running, not just that old pods were deleted.
+	if len(ownerSet) > 0 {
+		logger.Info("Waiting for owner controllers to reach ready state", "owners", len(ownerSet))
 		waitTimeout := e.config.Rebalancer.RescheduleTimeout
 		if waitTimeout <= 0 {
 			waitTimeout = 60 * time.Second
@@ -157,22 +168,20 @@ func (e *Executor) Execute(ctx context.Context, rec optimizer.Recommendation) er
 				logger.Info("Wait timeout reached, proceeding to uncordon", "node", nodeName)
 				goto uncordon
 			case <-ticker.C:
-				allRescheduled := true
-				for _, ep := range evictedPods {
-					pod := &corev1.Pod{}
-					err := e.client.Get(ctx, types.NamespacedName{Namespace: ep.namespace, Name: ep.name}, pod)
+				allReady := true
+				for owner := range ownerSet {
+					ready, err := e.isOwnerReady(ctx, owner)
 					if err != nil {
-						// Pod not found means it was deleted (will be recreated by controller)
+						// Owner not found (e.g. orphan pod) — skip
 						continue
 					}
-					// If the pod is still on the cordoned node and not terminated, it hasn't moved
-					if pod.Spec.NodeName == nodeName && pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
-						allRescheduled = false
+					if !ready {
+						allReady = false
 						break
 					}
 				}
-				if allRescheduled {
-					logger.Info("All evicted pods rescheduled", "node", nodeName)
+				if allReady {
+					logger.Info("All evicted pod owners report ready replicas", "node", nodeName)
 					goto uncordon
 				}
 			}
@@ -212,7 +221,57 @@ func (e *Executor) checkPDBSafeWithCache(pod *corev1.Pod, pdbList *policyv1.PodD
 	return true
 }
 
+// isOwnerReady checks if the owner controller has its desired replicas ready.
+func (e *Executor) isOwnerReady(ctx context.Context, owner ownerRef) (bool, error) {
+	switch owner.kind {
+	case "ReplicaSet":
+		rs := &appsv1.ReplicaSet{}
+		if err := e.client.Get(ctx, types.NamespacedName{Namespace: owner.namespace, Name: owner.name}, rs); err != nil {
+			return false, err
+		}
+		desired := int32(1)
+		if rs.Spec.Replicas != nil {
+			desired = *rs.Spec.Replicas
+		}
+		return rs.Status.ReadyReplicas >= desired, nil
+	case "Deployment":
+		dep := &appsv1.Deployment{}
+		if err := e.client.Get(ctx, types.NamespacedName{Namespace: owner.namespace, Name: owner.name}, dep); err != nil {
+			return false, err
+		}
+		desired := int32(1)
+		if dep.Spec.Replicas != nil {
+			desired = *dep.Spec.Replicas
+		}
+		return dep.Status.ReadyReplicas >= desired, nil
+	case "StatefulSet":
+		ss := &appsv1.StatefulSet{}
+		if err := e.client.Get(ctx, types.NamespacedName{Namespace: owner.namespace, Name: owner.name}, ss); err != nil {
+			return false, err
+		}
+		desired := int32(1)
+		if ss.Spec.Replicas != nil {
+			desired = *ss.Spec.Replicas
+		}
+		return ss.Status.ReadyReplicas >= desired, nil
+	default:
+		return true, nil
+	}
+}
+
 func canMovePod(pod *corev1.Pod) bool {
+	// Skip system-critical namespaces
+	if pod.Namespace == "kube-system" || pod.Namespace == "kube-public" || pod.Namespace == "kube-node-lease" {
+		return false
+	}
+	// Skip system-critical priority classes
+	if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
+		return false
+	}
+	// Skip completed pods
+	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		return false
+	}
 	// Skip DaemonSet pods
 	for _, ref := range pod.OwnerReferences {
 		if ref.Kind == "DaemonSet" {
@@ -227,9 +286,11 @@ func canMovePod(pod *corev1.Pod) bool {
 	if v, ok := pod.Annotations["koptimizer.io/exclude"]; ok && v == "true" {
 		return false
 	}
-	// Skip pods with local storage
+	// Skip pods with local storage (unless annotated safe-to-evict by either koptimizer or cluster-autoscaler)
+	safeToEvict := pod.Annotations["koptimizer.io/safe-to-evict"] == "true" ||
+		pod.Annotations["cluster-autoscaler.kubernetes.io/safe-to-evict"] == "true"
 	for _, vol := range pod.Spec.Volumes {
-		if vol.EmptyDir != nil && pod.Annotations["koptimizer.io/safe-to-evict"] != "true" {
+		if vol.EmptyDir != nil && !safeToEvict {
 			return false
 		}
 		if vol.HostPath != nil {

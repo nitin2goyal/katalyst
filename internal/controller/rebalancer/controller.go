@@ -3,6 +3,7 @@ package rebalancer
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -20,16 +21,17 @@ import (
 
 // Controller periodically rebalances workloads for optimal packing.
 type Controller struct {
-	client    client.Client
-	provider  cloudprovider.CloudProvider
-	state     *state.ClusterState
-	guard     *familylock.FamilyLockGuard
-	gate      *aigate.AIGate
-	config    *config.Config
-	planner   *Planner
-	executor  *Executor
-	scheduler *Scheduler
-	busyRedist *BusyRedistributor
+	client      client.Client
+	provider    cloudprovider.CloudProvider
+	state       *state.ClusterState
+	guard       *familylock.FamilyLockGuard
+	gate        *aigate.AIGate
+	config      *config.Config
+	planner     *Planner
+	executor    *Executor
+	scheduler   *Scheduler
+	busyRedist  *BusyRedistributor
+	reconcileMu sync.Mutex // Prevents concurrent reconciliation
 }
 
 func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
@@ -83,6 +85,9 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 }
 
 func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) error {
+	c.reconcileMu.Lock()
+	defer c.reconcileMu.Unlock()
+
 	logger := log.FromContext(ctx).WithName("rebalancer")
 	if c.config.Mode != "active" || c.config.Rebalancer.DryRun {
 		if c.config.Rebalancer.DryRun {
@@ -98,8 +103,10 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
-	// AI Gate validation for risky changes
-	if c.gate != nil && rec.RequiresAIGate {
+	// AI Gate validation for risky changes — fail-closed: use RequiresValidation
+	// which checks both the flag AND actual impact metrics, so high-impact
+	// recommendations cannot bypass the gate by omitting the flag.
+	if c.gate.RequiresValidation(rec) {
 		valReq := aigate.ValidationRequest{
 			Action:         rec.Summary,
 			Recommendation: rec,
@@ -159,15 +166,23 @@ func (c *Controller) run(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
+				if c.state.Breaker.IsTripped(c.Name()) {
+					logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
+					continue
+				}
 				snapshot := c.state.Snapshot()
 				recs, err := c.busyRedist.Analyze(ctx, snapshot)
 				if err != nil {
 					logger.Error(err, "Busy redistribution analysis failed")
+					c.state.Breaker.RecordFailure(c.Name())
 					continue
 				}
 				for _, rec := range recs {
 					if err := c.Execute(ctx, rec); err != nil {
 						logger.Error(err, "Busy redistribution failed", "recommendation", rec.ID)
+						c.state.Breaker.RecordFailure(c.Name())
+					} else {
+						c.state.Breaker.RecordSuccess(c.Name())
 					}
 				}
 			case <-ctx.Done():

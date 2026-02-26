@@ -77,7 +77,7 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.ValidateDetailed(); err != nil {
 		setupLog.Error(err, "Invalid configuration")
 		os.Exit(1)
 	}
@@ -221,14 +221,14 @@ func main() {
 	}
 
 	if cfg.Rightsizer.Enabled {
-		if err := rightsizer.NewController(mgr, clusterState, cfg, metricsStore).SetupWithManager(mgr); err != nil {
+		if err := rightsizer.NewController(mgr, clusterState, gate, cfg, metricsStore).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Unable to create controller", "controller", "Rightsizer")
 			os.Exit(1)
 		}
 	}
 
 	if cfg.WorkloadScaler.Enabled {
-		if err := workloadscaler.NewController(mgr, clusterState, cfg).SetupWithManager(mgr); err != nil {
+		if err := workloadscaler.NewController(mgr, clusterState, guard, gate, cfg).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Unable to create controller", "controller", "WorkloadScaler")
 			os.Exit(1)
 		}
@@ -249,21 +249,21 @@ func main() {
 	}
 
 	if cfg.GPU.Enabled {
-		if err := gpu.NewController(mgr, clusterState, cfg).SetupWithManager(mgr); err != nil {
+		if err := gpu.NewController(mgr, clusterState, guard, gate, cfg).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Unable to create controller", "controller", "GPU")
 			os.Exit(1)
 		}
 	}
 
 	if cfg.Spot.Enabled {
-		if err := spot.NewController(mgr, provider, clusterState, cfg).SetupWithManager(mgr); err != nil {
+		if err := spot.NewController(mgr, provider, clusterState, guard, gate, cfg).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Unable to create controller", "controller", "Spot")
 			os.Exit(1)
 		}
 	}
 
 	if cfg.Hibernation.Enabled {
-		if err := hibernation.NewController(mgr, provider, clusterState, cfg).SetupWithManager(mgr); err != nil {
+		if err := hibernation.NewController(mgr, provider, clusterState, guard, gate, cfg).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Unable to create controller", "controller", "Hibernation")
 			os.Exit(1)
 		}

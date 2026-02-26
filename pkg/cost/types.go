@@ -49,3 +49,16 @@ type CostSummary struct {
 	SavingsByCategory       map[string]float64
 	Timestamp               time.Time
 }
+
+// EstimateCPUCostFraction estimates the fraction of a node's total cost that
+// is attributable to CPU. On GPU nodes the GPU dominates (~95% of cost), so
+// CPU scavenging savings should only reference the CPU slice.
+func EstimateCPUCostFraction(cpuAllocMillis int64, isGPUNode bool) float64 {
+	if isGPUNode {
+		// GPU nodes: CPU is typically 2-5% of the total node cost.
+		return 0.05
+	}
+	// Non-GPU nodes: CPU and memory share the cost roughly equally.
+	_ = cpuAllocMillis
+	return 1.0
+}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
+	"github.com/koptimizer/koptimizer/pkg/cost"
 )
 
 // NodeGroupState tracks node groups and their associated nodes.
@@ -62,7 +63,7 @@ func (s *NodeGroupState) Update(groups []*cloudprovider.NodeGroup, nodes []*Node
 			info.UsedMemory += n.MemoryUsed
 			info.RequestedCPU += n.CPURequested
 			info.RequestedMemory += n.MemoryRequested
-			info.MonthlyCostUSD += n.HourlyCostUSD * 730
+			info.MonthlyCostUSD += n.HourlyCostUSD * cost.HoursPerMonth
 			for _, pod := range n.Pods {
 				if !isDaemonSetPod(pod) {
 					info.TotalPods++

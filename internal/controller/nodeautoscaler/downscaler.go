@@ -84,11 +84,12 @@ func (d *Downscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 		scalePct := float64(ng.DesiredCount-newDesired) / float64(ng.DesiredCount) * 100
 		requiresAIGate := scalePct > d.config.AIGate.ScaleThresholdPct
 
-		// Estimate savings
-		hourlySavingsPerNode := float64(0)
-		if len(nodes) > 0 {
-			hourlySavingsPerNode = nodes[0].HourlyCostUSD
+		// Estimate savings using average hourly cost across all nodes in the group
+		totalHourlyCost := float64(0)
+		for _, n := range nodes {
+			totalHourlyCost += n.HourlyCostUSD
 		}
+		hourlySavingsPerNode := totalHourlyCost / float64(len(nodes))
 		monthlySavings := hourlySavingsPerNode * cost.HoursPerMonth * float64(ng.DesiredCount-newDesired)
 
 		recs = append(recs, optimizer.Recommendation{
@@ -111,7 +112,7 @@ func (d *Downscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 				Currency:          "USD",
 			},
 			EstimatedImpact: optimizer.ImpactEstimate{
-				MonthlyCostChangeUSD: monthlySavings,
+				MonthlyCostChangeUSD: -monthlySavings,
 				NodesAffected:        ng.DesiredCount - newDesired,
 				RiskLevel:            "medium",
 			},

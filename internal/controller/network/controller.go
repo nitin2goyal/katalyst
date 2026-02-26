@@ -112,9 +112,21 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 		if len(wl.azs) > 1 && wl.totalPods >= 3 {
 			crossAZWorkloads++
 
-			// Estimate cross-AZ cost: assume 10% of pod traffic is inter-pod within
-			// the same service and flows cross-AZ proportional to AZ imbalance
-			estimatedCrossAZGB := float64(wl.totalPods) * 0.5 * cost.HoursPerMonth // rough: 0.5 GB/hr per pod
+			// Estimate cross-AZ cost using configurable per-pod traffic rate and
+			// actual AZ distribution for cross-AZ fraction
+			trafficPerPod := c.config.NetworkMonitor.TrafficPerPodGBPerHour
+			if trafficPerPod <= 0 {
+				trafficPerPod = 0.1 // fallback default
+			}
+			// Compute cross-AZ fraction from actual AZ distribution:
+			// fraction of traffic that goes cross-AZ = 1 - sum((pods_in_az/total)^2)
+			crossAZFraction := float64(0)
+			for _, count := range wl.azs {
+				frac := float64(count) / float64(wl.totalPods)
+				crossAZFraction += frac * frac
+			}
+			crossAZFraction = 1 - crossAZFraction
+			estimatedCrossAZGB := float64(wl.totalPods) * trafficPerPod * cost.HoursPerMonth * crossAZFraction
 			estimatedMonthlyCost := estimatedCrossAZGB * c.config.NetworkMonitor.CrossAZCostPerGBUSD
 
 			recs = append(recs, optimizer.Recommendation{

@@ -5,18 +5,22 @@ import (
 	"sort"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/koptimizer/koptimizer/internal/config"
+	"github.com/koptimizer/koptimizer/internal/scheduler"
 	"github.com/koptimizer/koptimizer/pkg/cost"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
 // Consolidator plans multi-node consolidation.
 type Consolidator struct {
-	config *config.Config
+	config    *config.Config
+	simulator *scheduler.Simulator
 }
 
 func NewConsolidator(cfg *config.Config) *Consolidator {
-	return &Consolidator{config: cfg}
+	return &Consolidator{config: cfg, simulator: scheduler.NewSimulator()}
 }
 
 // Plan creates a consolidation plan based on fragmentation scores.
@@ -40,46 +44,81 @@ func (c *Consolidator) Plan(snapshot *optimizer.ClusterSnapshot, scores []NodeSc
 		return nil, nil
 	}
 
-	// Calculate total free capacity on non-candidate nodes
-	totalFreeCPU := int64(0)
-	totalFreeMem := int64(0)
-	for _, s := range scores {
-		if !s.IsCandidate {
-			totalFreeCPU += s.CPUFree
-			totalFreeMem += s.MemFree
-		}
-	}
-
 	// Build node lookup map for O(1) access
 	nodeMap := make(map[string]*optimizer.NodeInfo, len(snapshot.Nodes))
 	for i := range snapshot.Nodes {
 		nodeMap[snapshot.Nodes[i].Node.Name] = &snapshot.Nodes[i]
 	}
 
-	// Check if candidate pods can fit on remaining nodes
+	// Build non-candidate nodes list and pods-by-node map for simulation
+	candidateSet := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		candidateSet[c.NodeName] = true
+	}
+
+	var nonCandidateNodes []*corev1.Node
+	podsByNode := make(map[string][]*corev1.Pod)
+	for _, n := range snapshot.Nodes {
+		name := n.Node.Name
+		if !candidateSet[name] {
+			nonCandidateNodes = append(nonCandidateNodes, n.Node)
+		}
+		podsByNode[name] = n.Pods
+	}
+
+	// Check if candidate pods can fit on remaining nodes using per-pod simulation
 	for _, candidate := range candidates {
 		if len(recs) >= c.config.Evictor.MaxConcurrentEvictions {
 			break
 		}
 
-		// Can the pods (used resources) from this node fit on other nodes?
-		// Used = Capacity - Free. We need the used resources to be <= total free elsewhere.
-		_ = candidate.CPUFree // CPUFree is the free capacity of the candidate
-		// We need to compute the USED capacity: what the pods on this node are requesting.
-		// From fragmentation.go: CPUFree = CPUCapacity - CPURequested, so CPURequested = CPUCapacity - CPUFree
-		// Since we don't have CPUCapacity in NodeScore, we check if the free space elsewhere
-		// exceeds what the pods use. The pods' total request = (capacity - free).
-		// But we can approximate: if a candidate has high score (very empty), the used portion is small.
-		// The correct check: (node.CPUCapacity - candidate.CPUFree) <= totalFreeCPU
-		// Since NodeScore doesn't carry capacity, we compute used from the snapshot.
-		var candidateCPUUsed, candidateMemUsed int64
-		if n, ok := nodeMap[candidate.NodeName]; ok {
-			candidateCPUUsed = n.CPURequested
-			candidateMemUsed = n.MemoryRequested
+		// Verify every non-DaemonSet pod on this candidate can be scheduled
+		// on at least one non-candidate node.
+		candidateNode, ok := nodeMap[candidate.NodeName]
+		if !ok {
+			continue
 		}
-		canFit := candidateCPUUsed <= totalFreeCPU && candidateMemUsed <= totalFreeMem
+		allFit := true
+		// Track cumulative placements within this candidate's feasibility check.
+		// Without this, two pods could both claim the same target node even if
+		// it only has capacity for one.
+		var tentativePlacements []struct {
+			node string
+			pod  *corev1.Pod
+		}
+		for _, pod := range candidateNode.Pods {
+			if pod == nil {
+				continue
+			}
+			isDaemonSet := false
+			for _, ref := range pod.OwnerReferences {
+				if ref.Kind == "DaemonSet" {
+					isDaemonSet = true
+					break
+				}
+			}
+			if isDaemonSet {
+				continue
+			}
+			fitting := c.simulator.FindFittingNodes(pod, nonCandidateNodes, podsByNode)
+			if len(fitting) == 0 {
+				allFit = false
+				break
+			}
+			// Accumulate: add pod to target node so subsequent pods see reduced capacity
+			podsByNode[fitting[0]] = append(podsByNode[fitting[0]], pod)
+			tentativePlacements = append(tentativePlacements, struct {
+				node string
+				pod  *corev1.Pod
+			}{fitting[0], pod})
+		}
 
-		if !canFit {
+		if !allFit {
+			// Roll back tentative placements since this candidate is infeasible
+			for _, tp := range tentativePlacements {
+				pods := podsByNode[tp.node]
+				podsByNode[tp.node] = pods[:len(pods)-1]
+			}
 			continue
 		}
 
@@ -127,10 +166,8 @@ func (c *Consolidator) Plan(snapshot *optimizer.ClusterSnapshot, scores []NodeSc
 			CreatedAt: time.Now(),
 		})
 
-		// Reduce available capacity after planning this consolidation.
-		// The pods from this candidate will consume candidateCPUUsed/candidateMemUsed on other nodes.
-		totalFreeCPU -= candidateCPUUsed
-		totalFreeMem -= candidateMemUsed
+		// Pod placements were already accumulated during the feasibility check above,
+		// so subsequent candidate iterations will see reduced capacity on target nodes.
 	}
 
 	return recs, nil
