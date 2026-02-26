@@ -2,13 +2,16 @@ package handler
 
 import (
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
+	pkgmetrics "github.com/koptimizer/koptimizer/pkg/metrics"
 )
 
 // --- helpers to build test fixtures ---
@@ -168,7 +171,7 @@ func TestEmptyNodeRecs(t *testing.T) {
 
 	recs := computeFromData(
 		[]*state.NodeState{emptyNode, busyNode, gpuNode},
-		nil, nil,
+		nil, nil, nil,
 	)
 
 	count := 0
@@ -203,7 +206,7 @@ func TestUnderutilizedNodeRecs(t *testing.T) {
 
 	recs := computeFromData(
 		[]*state.NodeState{lowNode, medNode, highNode},
-		nil, nil,
+		nil, nil, nil,
 	)
 
 	var lowRec, medRec *ComputedRecommendation
@@ -255,7 +258,7 @@ func TestSpotAdoptionRecs(t *testing.T) {
 
 	recs := computeFromData(
 		[]*state.NodeState{n1, n2, spotNode, gpuNode},
-		nil, nil,
+		nil, nil, nil,
 	)
 
 	spotRecs := 0
@@ -286,7 +289,7 @@ func TestPodRightsizingRecs(t *testing.T) {
 		400, 400e6, // usage: 10% CPU, 10% mem
 		"Deployment", "web-app")
 
-	recs := computeFromData([]*state.NodeState{node}, []*state.PodState{pod}, nil)
+	recs := computeFromData([]*state.NodeState{node}, []*state.PodState{pod}, nil, nil)
 
 	found := false
 	for _, r := range recs {
@@ -310,7 +313,7 @@ func TestPodRightsizingSkipsSystemNamespaces(t *testing.T) {
 		2000, 2e9, 200, 200e6,
 		"Deployment", "coredns")
 
-	recs := computeFromData([]*state.NodeState{node}, []*state.PodState{pod}, nil)
+	recs := computeFromData([]*state.NodeState{node}, []*state.PodState{pod}, nil, nil)
 
 	for _, r := range recs {
 		if r.Type == "rightsizing" && r.Target == "kube-system/Deployment/coredns" {
@@ -328,7 +331,7 @@ func TestNodeGroupRightsizingRecs(t *testing.T) {
 
 	ng := makeNodeGroup("ng-test", "test-pool", nodes)
 
-	recs := computeFromData(nil, nil, []*state.NodeGroupInfo{ng})
+	recs := computeFromData(nil, nil, []*state.NodeGroupInfo{ng}, nil)
 
 	found := false
 	for _, r := range recs {
@@ -349,7 +352,7 @@ func TestNodeGroupSkipsGPU(t *testing.T) {
 	n2 := makeNode("g2", 8000, 32e9, 800, 3e9, 0.50, withGPU)
 	ng := makeNodeGroup("ng-gpu", "gpu-pool", []*state.NodeState{n1, n2})
 
-	recs := computeFromData(nil, nil, []*state.NodeGroupInfo{ng})
+	recs := computeFromData(nil, nil, []*state.NodeGroupInfo{ng}, nil)
 
 	for _, r := range recs {
 		if r.Target == "gpu-pool" {
@@ -362,7 +365,7 @@ func TestNodeGroupSkipsSingleNode(t *testing.T) {
 	n := makeNode("solo", 8000, 32e9, 800, 3e9, 0.30)
 	ng := makeNodeGroup("ng-solo", "solo-pool", []*state.NodeState{n})
 
-	recs := computeFromData(nil, nil, []*state.NodeGroupInfo{ng})
+	recs := computeFromData(nil, nil, []*state.NodeGroupInfo{ng}, nil)
 
 	for _, r := range recs {
 		if r.Target == "solo-pool" {
@@ -376,7 +379,7 @@ func TestMinSavingsThreshold(t *testing.T) {
 	cheapNode := makeNode("cheap-1", 1000, 1e9, 0, 0, 0.001,
 		withPods(makeDaemonSetPod("kube-system", "proxy")))
 
-	recs := computeFromData([]*state.NodeState{cheapNode}, nil, nil)
+	recs := computeFromData([]*state.NodeState{cheapNode}, nil, nil, nil)
 
 	for _, r := range recs {
 		if r.Target == "cheap-1" {
@@ -446,7 +449,7 @@ func TestSortedBySavingsDescending(t *testing.T) {
 	n2 := makeNode("expensive", 4000, 8e9, 100, 100e6, 0.50,
 		withPods(makeDaemonSetPod("kube-system", "proxy")))
 
-	recs := computeFromData([]*state.NodeState{n1, n2}, nil, nil)
+	recs := computeFromData([]*state.NodeState{n1, n2}, nil, nil, nil)
 
 	if len(recs) < 2 {
 		t.Fatalf("expected at least 2 recs, got %d", len(recs))
@@ -456,5 +459,81 @@ func TestSortedBySavingsDescending(t *testing.T) {
 			t.Errorf("recs not sorted: [%d]=$%.2f > [%d]=$%.2f",
 				i, recs[i].EstimatedSavings, i-1, recs[i-1].EstimatedSavings)
 		}
+	}
+}
+
+func TestUnderutilizedWithHistoricalP95(t *testing.T) {
+	// Create a metrics store and seed it with 6h of synthetic data
+	ms := intmetrics.NewStore(7 * 24 * time.Hour)
+	now := time.Now()
+
+	// Node at 5% P95 CPU, 3% P95 memory (capacity: 16000m CPU, 64GiB mem)
+	// Seed 500 points within last 5h55m (>360 threshold, well within 6h window)
+	for i := 0; i < 500; i++ {
+		ms.RecordNodeMetrics(pkgmetrics.NodeMetrics{
+			Name:        "hist-node-1",
+			Timestamp:   now.Add(-355*time.Minute + time.Duration(i)*43*time.Second),
+			CPUUsage:    800,     // 800m out of 16000m = 5%
+			MemoryUsage: 1920e6, // ~1.92GB out of 64GB = 3%
+		})
+	}
+
+	node := makeNode("hist-node-1", 16000, 64e9, 800, int64(1.92e9), 0.50,
+		withPods(makeWorkloadPod("default", "pod-1", "200m")))
+
+	recs := computeFromData([]*state.NodeState{node}, nil, nil, ms)
+
+	var found *ComputedRecommendation
+	for i, r := range recs {
+		if r.Target == "hist-node-1" && r.Type == "consolidation" {
+			found = &recs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected underutil rec for hist-node-1 with historical data")
+	}
+	// Historical data should give confidence 0.90
+	if found.Confidence != 0.90 {
+		t.Errorf("confidence: got %.2f, want 0.90", found.Confidence)
+	}
+	if found.Priority != "high" {
+		t.Errorf("priority: got %s, want high (CPU 5%%, mem 3%%)", found.Priority)
+	}
+}
+
+func TestUnderutilizedFallsBackWithoutEnoughData(t *testing.T) {
+	// Create a metrics store with insufficient data points (<360)
+	ms := intmetrics.NewStore(7 * 24 * time.Hour)
+	now := time.Now()
+
+	// Only 100 points — below 360 threshold
+	for i := 0; i < 100; i++ {
+		ms.RecordNodeMetrics(pkgmetrics.NodeMetrics{
+			Name:        "sparse-node",
+			Timestamp:   now.Add(-time.Duration(100-i) * time.Minute),
+			CPUUsage:    800,
+			MemoryUsage: 1920e6,
+		})
+	}
+
+	node := makeNode("sparse-node", 16000, 64e9, 800, int64(1.92e9), 0.50,
+		withPods(makeWorkloadPod("default", "pod-1", "200m")))
+
+	recs := computeFromData([]*state.NodeState{node}, nil, nil, ms)
+
+	var found *ComputedRecommendation
+	for i, r := range recs {
+		if r.Target == "sparse-node" && r.Type == "consolidation" {
+			found = &recs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected underutil rec for sparse-node via point-in-time fallback")
+	}
+	// Should fall back to point-in-time confidence
+	if found.Confidence != 0.70 {
+		t.Errorf("confidence: got %.2f, want 0.70 (fallback)", found.Confidence)
 	}
 }

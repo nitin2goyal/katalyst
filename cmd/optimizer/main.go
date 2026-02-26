@@ -164,7 +164,7 @@ func main() {
 	}
 
 	// Initialize cluster state (audit log backed by SQLite when available)
-	clusterState := state.NewClusterState(mgr.GetClient(), provider, metricsCollector, sqlDBRef, dbWriter)
+	clusterState := state.NewClusterState(mgr.GetClient(), provider, metricsCollector, sqlDBRef, dbWriter, metricsStore)
 
 	// Initialize cost store (nil-safe)
 	costStore := store.NewCostStore(sqlDBRef)
@@ -315,7 +315,7 @@ func main() {
 	// Start REST API server
 	var apiSrv *http.Server
 	if cfg.APIServer.Enabled {
-		apiSrv = apiserver.NewServer(cfg, clusterState, provider, guard, mgr.GetClient(), costStore)
+		apiSrv = apiserver.NewServer(cfg, clusterState, provider, guard, mgr.GetClient(), costStore, metricsStore)
 		go func() {
 			addr := fmt.Sprintf("%s:%d", cfg.APIServer.Address, cfg.APIServer.Port)
 			setupLog.Info("Starting API server", "address", addr)

@@ -110,6 +110,23 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	// Persist daily cost snapshot to SQLite (nil-safe inside CostStore)
 	c.costStore.RecordDailySnapshot(totalMonthlyCost, costByNamespace, costByNodeGroup)
 
+	// Record hourly cost snapshot for intra-day trend analysis
+	c.costStore.RecordHourlySnapshot(totalMonthlyCost)
+
+	// Record cluster resource snapshot for time-series tracking
+	var totalCPUCap, totalCPUUsed, totalMemCap, totalMemUsed int64
+	for _, n := range snapshot.Nodes {
+		totalCPUCap += n.CPUCapacity
+		totalCPUUsed += n.CPUUsed
+		totalMemCap += n.MemoryCapacity
+		totalMemUsed += n.MemoryUsed
+	}
+	c.costStore.RecordClusterSnapshot(
+		len(snapshot.Nodes), len(snapshot.Pods),
+		totalCPUCap, totalCPUUsed, totalMemCap, totalMemUsed,
+		totalMonthlyCost,
+	)
+
 	// Update CostReport CRD
 	return c.reporter.UpdateCostReport(ctx, totalMonthlyCost, costByNamespace, costByNodeGroup, topWorkloads)
 }

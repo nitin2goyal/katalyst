@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	koptv1alpha1 "github.com/koptimizer/koptimizer/api/v1alpha1"
+	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/internal/store"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
@@ -19,14 +20,15 @@ import (
 )
 
 type CostHandler struct {
-	state     *state.ClusterState
-	provider  cloudprovider.CloudProvider
-	client    client.Client
-	costStore *store.CostStore
+	state        *state.ClusterState
+	provider     cloudprovider.CloudProvider
+	client       client.Client
+	costStore    *store.CostStore
+	metricsStore *intmetrics.Store
 }
 
-func NewCostHandler(st *state.ClusterState, provider cloudprovider.CloudProvider, c client.Client, costStore *store.CostStore) *CostHandler {
-	return &CostHandler{state: st, provider: provider, client: c, costStore: costStore}
+func NewCostHandler(st *state.ClusterState, provider cloudprovider.CloudProvider, c client.Client, costStore *store.CostStore, metricsStore *intmetrics.Store) *CostHandler {
+	return &CostHandler{state: st, provider: provider, client: c, costStore: costStore, metricsStore: metricsStore}
 }
 
 func (h *CostHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +53,7 @@ func (h *CostHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 
 	// Fallback: compute savings from engine when CRDs yield nothing
 	if potentialSavings == 0 {
-		computed := ComputeRecommendations(h.state)
+		computed := ComputeRecommendations(h.state, h.metricsStore)
 		potentialSavings = ComputeTotalPotentialSavings(computed)
 	}
 
@@ -284,7 +286,7 @@ func (h *CostHandler) GetSavings(w http.ResponseWriter, r *http.Request) {
 
 	// Fallback: compute savings opportunities from engine when CRDs yield nothing
 	if len(opportunities) == 0 {
-		computed := ComputeRecommendations(h.state)
+		computed := ComputeRecommendations(h.state, h.metricsStore)
 		for _, opp := range ComputeSavingsOpportunities(computed) {
 			opportunities = append(opportunities, map[string]interface{}{
 				"type":             opp.Type,

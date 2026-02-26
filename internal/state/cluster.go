@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/store"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
 	"github.com/koptimizer/koptimizer/pkg/familylock"
@@ -32,6 +33,7 @@ type ClusterState struct {
 	MetricsAvailable bool // true if Metrics Server returned data on last refresh
 	NodesWithMetrics int  // count of nodes with actual metrics data
 	PodsWithMetrics  int  // count of pods with actual metrics data
+	metricsStore *intmetrics.Store // historical metrics for percentile queries
 	// Metrics cache: persist last successful metrics data for 5 min
 	lastNodeMetrics   map[string]*pkgmetrics.NodeMetrics
 	lastPodMetrics    map[string]*pkgmetrics.PodMetrics
@@ -40,7 +42,7 @@ type ClusterState struct {
 
 // NewClusterState creates a new ClusterState. If db and writer are non-nil,
 // the audit log is backed by SQLite for persistence across restarts.
-func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc pkgmetrics.MetricsCollector, db *sql.DB, writer *store.Writer) *ClusterState {
+func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc pkgmetrics.MetricsCollector, db *sql.DB, writer *store.Writer, metricsStore *intmetrics.Store) *ClusterState {
 	var auditLog *AuditLog
 	if db != nil && writer != nil {
 		auditLog = NewAuditLogWithDB(1000, db, writer)
@@ -48,15 +50,16 @@ func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc p
 		auditLog = NewAuditLog(1000)
 	}
 	return &ClusterState{
-		client:     c,
-		provider:   provider,
-		metrics:    mc,
-		nodes:      make(map[string]*NodeState),
-		pods:       make(map[string]*PodState),
-		nodeGroups: NewNodeGroupState(),
-		AuditLog:   auditLog,
-		NodeLock:   NewNodeLock(),
-		Breaker:    NewCircuitBreaker(0.5, 5*time.Minute),
+		client:       c,
+		provider:     provider,
+		metrics:      mc,
+		metricsStore: metricsStore,
+		nodes:        make(map[string]*NodeState),
+		pods:         make(map[string]*PodState),
+		nodeGroups:   NewNodeGroupState(),
+		AuditLog:     auditLog,
+		NodeLock:     NewNodeLock(),
+		Breaker:      NewCircuitBreaker(0.5, 5*time.Minute),
 	}
 }
 
@@ -205,6 +208,17 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	} else if s.lastPodMetrics != nil && time.Since(s.lastMetricsUpdate) < 5*time.Minute {
 		slog.Info("using cached pod metrics", "age", time.Since(s.lastMetricsUpdate).Round(time.Second))
 		podMetricsMap = s.lastPodMetrics
+	}
+
+	// Record raw metrics to historical store for percentile analysis.
+	// Runs outside mu.Lock — metricsStore has its own mutex + async writer.
+	if s.metricsStore != nil {
+		for i := range nodeMetrics {
+			s.metricsStore.RecordNodeMetrics(nodeMetrics[i])
+		}
+		for i := range podMetrics {
+			s.metricsStore.RecordPodMetrics(podMetrics[i])
+		}
 	}
 
 	// Detect if metrics server is available.

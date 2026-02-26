@@ -141,6 +141,25 @@ func createTables(db *sql.DB) error {
 			memory_usage INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_pod_metrics_key_ts ON pod_metrics(namespace, pod_name, container, timestamp)`,
+
+		`CREATE TABLE IF NOT EXISTS cost_snapshots_hourly (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			datetime_hour TEXT NOT NULL UNIQUE,
+			total_monthly_cost_usd REAL NOT NULL
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS cluster_snapshots (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp INTEGER NOT NULL,
+			node_count INTEGER NOT NULL,
+			pod_count INTEGER NOT NULL,
+			total_cpu_capacity INTEGER NOT NULL,
+			total_cpu_used INTEGER NOT NULL,
+			total_memory_capacity INTEGER NOT NULL,
+			total_memory_used INTEGER NOT NULL,
+			total_monthly_cost REAL NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_cluster_snapshots_ts ON cluster_snapshots(timestamp)`,
 	}
 
 	for _, stmt := range stmts {
@@ -168,6 +187,8 @@ func (d *DB) Cleanup() error {
 		{"DELETE FROM cost_by_nodegroup WHERE date < ?", dateCutoff},
 		{"DELETE FROM node_metrics WHERE timestamp < ?", metricsCutoff},
 		{"DELETE FROM pod_metrics WHERE timestamp < ?", metricsCutoff},
+		{"DELETE FROM cost_snapshots_hourly WHERE datetime_hour < ?", time.Now().AddDate(0, 0, -d.retentionDays).Format("2006-01-02T15")},
+		{"DELETE FROM cluster_snapshots WHERE timestamp < ?", metricsCutoff},
 	}
 
 	for _, s := range stmts {

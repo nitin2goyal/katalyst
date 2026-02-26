@@ -11,20 +11,22 @@ import (
 
 	koptv1alpha1 "github.com/koptimizer/koptimizer/api/v1alpha1"
 	"github.com/koptimizer/koptimizer/internal/config"
+	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
 	"github.com/koptimizer/koptimizer/pkg/cost"
 )
 
 type ClusterHandler struct {
-	state    *state.ClusterState
-	provider cloudprovider.CloudProvider
-	config   *config.Config
-	client   client.Client
+	state        *state.ClusterState
+	provider     cloudprovider.CloudProvider
+	config       *config.Config
+	client       client.Client
+	metricsStore *intmetrics.Store
 }
 
-func NewClusterHandler(st *state.ClusterState, provider cloudprovider.CloudProvider, cfg *config.Config, c client.Client) *ClusterHandler {
-	return &ClusterHandler{state: st, provider: provider, config: cfg, client: c}
+func NewClusterHandler(st *state.ClusterState, provider cloudprovider.CloudProvider, cfg *config.Config, c client.Client, metricsStore *intmetrics.Store) *ClusterHandler {
+	return &ClusterHandler{state: st, provider: provider, config: cfg, client: c, metricsStore: metricsStore}
 }
 
 func (h *ClusterHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +66,7 @@ func (h *ClusterHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	// Fallback: compute from live data if no CRD recommendations exist.
 	if potentialSavings == 0 {
-		computed := ComputeRecommendations(h.state)
+		computed := ComputeRecommendations(h.state, h.metricsStore)
 		potentialSavings = ComputeTotalPotentialSavings(computed)
 	}
 

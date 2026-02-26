@@ -9,6 +9,7 @@ import (
 
 	"github.com/koptimizer/koptimizer/internal/apiserver/handler"
 	"github.com/koptimizer/koptimizer/internal/config"
+	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/internal/store"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
@@ -16,18 +17,18 @@ import (
 )
 
 // NewRouter creates the API router with all endpoints.
-func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cloudprovider.CloudProvider, guard *familylock.FamilyLockGuard, k8sClient client.Client, costStore *store.CostStore) http.Handler {
+func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cloudprovider.CloudProvider, guard *familylock.FamilyLockGuard, k8sClient client.Client, costStore *store.CostStore, metricsStore *intmetrics.Store) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 
-	clusterHandler := handler.NewClusterHandler(clusterState, provider, cfg, k8sClient)
+	clusterHandler := handler.NewClusterHandler(clusterState, provider, cfg, k8sClient, metricsStore)
 	nodeHandler := handler.NewNodeHandler(clusterState)
 	nodeGroupHandler := handler.NewNodeGroupHandler(clusterState, guard)
-	costHandler := handler.NewCostHandler(clusterState, provider, k8sClient, costStore)
-	recHandler := handler.NewRecommendationHandler(clusterState, k8sClient)
+	costHandler := handler.NewCostHandler(clusterState, provider, k8sClient, costStore, metricsStore)
+	recHandler := handler.NewRecommendationHandler(clusterState, k8sClient, metricsStore)
 	workloadHandler := handler.NewWorkloadHandler(clusterState)
 	commitmentHandler := handler.NewCommitmentHandler(provider)
 	gpuHandler := handler.NewGPUHandler(clusterState)

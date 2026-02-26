@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cost"
 )
@@ -36,6 +37,10 @@ type ComputedOpportunity struct {
 const (
 	minSavingsThreshold = 5.0 // $5/mo minimum to surface a recommendation
 	cacheTTL            = 5 * time.Minute
+
+	// Minimum data points required for historical analysis
+	minNodeDataPoints = 360  // 6h at 60s intervals
+	minPodDataPoints  = 1440 // 24h at 60s intervals
 )
 
 var systemNamespaces = map[string]bool{
@@ -60,28 +65,28 @@ func computedID(recType, target string) string {
 
 // ComputeRecommendations generates recommendations from live ClusterState.
 // Results are cached for 5 minutes to avoid redundant computation across endpoints.
-func ComputeRecommendations(cs *state.ClusterState) []ComputedRecommendation {
+func ComputeRecommendations(cs *state.ClusterState, metricsStore *intmetrics.Store) []ComputedRecommendation {
 	recsCache.Lock()
 	defer recsCache.Unlock()
 	if time.Now().Before(recsCache.expiry) && recsCache.recs != nil {
 		return recsCache.recs
 	}
-	recs := computeFromData(cs.GetAllNodes(), cs.GetAllPods(), cs.GetNodeGroups().GetAll())
+	recs := computeFromData(cs.GetAllNodes(), cs.GetAllPods(), cs.GetNodeGroups().GetAll(), metricsStore)
 	recsCache.recs = recs
 	recsCache.expiry = time.Now().Add(cacheTTL)
 	return recs
 }
 
 // computeFromData is the core computation, separated for testability.
-func computeFromData(nodes []*state.NodeState, pods []*state.PodState, nodeGroups []*state.NodeGroupInfo) []ComputedRecommendation {
+func computeFromData(nodes []*state.NodeState, pods []*state.PodState, nodeGroups []*state.NodeGroupInfo, metricsStore *intmetrics.Store) []ComputedRecommendation {
 	now := time.Now().UTC().Format(time.RFC3339)
 	var recs []ComputedRecommendation
 
 	recs = appendEmptyNodeRecs(recs, nodes, now)
-	recs = appendUnderutilizedNodeRecs(recs, nodes, now)
+	recs = appendUnderutilizedNodeRecs(recs, nodes, now, metricsStore)
 	recs = appendSpotAdoptionRecs(recs, nodes, now)
-	recs = appendPodRightsizingRecs(recs, nodes, pods, now)
-	recs = appendNodeGroupRightsizingRecs(recs, nodeGroups, now)
+	recs = appendPodRightsizingRecs(recs, nodes, pods, now, metricsStore)
+	recs = appendNodeGroupRightsizingRecs(recs, nodeGroups, now, metricsStore)
 
 	sort.Slice(recs, func(i, j int) bool {
 		return recs[i].EstimatedSavings > recs[j].EstimatedSavings
@@ -117,8 +122,9 @@ func appendEmptyNodeRecs(recs []ComputedRecommendation, nodes []*state.NodeState
 }
 
 // --- Algorithm 2: Underutilized nodes (both CPU & mem < 20%) ---
+// Uses P95 over 6h when historical data is available.
 
-func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.NodeState, now string) []ComputedRecommendation {
+func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.NodeState, now string, metricsStore *intmetrics.Store) []ComputedRecommendation {
 	for _, n := range nodes {
 		if n.IsGPUNode || n.IsEmpty() {
 			continue
@@ -127,15 +133,38 @@ func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.N
 		if n.CPUUsed == 0 && n.MemoryUsed == 0 && len(n.Pods) > 0 {
 			continue
 		}
-		if !n.IsUnderutilized(20) {
+
+		var cpuUtil, memUtil float64
+		confidence := 0.70
+
+		// Try historical P95 over 6h
+		if metricsStore != nil {
+			if window := metricsStore.GetNodeWindow(n.Node.Name, 6*time.Hour); window != nil && window.DataPoints >= minNodeDataPoints {
+				if n.CPUCapacity > 0 {
+					cpuUtil = float64(window.P95CPU) / float64(n.CPUCapacity) * 100
+				}
+				if n.MemoryCapacity > 0 {
+					memUtil = float64(window.P95Memory) / float64(n.MemoryCapacity) * 100
+				}
+				confidence = 0.90
+			} else {
+				// Fall back to point-in-time
+				cpuUtil = n.CPUUtilization()
+				memUtil = n.MemoryUtilization()
+			}
+		} else {
+			cpuUtil = n.CPUUtilization()
+			memUtil = n.MemoryUtilization()
+		}
+
+		if cpuUtil >= 20 || memUtil >= 20 {
 			continue
 		}
+
 		savings := n.HourlyCostUSD * cost.HoursPerMonth
 		if savings < minSavingsThreshold {
 			continue
 		}
-		cpuUtil := n.CPUUtilization()
-		memUtil := n.MemoryUtilization()
 		priority := "medium"
 		if cpuUtil < 10 && memUtil < 10 {
 			priority = "high"
@@ -149,7 +178,7 @@ func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.N
 			Status:           "pending",
 			Priority:         priority,
 			CreatedAt:        now,
-			Confidence:       0.85,
+			Confidence:       confidence,
 		})
 	}
 	return recs
@@ -206,8 +235,9 @@ func appendSpotAdoptionRecs(recs []ComputedRecommendation, nodes []*state.NodeSt
 }
 
 // --- Algorithm 4: Pod rightsizing ---
+// Uses P95 over 24h when historical data is available.
 
-func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.NodeState, pods []*state.PodState, now string) []ComputedRecommendation {
+func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.NodeState, pods []*state.PodState, now string, metricsStore *intmetrics.Store) []ComputedRecommendation {
 	nodeCostMap := make(map[string]float64, len(nodes))
 	nodeCPUReqMap := make(map[string]int64, len(nodes))
 	for _, n := range nodes {
@@ -230,14 +260,15 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 	}
 
 	type ownerGroup struct {
-		namespace string
-		ownerKind string
-		ownerName string
-		allocated float64
-		wasted    float64
-		podCount  int
-		sumCPUEff float64
-		sumMemEff float64
+		namespace     string
+		ownerKind     string
+		ownerName     string
+		allocated     float64
+		wasted        float64
+		podCount      int
+		sumCPUEff     float64
+		sumMemEff     float64
+		hasHistorical bool
 	}
 	owners := make(map[string]*ownerGroup)
 	for _, p := range pods {
@@ -250,15 +281,52 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 				continue
 			}
 		}
-		if !p.IsOverProvisioned(0.5) {
-			continue
-		}
 
 		kind, name := p.OwnerKind, p.OwnerName
 		if name == "" {
 			kind, name = "Pod", p.Name
 		}
 		ownerKey := p.Namespace + "/" + kind + "/" + name
+
+		// Try historical P95 over 24h for each pod's containers
+		var cpuEff, memEff float64
+		usedHistorical := false
+		if metricsStore != nil && p.Pod != nil {
+			var totalP95CPU, totalP95Mem int64
+			allContainersHaveData := true
+			for _, c := range p.Pod.Spec.Containers {
+				window := metricsStore.GetPodContainerWindow(p.Namespace, p.Name, c.Name, 24*time.Hour)
+				if window != nil && window.DataPoints >= minPodDataPoints {
+					totalP95CPU += window.P95CPU
+					totalP95Mem += window.P95Memory
+				} else {
+					allContainersHaveData = false
+					break
+				}
+			}
+			if allContainersHaveData && p.CPURequest > 0 {
+				cpuEff = float64(totalP95CPU) / float64(p.CPURequest)
+				if p.MemoryRequest > 0 {
+					memEff = float64(totalP95Mem) / float64(p.MemoryRequest)
+				}
+				usedHistorical = true
+			}
+		}
+
+		if !usedHistorical {
+			// Fall back to point-in-time
+			if !p.IsOverProvisioned(0.5) {
+				continue
+			}
+			cpuEff = p.CPUEfficiency()
+			memEff = p.MemoryEfficiency()
+		} else {
+			// With historical data, check overprovisioning using P95 efficiency
+			maxEff := math.Max(cpuEff, memEff)
+			if maxEff >= 0.5 {
+				continue
+			}
+		}
 
 		nodeHourly := nodeCostMap[p.NodeName]
 		nodeCPUReq := nodeCPUReqMap[p.NodeName]
@@ -268,8 +336,6 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		fraction := float64(p.CPURequest) / float64(nodeCPUReq)
 		allocatedMonthly := nodeHourly * cost.HoursPerMonth * fraction
 
-		cpuEff := p.CPUEfficiency()
-		memEff := p.MemoryEfficiency()
 		maxEff := math.Max(cpuEff, memEff)
 		wastedMonthly := allocatedMonthly * (1 - maxEff)
 
@@ -283,6 +349,9 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		og.podCount++
 		og.sumCPUEff += cpuEff
 		og.sumMemEff += memEff
+		if usedHistorical {
+			og.hasHistorical = true
+		}
 	}
 
 	for key, og := range owners {
@@ -299,6 +368,11 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		}
 		target := og.namespace + "/" + og.ownerKind + "/" + og.ownerName
 
+		confidence := 0.70
+		if og.hasHistorical {
+			confidence = 0.90
+		}
+
 		recs = append(recs, ComputedRecommendation{
 			ID:               computedID("rightsizing", key),
 			Type:             "rightsizing",
@@ -308,15 +382,16 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			Status:           "pending",
 			Priority:         priority,
 			CreatedAt:        now,
-			Confidence:       0.80,
+			Confidence:       confidence,
 		})
 	}
 	return recs
 }
 
 // --- Algorithm 5: Node group rightsizing ---
+// Uses P95 over 6h when historical data is available for ALL nodes in the group.
 
-func appendNodeGroupRightsizingRecs(recs []ComputedRecommendation, nodeGroups []*state.NodeGroupInfo, now string) []ComputedRecommendation {
+func appendNodeGroupRightsizingRecs(recs []ComputedRecommendation, nodeGroups []*state.NodeGroupInfo, now string, metricsStore *intmetrics.Store) []ComputedRecommendation {
 	for _, ng := range nodeGroups {
 		if len(ng.Nodes) < 2 {
 			continue
@@ -332,8 +407,39 @@ func appendNodeGroupRightsizingRecs(recs []ComputedRecommendation, nodeGroups []
 			continue
 		}
 
-		cpuUtil := ng.CPUUtilization()
-		memUtil := ng.MemoryUtilization()
+		var cpuUtil, memUtil float64
+		confidence := 0.70
+
+		// Try historical P95 over 6h — require ALL nodes in group to have data
+		if metricsStore != nil {
+			var totalP95CPU, totalP95Mem int64
+			var totalCPUCap, totalMemCap int64
+			allHaveData := true
+			for _, n := range ng.Nodes {
+				window := metricsStore.GetNodeWindow(n.Node.Name, 6*time.Hour)
+				if window != nil && window.DataPoints >= minNodeDataPoints {
+					totalP95CPU += window.P95CPU
+					totalP95Mem += window.P95Memory
+				} else {
+					allHaveData = false
+					break
+				}
+				totalCPUCap += n.CPUCapacity
+				totalMemCap += n.MemoryCapacity
+			}
+			if allHaveData && totalCPUCap > 0 && totalMemCap > 0 {
+				cpuUtil = float64(totalP95CPU) / float64(totalCPUCap) * 100
+				memUtil = float64(totalP95Mem) / float64(totalMemCap) * 100
+				confidence = 0.90
+			} else {
+				cpuUtil = ng.CPUUtilization()
+				memUtil = ng.MemoryUtilization()
+			}
+		} else {
+			cpuUtil = ng.CPUUtilization()
+			memUtil = ng.MemoryUtilization()
+		}
+
 		// Skip groups with 0% utilization — likely missing metrics, not truly idle
 		if cpuUtil == 0 && memUtil == 0 {
 			continue
@@ -379,7 +485,7 @@ func appendNodeGroupRightsizingRecs(recs []ComputedRecommendation, nodeGroups []
 			Status:           "pending",
 			Priority:         "medium",
 			CreatedAt:        now,
-			Confidence:       0.80,
+			Confidence:       confidence,
 		})
 	}
 	return recs

@@ -11,16 +11,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	koptv1alpha1 "github.com/koptimizer/koptimizer/api/v1alpha1"
+	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
 )
 
 type RecommendationHandler struct {
-	state  *state.ClusterState
-	client client.Client
+	state        *state.ClusterState
+	client       client.Client
+	metricsStore *intmetrics.Store
 }
 
-func NewRecommendationHandler(st *state.ClusterState, c client.Client) *RecommendationHandler {
-	return &RecommendationHandler{state: st, client: c}
+func NewRecommendationHandler(st *state.ClusterState, c client.Client, metricsStore *intmetrics.Store) *RecommendationHandler {
+	return &RecommendationHandler{state: st, client: c, metricsStore: metricsStore}
 }
 
 func (h *RecommendationHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +37,7 @@ func (h *RecommendationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Fallback: compute recommendations on-the-fly when no CRDs exist
 	if crdErr != nil || len(recList.Items) == 0 {
-		recs := ComputeRecommendations(h.state)
+		recs := ComputeRecommendations(h.state, h.metricsStore)
 		if recs == nil {
 			recs = []ComputedRecommendation{}
 		}
@@ -189,7 +191,7 @@ func (h *RecommendationHandler) Debug(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	computed := ComputeRecommendations(h.state)
+	computed := ComputeRecommendations(h.state, h.metricsStore)
 	recsByType := map[string]int{}
 	savingsByType := map[string]float64{}
 	for _, r := range computed {
@@ -251,7 +253,7 @@ func (h *RecommendationHandler) GetSummary(w http.ResponseWriter, r *http.Reques
 
 	// Fallback: compute summary from engine when no CRDs exist
 	if crdErr != nil || len(recList.Items) == 0 {
-		computed := ComputeRecommendations(h.state)
+		computed := ComputeRecommendations(h.state, h.metricsStore)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"total":                 len(computed),
 			"pending":               len(computed),
