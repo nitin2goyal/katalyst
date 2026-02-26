@@ -76,18 +76,23 @@ export async function renderWorkloadDetail(params) {
         const cpuReq = parseFloat(wl.cpuRequest) || cpuMillis || 0;
         const cpuUsed = parseFloat(wl.cpuUsed || wl.cpuActual) || cpuReq * 0.6;
         const cpuLimit = parseFloat(wl.cpuLimit) || cpuReq * 1.5;
-        const memReq = parseFloat(wl.memRequest) || memBytes || 0;
-        const memUsed = parseFloat(wl.memUsed || wl.memActual) || memReq * 0.7;
-        const memLimit = parseFloat(wl.memLimit) || memReq * 1.5;
+        const memReqRaw = parseFloat(wl.memRequest) || memBytes || 0;
+        const memUsedRaw = parseFloat(wl.memUsed || wl.memActual) || memReqRaw * 0.7;
+        const memLimitRaw = parseFloat(wl.memLimit) || memReqRaw * 1.5;
+        // Convert memory from bytes to MiB for chart display
+        const toMi = (v) => v >= 1048576 ? Math.round(v / 1048576) : v;
+        const memReqMi = toMi(memReqRaw);
+        const memUsedMi = toMi(memUsedRaw);
+        const memLimitMi = toMi(memLimitRaw);
 
         makeChart('wl-resource-chart', {
           type: 'bar',
           data: {
             labels: ['CPU (millicores)', 'Memory (Mi)'],
             datasets: [
-              { label: 'Actual', data: [cpuUsed, memUsed], backgroundColor: '#4361ee', borderRadius: 4 },
-              { label: 'Request', data: [cpuReq, memReq], backgroundColor: '#10b981', borderRadius: 4 },
-              { label: 'Limit', data: [cpuLimit, memLimit], backgroundColor: '#e2e8f0', borderRadius: 4 },
+              { label: 'Actual', data: [cpuUsed, memUsedMi], backgroundColor: '#4361ee', borderRadius: 4 },
+              { label: 'Request', data: [cpuReq, memReqMi], backgroundColor: '#10b981', borderRadius: 4 },
+              { label: 'Limit', data: [cpuLimit, memLimitMi], backgroundColor: '#e2e8f0', borderRadius: 4 },
             ]
           },
           options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
