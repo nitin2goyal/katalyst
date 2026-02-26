@@ -26,14 +26,12 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 		// provider's reported count (g.CurrentCount) which can be stale.
 		nodeCount := len(g.Nodes)
 
-		// Get labels and taints from actual K8s nodes in the cluster,
-		// not from the cloud provider's ASG tags. Use the first node
-		// as representative since all nodes in a group share the same
-		// labels and taints.
-		var labels map[string]string
+		// Extract spr-cluster label value and taints from actual K8s
+		// nodes (not cloud provider tags). Use first node as representative.
+		sprCluster := ""
 		var taints []map[string]string
 		if len(g.Nodes) > 0 {
-			labels = FilterNodeLabels(g.Nodes[0].Node.Labels)
+			sprCluster = g.Nodes[0].Node.Labels["spr-cluster"]
 			for _, t := range g.Nodes[0].Node.Spec.Taints {
 				taints = append(taints, map[string]string{
 					"key":    t.Key,
@@ -61,7 +59,7 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			"totalPods":      g.TotalPods,
 			"monthlyCostUSD": g.MonthlyCostUSD,
 			"isEmpty":        g.IsEmpty(),
-			"labels":         labels,
+			"sprCluster":     sprCluster,
 			"taints":         taints,
 		})
 	}

@@ -55,6 +55,12 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	workloads := make(map[string]*wlInfo)
 	for _, p := range pods {
+		// Only count Running and Pending pods for replica counts and
+		// resource totals. Evicted, Failed, and Succeeded pods still
+		// have spec.nodeName and requests set, which inflates totals.
+		if p.Pod.Status.Phase != corev1.PodRunning && p.Pod.Status.Phase != corev1.PodPending {
+			continue
+		}
 		ownerKind, ownerName := resolveOwner(p)
 		key := p.Namespace + "/" + ownerKind + "/" + ownerName
 		wl, ok := workloads[key]

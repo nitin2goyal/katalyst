@@ -72,49 +72,6 @@ func writePaginatedJSON(w http.ResponseWriter, r *http.Request, items []map[stri
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// infraLabelPrefixes are label key prefixes used by Kubernetes and cloud
-// providers for infrastructure metadata. These are filtered out when
-// displaying node group labels to surface only user-defined labels.
-var infraLabelPrefixes = []string{
-	"kubernetes.io/",
-	"k8s.io/",
-	"node.kubernetes.io/",
-	"cloud.google.com/",
-	"eks.amazonaws.com/",
-	"kubernetes.azure.com/",
-	"topology.kubernetes.io/",
-	"failure-domain.beta.kubernetes.io/",
-	"beta.kubernetes.io/",
-	"node-role.kubernetes.io/",
-	"aws:",
-	"eks:",
-}
-
-// FilterNodeLabels returns only user-defined labels from a K8s node,
-// stripping out standard infrastructure labels.
-func FilterNodeLabels(labels map[string]string) map[string]string {
-	if len(labels) == 0 {
-		return nil
-	}
-	filtered := make(map[string]string)
-	for k, v := range labels {
-		infra := false
-		for _, prefix := range infraLabelPrefixes {
-			if strings.HasPrefix(k, prefix) {
-				infra = true
-				break
-			}
-		}
-		if !infra {
-			filtered[k] = v
-		}
-	}
-	if len(filtered) == 0 {
-		return nil
-	}
-	return filtered
-}
-
 // IsSystemPod returns true if the pod is an infrastructure/system pod rather
 // than an application workload. A pod is considered "system" if its namespace
 // starts with "kube-" or if it is owned by a DaemonSet.
