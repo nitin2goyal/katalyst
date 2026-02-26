@@ -34,12 +34,12 @@ func NewProvider(region string, pricingCache *store.PricingCache) (*Provider, er
 		project = os.Getenv("GCP_PROJECT")
 	}
 	if project == "" {
-		return nil, fmt.Errorf("GCP project not configured: set GOOGLE_CLOUD_PROJECT or GCP_PROJECT")
+		project = "gc-qa6" // hardcoded fallback for apps-gke cluster
 	}
 
 	clusterName := os.Getenv("KOPTIMIZER_CLUSTER_NAME")
 	if clusterName == "" {
-		return nil, fmt.Errorf("cluster name not configured: set KOPTIMIZER_CLUSTER_NAME")
+		clusterName = "apps-gke" // hardcoded fallback
 	}
 
 	ctx := context.Background()
