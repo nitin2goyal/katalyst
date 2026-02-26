@@ -148,27 +148,43 @@ export function exportCSV(headers, rows, filename) {
   URL.revokeObjectURL(url);
 }
 
+// In-memory sort state persisted across data refreshes (not cleared by store.clear())
+const sortState = new Map();
+
+function applySortToTable(tableEl, headers, colIdx, asc) {
+  const tbody = $('tbody', tableEl);
+  const rows = $$('tr', tbody).filter(r => r.style.display !== 'none');
+  headers.forEach(h => { h.classList.remove('sorted-asc', 'sorted-desc'); });
+  headers[colIdx].classList.add(asc ? 'sorted-asc' : 'sorted-desc');
+  rows.sort((a, b) => {
+    const at = a.children[colIdx]?.textContent.trim() || '';
+    const bt = b.children[colIdx]?.textContent.trim() || '';
+    const an = parseFloat(at.replace(/[$,%k]/g, ''));
+    const bn = parseFloat(bt.replace(/[$,%k]/g, ''));
+    if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+    return asc ? at.localeCompare(bt) : bt.localeCompare(at);
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+
 export function makeSortable(tableEl) {
   if (!tableEl) return;
+  const tableId = tableEl.id;
   const headers = $$('thead th', tableEl);
   headers.forEach((th, idx) => {
     th.addEventListener('click', () => {
-      const tbody = $('tbody', tableEl);
-      const rows = $$('tr', tbody).filter(r => r.style.display !== 'none');
       const asc = !th.classList.contains('sorted-asc');
-      headers.forEach(h => { h.classList.remove('sorted-asc', 'sorted-desc'); });
-      th.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
-      rows.sort((a, b) => {
-        const at = a.children[idx]?.textContent.trim() || '';
-        const bt = b.children[idx]?.textContent.trim() || '';
-        const an = parseFloat(at.replace(/[$,%k]/g, ''));
-        const bn = parseFloat(bt.replace(/[$,%k]/g, ''));
-        if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
-        return asc ? at.localeCompare(bt) : bt.localeCompare(at);
-      });
-      rows.forEach(r => tbody.appendChild(r));
+      applySortToTable(tableEl, headers, idx, asc);
+      if (tableId) sortState.set(tableId, { colIdx: idx, asc });
     });
   });
+  // Restore saved sort state after re-render
+  if (tableId && sortState.has(tableId)) {
+    const { colIdx, asc } = sortState.get(tableId);
+    if (colIdx < headers.length) {
+      applySortToTable(tableEl, headers, colIdx, asc);
+    }
+  }
 }
 
 export function emptyState(icon, message) {
