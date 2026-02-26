@@ -151,6 +151,13 @@ export function exportCSV(headers, rows, filename) {
 // In-memory sort state persisted across data refreshes (not cleared by store.clear())
 const sortState = new Map();
 
+function parseNum(s) {
+  const cleaned = s.replace(/[$,%]/g, '');
+  const m = cleaned.match(/^(-?[\d.]+)\s*k$/i);
+  if (m) return parseFloat(m[1]) * 1000;
+  return parseFloat(cleaned);
+}
+
 function applySortToTable(tableEl, headers, colIdx, asc) {
   const tbody = $('tbody', tableEl);
   const rows = $$('tr', tbody).filter(r => r.style.display !== 'none');
@@ -159,8 +166,8 @@ function applySortToTable(tableEl, headers, colIdx, asc) {
   rows.sort((a, b) => {
     const at = a.children[colIdx]?.textContent.trim() || '';
     const bt = b.children[colIdx]?.textContent.trim() || '';
-    const an = parseFloat(at.replace(/[$,%k]/g, ''));
-    const bn = parseFloat(bt.replace(/[$,%k]/g, ''));
+    const an = parseNum(at);
+    const bn = parseNum(bt);
     if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
     return asc ? at.localeCompare(bt) : bt.localeCompare(at);
   });
