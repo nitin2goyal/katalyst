@@ -87,6 +87,7 @@ export async function renderWorkloadDetail(params) {
 
         makeChart('wl-resource-chart', {
           type: 'bar',
+          noCurrency: true,
           data: {
             labels: ['CPU (millicores)', 'Memory (Mi)'],
             datasets: [

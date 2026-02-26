@@ -22,6 +22,7 @@ const subRenderers = {
 
 export async function renderCost(params) {
   const activeTab = params?.tab || 'dashboard';
+  destroyCharts();
 
   container().innerHTML = `
     <div class="page-header"><h1>Cost</h1><p>Cost analysis and savings opportunities</p></div>

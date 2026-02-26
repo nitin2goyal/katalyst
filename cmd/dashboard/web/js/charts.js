@@ -3,7 +3,13 @@ const charts = {};
 
 export function destroyCharts() {
   Object.keys(charts).forEach(k => {
-    if (charts[k] && typeof charts[k].destroy === 'function') charts[k].destroy();
+    try {
+      if (charts[k] && typeof charts[k].destroy === 'function') {
+        // Disable animations before destroying to prevent NaN SVG errors
+        if (charts[k].opts) charts[k].opts.chart = { ...charts[k].opts.chart, animations: { enabled: false } };
+        charts[k].destroy();
+      }
+    } catch (_) { /* ignore teardown errors */ }
     delete charts[k];
   });
 }
@@ -89,10 +95,13 @@ function renderApex(containerId, cfg) {
 
 // ─── Public API ───
 
-export function makeBarChart(containerId, { categories, series, colors, horizontal, stacked, columnWidth, formatter }) {
+export function makeBarChart(containerId, { categories, series, colors, horizontal, stacked, columnWidth, formatter, noCurrency }) {
   const t = getThemeColors();
   const ax = baseAxis();
   const distributed = series.length === 1 && Array.isArray(colors) && colors.length > 1;
+  const fmtVal = noCurrency
+    ? (val) => { if (val >= 1000) return (val / 1000).toFixed(1) + 'k'; return Number(val).toFixed(0); }
+    : null;
 
   return renderApex(containerId, {
     chart: { ...baseChart(), type: 'bar', stacked: !!stacked },
@@ -110,7 +119,7 @@ export function makeBarChart(containerId, { categories, series, colors, horizont
     },
     dataLabels: {
       enabled: horizontal && series.length === 1,
-      formatter: formatter || ((val) => '$' + Number(val).toFixed(0)),
+      formatter: formatter || fmtVal || ((val) => '$' + Number(val).toFixed(0)),
       offsetX: 8,
       style: { fontSize: '11px', fontWeight: 600, colors: [t.text] },
     },
@@ -118,12 +127,14 @@ export function makeBarChart(containerId, { categories, series, colors, horizont
     xaxis: { ...ax.xaxis, categories },
     yaxis: horizontal
       ? { ...ax.yaxis, labels: { ...ax.yaxis.labels, formatter: (v) => v } }
-      : ax.yaxis,
+      : noCurrency
+        ? { ...ax.yaxis, labels: { ...ax.yaxis.labels, formatter: fmtVal } }
+        : ax.yaxis,
     legend: { show: series.length > 1, fontSize: '11px', labels: { colors: t.text }, position: 'top', horizontalAlign: 'left', markers: { radius: 3 } },
     tooltip: {
       theme: t.isDark ? 'dark' : 'light',
       style: { fontSize: '11px' },
-      y: { formatter: formatter || ((val) => '$' + Number(val).toFixed(2)) },
+      y: { formatter: formatter || fmtVal || ((val) => '$' + Number(val).toFixed(2)) },
     },
   });
 }
@@ -258,6 +269,7 @@ export function makeChart(containerId, cfg) {
         ? (Array.isArray(datasets[0].backgroundColor) ? datasets[0].backgroundColor : [datasets[0].backgroundColor || '#6366f1'])
         : datasets.map(ds => Array.isArray(ds.backgroundColor) ? ds.backgroundColor[0] : ds.backgroundColor || '#6366f1'),
       horizontal: isHorizontal,
+      noCurrency: cfg.noCurrency,
     });
   }
 
