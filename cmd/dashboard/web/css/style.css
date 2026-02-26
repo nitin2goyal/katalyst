@@ -465,6 +465,7 @@ td {
 .badge-blue { background: rgba(0,212,255,0.15); color: #00d4ff; }
 .badge-gray { background: rgba(255,255,255,0.06); color: #6b7280; }
 .badge-purple { background: rgba(139,92,246,0.15); color: #a78bfa; }
+.badge-muted { background: rgba(255,255,255,0.08); color: #9ca3af; font-size: 0.7rem; }
 
 /* === Health Dots === */
 .health-dot {

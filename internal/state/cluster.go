@@ -421,51 +421,57 @@ func (s *ClusterState) GetNodeGroups() *NodeGroupState {
 // buildNodeGroupMapping maps node names to their node group IDs.
 func buildNodeGroupMapping(nodes *corev1.NodeList, groups []*cloudprovider.NodeGroup) map[string]string {
 	result := make(map[string]string)
-	// Node groups are matched by labels
-	for _, ng := range groups {
-		for i := range nodes.Items {
-			node := &nodes.Items[i]
-			if matchesNodeGroup(node, ng) {
-				result[node.Name] = ng.ID
+
+	// Pass 1: Match using authoritative cloud-specific labels (never overwrite).
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
+		if node.Labels == nil {
+			continue
+		}
+		poolLabel := ""
+		if v, ok := node.Labels["cloud.google.com/gke-nodepool"]; ok {
+			poolLabel = v
+		} else if v, ok := node.Labels["eks.amazonaws.com/nodegroup"]; ok {
+			poolLabel = v
+		} else if v, ok := node.Labels["kubernetes.azure.com/agentpool"]; ok {
+			poolLabel = v
+		}
+		if poolLabel != "" {
+			for _, ng := range groups {
+				if ng.Name == poolLabel {
+					result[node.Name] = ng.ID
+					break
+				}
 			}
 		}
 	}
-	return result
-}
 
-// matchesNodeGroup checks if a node belongs to a node group using multiple strategies.
-func matchesNodeGroup(node *corev1.Node, ng *cloudprovider.NodeGroup) bool {
-	if node.Labels == nil {
-		return false
-	}
-
-	// Strategy 1: Cloud-specific node group labels (most reliable).
-	// AWS EKS
-	if v, ok := node.Labels["eks.amazonaws.com/nodegroup"]; ok && v == ng.Name {
-		return true
-	}
-	// GCP GKE
-	if v, ok := node.Labels["cloud.google.com/gke-nodepool"]; ok && v == ng.Name {
-		return true
-	}
-	// Azure AKS
-	if v, ok := node.Labels["kubernetes.azure.com/agentpool"]; ok && v == ng.Name {
-		return true
-	}
-
-	// Strategy 2: Match by node group labels if present.
-	if len(ng.Labels) > 0 {
-		allMatch := true
-		for k, v := range ng.Labels {
-			if nodeVal, ok := node.Labels[k]; !ok || nodeVal != v {
-				allMatch = false
+	// Pass 2: Fallback — match unmatched nodes by node group labels.
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
+		if _, matched := result[node.Name]; matched {
+			continue
+		}
+		if node.Labels == nil {
+			continue
+		}
+		for _, ng := range groups {
+			if len(ng.Labels) == 0 {
+				continue
+			}
+			allMatch := true
+			for k, v := range ng.Labels {
+				if nodeVal, ok := node.Labels[k]; !ok || nodeVal != v {
+					allMatch = false
+					break
+				}
+			}
+			if allMatch {
+				result[node.Name] = ng.ID
 				break
 			}
 		}
-		if allMatch {
-			return true
-		}
 	}
 
-	return false
+	return result
 }
