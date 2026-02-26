@@ -194,10 +194,10 @@ type DatabaseConfig struct {
 // Cloud provider and region can be set via CLOUD_PROVIDER and REGION env vars.
 func DefaultConfig() *Config {
 	cfg := &Config{
-		Mode:              "recommend",
-		CloudProvider:     os.Getenv("CLOUD_PROVIDER"),
-		Region:            os.Getenv("REGION"),
-		ClusterName:       os.Getenv("CLUSTER_NAME"),
+		Mode:          "recommend",
+		CloudProvider: "gcp",
+		Region:        "asia-south1",
+		ClusterName:   "apps-gke",
 		ReconcileInterval: 60 * time.Second,
 		CostMonitor: CostMonitorConfig{
 			Enabled:        true,
@@ -205,6 +205,7 @@ func DefaultConfig() *Config {
 		},
 		NodeAutoscaler: NodeAutoscalerConfig{
 			Enabled:              true,
+			DryRun:               true, // safe default
 			NodeTemplatesEnabled: true,
 			ScanInterval:       30 * time.Second,
 			ScaleUpThreshold:   80.0,
@@ -239,6 +240,7 @@ func DefaultConfig() *Config {
 		},
 		Evictor: EvictorConfig{
 			Enabled:                true,
+			DryRun:                 true, // safe default: recommend-only until explicitly enabled
 			UtilizationThreshold:   40.0,
 			ConsolidationInterval:  5 * time.Minute,
 			MaxConcurrentEvictions: 5,
@@ -247,6 +249,7 @@ func DefaultConfig() *Config {
 		},
 		Rebalancer: RebalancerConfig{
 			Enabled:               true,
+			DryRun:                true, // safe default
 			Schedule:              "0 3 * * SUN",
 			ImbalanceThresholdPct: 40.0,
 		},
@@ -295,7 +298,7 @@ func DefaultConfig() *Config {
 			ExpiryWarningDays: []int{30, 60, 90},
 		},
 		AIGate: AIGateConfig{
-			Enabled:           true,
+			Enabled:           false,
 			Model:             "claude-sonnet-4-6",
 			Timeout:           10 * time.Second,
 			CostThresholdUSD:  500.0,
