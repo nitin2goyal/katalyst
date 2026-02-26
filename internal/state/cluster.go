@@ -119,20 +119,12 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		return fmt.Errorf("discovering node groups: %w", err)
 	}
 
-	// Get node metrics with retry (up to 5 attempts). Metrics must be rock solid.
+	// Get node metrics (single attempt — retrying is pointless when metrics-server is absent).
 	var nodeMetrics []pkgmetrics.NodeMetrics
-	for attempt := 1; attempt <= 5; attempt++ {
-		nm, err := s.metrics.GetNodeMetrics(ctx)
-		if err == nil && len(nm) > 0 {
-			nodeMetrics = nm
-			break
-		}
-		if attempt < 5 {
-			slog.Warn("metrics fetch failed, retrying", "attempt", attempt, "maxRetries", 5, "error", err)
-			time.Sleep(time.Duration(attempt) * time.Second)
-		} else {
-			slog.Error("metrics fetch failed after all retries", "attempts", 5, "error", err)
-		}
+	if nm, err := s.metrics.GetNodeMetrics(ctx); err == nil && len(nm) > 0 {
+		nodeMetrics = nm
+	} else if err != nil {
+		slog.Warn("node metrics unavailable, continuing without live metrics", "error", err)
 	}
 	metricsMap := make(map[string]*pkgmetrics.NodeMetrics, len(nodeMetrics))
 	if len(nodeMetrics) > 0 {
@@ -183,21 +175,12 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	// Default pricingMap for backward compatibility
 	pricingMap := pricingByRegion[defaultRegion]
 
-	// Get pod metrics BEFORE acquiring the lock to avoid blocking readers
-	// during this network call. Retry up to 5 times for resilience.
+	// Get pod metrics BEFORE acquiring the lock to avoid blocking readers.
 	var podMetrics []pkgmetrics.PodMetrics
-	for attempt := 1; attempt <= 5; attempt++ {
-		pm, err := s.metrics.GetPodMetrics(ctx, "")
-		if err == nil && len(pm) > 0 {
-			podMetrics = pm
-			break
-		}
-		if attempt < 5 {
-			slog.Warn("pod metrics fetch failed, retrying", "attempt", attempt, "maxRetries", 5, "error", err)
-			time.Sleep(time.Duration(attempt) * time.Second)
-		} else {
-			slog.Error("pod metrics fetch failed after all retries", "attempts", 5, "error", err)
-		}
+	if pm, err := s.metrics.GetPodMetrics(ctx, ""); err == nil && len(pm) > 0 {
+		podMetrics = pm
+	} else if err != nil {
+		slog.Warn("pod metrics unavailable, continuing without live metrics", "error", err)
 	}
 	podMetricsMap := make(map[string]*pkgmetrics.PodMetrics, len(podMetrics))
 	if len(podMetrics) > 0 {

@@ -14,6 +14,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -134,6 +135,16 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         true,
 		LeaderElectionID:       "koptimizer-leader",
+		// Bypass cache for metrics-server types so controller-runtime does not
+		// start informers that spam errors when metrics-server is unavailable.
+		Client: client.Options{
+			Cache: &client.CacheOptions{
+				DisableFor: []client.Object{
+					&metricsv1beta1.NodeMetrics{},
+					&metricsv1beta1.PodMetrics{},
+				},
+			},
+		},
 	})
 	if err != nil {
 		setupLog.Error(err, "Unable to create manager")

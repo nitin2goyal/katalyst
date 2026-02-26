@@ -311,7 +311,7 @@ func DefaultConfig() *Config {
 			Port:    8080,
 		},
 		Database: DatabaseConfig{
-			Path:          "/data/koptimizer.db",
+			Path:          "/tmp/koptimizer.db",
 			RetentionDays: 90,
 		},
 	}
