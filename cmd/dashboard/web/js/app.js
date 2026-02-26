@@ -85,33 +85,24 @@ document.getElementById('theme-toggle')?.addEventListener('click', () => {
   window.dispatchEvent(new CustomEvent('kopt-theme-toggle'));
 });
 
-// Auto-refresh indicator
+// Manual refresh
 let lastUpdated = Date.now();
 function updateRefreshIndicator() {
-  const el = $('#refresh-indicator');
+  const el = $('#refresh-age');
   if (!el) return;
   const secs = Math.floor((Date.now() - lastUpdated) / 1000);
-  el.textContent = secs < 5 ? 'Just updated' : `Updated ${secs}s ago`;
+  el.textContent = secs < 5 ? 'Just now' : `${secs}s ago`;
 }
 
-// Auto-refresh management
-let refreshTimer = null;
-function setupAutoRefresh() {
-  if (refreshTimer) clearInterval(refreshTimer);
-  const interval = parseInt(localStorage.getItem('kopt-refresh-interval') || '30', 10);
-  if (interval > 0) {
-    refreshTimer = setInterval(() => {
-      store.clear();
-      lastUpdated = Date.now();
-      handleNavigation();
-      updateModeBadge();
-    }, interval * 1000);
-  }
+function doRefresh() {
+  store.clear();
+  lastUpdated = Date.now();
+  handleNavigation();
+  updateModeBadge();
+  updateRefreshIndicator();
 }
 
-window.addEventListener('kopt-refresh-change', (e) => {
-  setupAutoRefresh();
-});
+document.getElementById('refresh-btn')?.addEventListener('click', doRefresh);
 
 // Dark mode - dark is default (no attribute), light mode uses data-theme="light"
 function initTheme() {
@@ -154,5 +145,4 @@ setInterval(updateRefreshIndicator, 5000);
 initTheme();
 updateModeBadge();
 initRouter();
-setupAutoRefresh();
 lastUpdated = Date.now();

@@ -16,9 +16,6 @@ export async function renderSettings() {
     const mode = config.mode || 'recommend';
     const controllers = config.controllers || {};
 
-    // Get auto-refresh interval from localStorage
-    const refreshInterval = localStorage.getItem('kopt-refresh-interval') || '30';
-
     // Policies data
     const templates = policiesData?.nodeTemplates || [];
     const policies = policiesData?.schedulingPolicies || [];
@@ -65,15 +62,6 @@ export async function renderSettings() {
       <div class="card">
         <h2>Dashboard Settings</h2>
         <div class="detail-list">
-          <div class="detail-item">
-            <span class="detail-label">Auto-refresh interval</span>
-            <select id="refresh-interval" class="filter-select" style="width:auto">
-              <option value="15" ${refreshInterval === '15' ? 'selected' : ''}>15 seconds</option>
-              <option value="30" ${refreshInterval === '30' ? 'selected' : ''}>30 seconds</option>
-              <option value="60" ${refreshInterval === '60' ? 'selected' : ''}>60 seconds</option>
-              <option value="0" ${refreshInterval === '0' ? 'selected' : ''}>Disabled</option>
-            </select>
-          </div>
           <div class="detail-item">
             <span class="detail-label">Theme</span>
             <button class="btn btn-gray btn-sm" id="theme-toggle-settings">
@@ -199,14 +187,6 @@ export async function renderSettings() {
       } catch (e) {
         toast('Failed to change mode: ' + e.message, 'error');
       }
-    });
-
-    // Refresh interval handler
-    $('#refresh-interval').addEventListener('change', (e) => {
-      localStorage.setItem('kopt-refresh-interval', e.target.value);
-      toast('Refresh interval updated', 'success');
-      // Notify app.js to reset interval
-      window.dispatchEvent(new CustomEvent('kopt-refresh-change', { detail: parseInt(e.target.value) }));
     });
 
     // Theme toggle
