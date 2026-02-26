@@ -2,6 +2,13 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader } from '../components.js';
 
+// Format disk type + size as a concise string, e.g. "Hyperdisk Balanced 100G"
+function fmtDisk(type, sizeGB) {
+  if (!type && !sizeGB) return '';
+  const name = (type || '').replace(/^pd-/, 'PD ').replace(/^hyperdisk-/, 'Hyperdisk ').replace(/\b\w/g, c => c.toUpperCase());
+  return (name + (sizeGB ? ' ' + sizeGB + 'G' : '')).trim();
+}
+
 export async function renderNodes(targetEl) {
   const container = () => targetEl || $('#page-container');
   container().innerHTML = skeleton(5);
@@ -36,7 +43,7 @@ export async function renderNodes(targetEl) {
       <div class="card">
         ${cardHeader('Node Groups', '<button class="btn btn-gray btn-sm" onclick="window.__exportNgCSV()">Export CSV</button>')}
         <div class="table-wrap"><table id="ng-table">
-          <thead><tr><th>Name</th><th>Instance Type</th><th>Family</th><th>Count</th><th>Min</th><th>Max</th><th>Total Cores</th><th>Total Memory</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Cluster</th><th>Taints</th><th>Cost/mo</th></tr></thead>
+          <thead><tr><th>Name</th><th>Instance Type</th><th>Family</th><th>Disk</th><th>Count</th><th>Min</th><th>Max</th><th>Total Cores</th><th>Total Memory</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Cluster</th><th>Taints</th><th>Cost/mo</th></tr></thead>
           <tbody id="ng-body"></tbody>
         </table></div>
       </div>
@@ -46,11 +53,11 @@ export async function renderNodes(targetEl) {
           placeholder: 'Search nodes...',
           filters: [
             { key: '1', label: 'Node Group', options: nodeGroups },
-            { key: '8', label: 'Type', options: spotTypes },
+            { key: '9', label: 'Type', options: spotTypes },
           ]
         })}
         <div class="table-wrap"><table id="node-table">
-          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Spot</th><th>Cost/hr</th></tr></thead>
+          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>Disk</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Spot</th><th>Cost/hr</th></tr></thead>
           <tbody id="node-body"></tbody>
         </table></div>
       </div>`;
@@ -60,6 +67,7 @@ export async function renderNodes(targetEl) {
       return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" onclick="location.hash='#/nodegroups/${ng.id || ''}'">
         <td>${ng.name || ng.id || ''}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}</td>
         <td>${ng.instanceType || ''}</td><td>${ng.instanceFamily || ''}</td>
+        <td style="font-size:0.8rem">${fmtDisk(ng.diskType, ng.diskSizeGB)}</td>
         <td>${ng.currentCount ?? 0}</td><td>${ng.minCount ?? ''}</td><td>${ng.maxCount ?? ''}</td>
         <td>${ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0}</td>
         <td>${ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) + ' Gi' : '0 Gi'}</td>
@@ -71,10 +79,11 @@ export async function renderNodes(targetEl) {
         <td style="font-size:0.75rem;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${Array.isArray(ng.taints) ? ng.taints.map(t=>t.key+'='+t.value+':'+t.effect).join(', ') : ''}">${Array.isArray(ng.taints) ? ng.taints.map(t=>'<span class="badge badge-red">'+t.key+':'+t.effect+'</span>').join(' ') : ''}</td>
         <td>${fmt$(ng.monthlyCostUSD)}</td>
       </tr>`;
-    }).join('') : '<tr><td colspan="15" style="color:var(--text-muted)">No node groups</td></tr>';
+    }).join('') : '<tr><td colspan="16" style="color:var(--text-muted)">No node groups</td></tr>';
 
     $('#node-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${n.name || ''}'">
       <td>${n.name || ''}</td><td>${n.nodeGroup || ''}</td><td>${n.instanceType || ''}</td>
+      <td style="font-size:0.8rem">${fmtDisk(n.diskType, n.diskSizeGB)}</td>
       <td><strong class="${utilClass(n.cpuUtilPct || 0)}">${fmtPct(n.cpuUtilPct)}</strong></td>
       <td><strong class="${utilClass(n.memUtilPct || 0)}">${fmtPct(n.memUtilPct)}</strong></td>
       <td><strong class="${utilClass(n.cpuAllocPct || 0)}">${fmtPct(n.cpuAllocPct)}</strong></td>
@@ -82,7 +91,7 @@ export async function renderNodes(targetEl) {
       <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span style="color:var(--text-muted)">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
       <td>${n.isSpot ? badge('Spot', 'blue') : badge('On-Demand', 'gray')}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
-    </tr>`).join('') : '<tr><td colspan="10" style="color:var(--text-muted)">No nodes</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="11" style="color:var(--text-muted)">No nodes</td></tr>';
 
     makeSortable($('#ng-table'));
     makeSortable($('#node-table'));
@@ -94,13 +103,13 @@ export async function renderNodes(targetEl) {
 
     // CSV exports
     window.__exportNgCSV = () => {
-      exportCSV(['Name', 'Instance Type', 'Family', 'Count', 'Min', 'Max', 'Total Cores', 'Total Memory (GiB)', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'Cluster', 'Taints', 'Cost/mo'],
-        ngList.map(ng => [ng.name, ng.instanceType, ng.instanceFamily, ng.currentCount, ng.minCount, ng.maxCount, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), (ng.cpuAllocPct||0).toFixed(1), (ng.memAllocPct||0).toFixed(1), ng.sprCluster || '', Array.isArray(ng.taints) ? ng.taints.map(t=>t.key+'='+t.value+':'+t.effect).join('; ') : '', ng.monthlyCostUSD]),
+      exportCSV(['Name', 'Instance Type', 'Family', 'Disk Type', 'Disk Size (GB)', 'Count', 'Min', 'Max', 'Total Cores', 'Total Memory (GiB)', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'Cluster', 'Taints', 'Cost/mo'],
+        ngList.map(ng => [ng.name, ng.instanceType, ng.instanceFamily, ng.diskType || '', ng.diskSizeGB || '', ng.currentCount, ng.minCount, ng.maxCount, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), (ng.cpuAllocPct||0).toFixed(1), (ng.memAllocPct||0).toFixed(1), ng.sprCluster || '', Array.isArray(ng.taints) ? ng.taints.map(t=>t.key+'='+t.value+':'+t.effect).join('; ') : '', ng.monthlyCostUSD]),
         'koptimizer-nodegroups.csv');
     };
     window.__exportNodesCSV = () => {
-      exportCSV(['Name', 'Node Group', 'Instance Type', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'App Pods', 'System Pods', 'Total Pods', 'Spot', 'Cost/hr'],
-        nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), (n.cpuAllocPct||0).toFixed(1), (n.memAllocPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.isSpot ? 'Yes' : 'No', n.hourlyCostUSD]),
+      exportCSV(['Name', 'Node Group', 'Instance Type', 'Disk Type', 'Disk Size (GB)', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'App Pods', 'System Pods', 'Total Pods', 'Spot', 'Cost/hr'],
+        nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, n.diskType || '', n.diskSizeGB || '', (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), (n.cpuAllocPct||0).toFixed(1), (n.memAllocPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.isSpot ? 'Yes' : 'No', n.hourlyCostUSD]),
         'koptimizer-nodes.csv');
     };
 

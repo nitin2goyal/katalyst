@@ -61,6 +61,8 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			"isEmpty":        g.IsEmpty(),
 			"sprCluster":     sprCluster,
 			"taints":         taints,
+			"diskType":       g.DiskType,
+			"diskSizeGB":     g.DiskSizeGB,
 		})
 	}
 	if result == nil {

@@ -30,6 +30,12 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 				appCount++
 			}
 		}
+		// Get disk info from the node group
+		diskType, diskSizeGB := "", 0
+		if ng, ok := h.state.GetNodeGroups().Get(n.NodeGroupID); ok {
+			diskType = ng.DiskType
+			diskSizeGB = ng.DiskSizeGB
+		}
 		result = append(result, map[string]interface{}{
 			"name":           n.Node.Name,
 			"instanceType":   n.InstanceType,
@@ -51,6 +57,8 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 			"podCount":       len(n.Pods),
 			"appPodCount":    appCount,
 			"systemPodCount": sysCount,
+			"diskType":       diskType,
+			"diskSizeGB":     diskSizeGB,
 		})
 	}
 	writePaginatedJSON(w, r, result)
@@ -62,6 +70,13 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
 		return
+	}
+
+	// Get disk info from the node group
+	diskType, diskSizeGB := "", 0
+	if ng, ok := h.state.GetNodeGroups().Get(node.NodeGroupID); ok {
+		diskType = ng.DiskType
+		diskSizeGB = ng.DiskSizeGB
 	}
 
 	resp := map[string]interface{}{
@@ -82,6 +97,8 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"isSpot":         node.IsSpot,
 		"isGPU":          node.IsGPUNode,
 		"podCount":       len(node.Pods),
+		"diskType":       diskType,
+		"diskSizeGB":     diskSizeGB,
 	}
 
 	// Build pods array for the detail table

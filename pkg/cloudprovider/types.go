@@ -84,6 +84,8 @@ type NodeGroup struct {
 	Lifecycle      string   // "on-demand", "spot", "mixed"
 	SpotPercentage int      // 0-100, for mixed instance groups
 	InstanceTypes  []string // Multiple instance types for spot diversity
+	DiskType       string   // e.g. "pd-balanced", "hyperdisk-balanced", "gp3"
+	DiskSizeGB     int      // boot disk size in GiB
 }
 
 // SpotInstanceInfo provides spot-specific pricing and reliability data.

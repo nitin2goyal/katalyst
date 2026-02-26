@@ -22,6 +22,8 @@ const gkeBaseURL = "https://container.googleapis.com/v1"
 // gkeNodePoolConfig represents a GKE node pool's config section.
 type gkeNodePoolConfig struct {
 	MachineType string            `json:"machineType"`
+	DiskType    string            `json:"diskType"`
+	DiskSizeGb  int               `json:"diskSizeGb"`
 	Spot        bool              `json:"spot"`
 	Preemptible bool              `json:"preemptible"`
 	Labels      map[string]string `json:"labels"`
@@ -251,6 +253,8 @@ func mapNodePoolToNodeGroup(ctx context.Context, np gkeNodePool, region string, 
 		Labels:         np.Config.Labels,
 		Taints:         taints,
 		Lifecycle:      lifecycle,
+		DiskType:       np.Config.DiskType,
+		DiskSizeGB:     np.Config.DiskSizeGb,
 	}, nil
 }
 

@@ -78,6 +78,8 @@ type agentPoolProperties struct {
 	OrchestratorVersion string `json:"orchestratorVersion"`
 	ScaleSetPriority   string `json:"scaleSetPriority"`
 	ProvisioningState  string `json:"provisioningState"`
+	OsDiskSizeGB       int    `json:"osDiskSizeGB"`
+	OsDiskType         string `json:"osDiskType"`
 }
 
 // agentPoolListResponse is the ARM response for listing agent pools.
@@ -134,10 +136,12 @@ func discoverVMSS(ctx context.Context, p *Provider) ([]*cloudprovider.NodeGroup,
 
 			ng := vmssToNodeGroup(vmss, poolName, p.region)
 
-			// Enrich with agent pool data for min/max counts.
+			// Enrich with agent pool data for min/max counts and disk info.
 			if ap, ok := agentPools[poolName]; ok {
 				ng.MinCount = ap.Properties.MinCount
 				ng.MaxCount = ap.Properties.MaxCount
+				ng.DiskSizeGB = ap.Properties.OsDiskSizeGB
+				ng.DiskType = ap.Properties.OsDiskType
 			}
 
 			allGroups = append(allGroups, ng)
@@ -181,12 +185,14 @@ func getVMSS(ctx context.Context, p *Provider, id string) (*cloudprovider.NodeGr
 
 	ng := vmssToNodeGroup(vmss, poolName, p.region)
 
-	// Try to get agent pool info for min/max counts.
+	// Try to get agent pool info for min/max counts and disk info.
 	if p.clusterName != "" {
 		ap, err := getAgentPool(ctx, p, poolName)
 		if err == nil {
 			ng.MinCount = ap.Properties.MinCount
 			ng.MaxCount = ap.Properties.MaxCount
+			ng.DiskSizeGB = ap.Properties.OsDiskSizeGB
+			ng.DiskType = ap.Properties.OsDiskType
 		}
 	}
 
