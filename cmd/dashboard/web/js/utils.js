@@ -9,6 +9,8 @@ export function toArray(data, ...keys) {
   for (const k of keys) {
     if (Array.isArray(data[k])) return data[k];
   }
+  // Handle paginated response envelope {data: [...], total, page, ...}
+  if (Array.isArray(data.data)) return data.data;
   return [];
 }
 

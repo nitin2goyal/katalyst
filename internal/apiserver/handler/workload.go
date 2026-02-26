@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	corev1 "k8s.io/api/core/v1"
@@ -11,6 +12,24 @@ import (
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cost"
 )
+
+// resolveOwner resolves the workload owner chain. For pods owned by
+// ReplicaSets created by Deployments, returns "Deployment" + deployment name
+// (strips the pod-template-hash suffix). Orphan pods get kind="Pod".
+func resolveOwner(p *state.PodState) (kind, name string) {
+	kind, name = p.OwnerKind, p.OwnerName
+	if kind == "ReplicaSet" && p.Pod != nil {
+		if hash, ok := p.Pod.Labels["pod-template-hash"]; ok && strings.HasSuffix(name, "-"+hash) {
+			kind = "Deployment"
+			name = strings.TrimSuffix(name, "-"+hash)
+		}
+	}
+	if name == "" {
+		name = p.Name
+		kind = "Pod"
+	}
+	return
+}
 
 type WorkloadHandler struct {
 	state *state.ClusterState
@@ -36,7 +55,8 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	workloads := make(map[string]*wlInfo)
 	for _, p := range pods {
-		key := p.Namespace + "/" + p.OwnerKind + "/" + p.OwnerName
+		ownerKind, ownerName := resolveOwner(p)
+		key := p.Namespace + "/" + ownerKind + "/" + ownerName
 		wl, ok := workloads[key]
 		if !ok {
 			// Use image from first pod's first container
@@ -46,8 +66,8 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 			wl = &wlInfo{
 				Namespace: p.Namespace,
-				Kind:      p.OwnerKind,
-				Name:      p.OwnerName,
+				Kind:      ownerKind,
+				Name:      ownerName,
 				Image:     img,
 			}
 			workloads[key] = wl
@@ -106,7 +126,8 @@ func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 	totalMemReq := int64(0)
 
 	for _, p := range pods {
-		if p.Namespace == ns && p.OwnerKind == kind && p.OwnerName == name {
+		ownerKind, ownerName := resolveOwner(p)
+		if p.Namespace == ns && ownerKind == kind && ownerName == name {
 			matchedPods = append(matchedPods, podDetail{
 				Name:          p.Name,
 				Namespace:     p.Namespace,
@@ -151,7 +172,8 @@ func (h *WorkloadHandler) GetRightsizing(w http.ResponseWriter, r *http.Request)
 	var result []podUtilization
 
 	for _, p := range pods {
-		if p.Namespace == ns && p.OwnerKind == kind && p.OwnerName == name {
+		ownerKind, ownerName := resolveOwner(p)
+		if p.Namespace == ns && ownerKind == kind && ownerName == name {
 			cpuUtil := float64(0)
 			if p.CPURequest > 0 {
 				cpuUtil = float64(p.CPUUsage) / float64(p.CPURequest) * 100
@@ -185,7 +207,8 @@ func (h *WorkloadHandler) GetScaling(w http.ResponseWriter, r *http.Request) {
 	totalCPUReq := int64(0)
 
 	for _, p := range pods {
-		if p.Namespace == ns && p.OwnerKind == kind && p.OwnerName == name {
+		ownerKind, ownerName := resolveOwner(p)
+		if p.Namespace == ns && ownerKind == kind && ownerName == name {
 			replicaCount++
 			totalCPUUsage += p.CPUUsage
 			totalCPUReq += p.CPURequest
@@ -244,11 +267,7 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 		if p.Pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
-		ownerKind, ownerName := p.OwnerKind, p.OwnerName
-		if ownerName == "" {
-			ownerName = p.Name
-			ownerKind = "Pod"
-		}
+		ownerKind, ownerName := resolveOwner(p)
 		key := p.Namespace + "/" + ownerKind + "/" + ownerName
 		wl, ok := workloads[key]
 		if !ok {

@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-const defaultPageSize = 50
+const defaultPageSize = 1000
 
 // writeJSON is a shared helper for all handlers.
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -30,7 +30,7 @@ type PaginatedResponse struct {
 func parsePagination(r *http.Request) (page, pageSize int) {
 	page, _ = strconv.Atoi(r.URL.Query().Get("page"))
 	pageSize, _ = strconv.Atoi(r.URL.Query().Get("pageSize"))
-	if pageSize <= 0 || pageSize > 500 {
+	if pageSize <= 0 || pageSize > 10000 {
 		pageSize = defaultPageSize
 	}
 	if page <= 0 {
