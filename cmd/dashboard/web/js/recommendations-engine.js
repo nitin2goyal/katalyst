@@ -8,7 +8,7 @@ const SYSTEM_NS = new Set(['kube-system', 'kube-public', 'kube-node-lease']);
 
 let _cache = null;
 let _cacheTs = 0;
-const CACHE_TTL = 60_000; // 60s
+const CACHE_TTL = 300_000; // 5 min
 
 /**
  * Compute recommendations from live node + workload data.

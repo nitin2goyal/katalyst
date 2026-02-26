@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +31,10 @@ type ClusterState struct {
 	MetricsAvailable bool // true if Metrics Server returned data on last refresh
 	NodesWithMetrics int  // count of nodes with actual metrics data
 	PodsWithMetrics  int  // count of pods with actual metrics data
+	// Metrics cache: persist last successful metrics data for 5 min
+	lastNodeMetrics   map[string]*pkgmetrics.NodeMetrics
+	lastPodMetrics    map[string]*pkgmetrics.PodMetrics
+	lastMetricsUpdate time.Time
 }
 
 // NewClusterState creates a new ClusterState. If db and writer are non-nil,
@@ -109,11 +114,30 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		return fmt.Errorf("discovering node groups: %w", err)
 	}
 
-	// Get node metrics
-	nodeMetrics, _ := s.metrics.GetNodeMetrics(ctx) // Best effort
+	// Get node metrics with retry (up to 5 attempts). Metrics must be rock solid.
+	var nodeMetrics []pkgmetrics.NodeMetrics
+	for attempt := 1; attempt <= 5; attempt++ {
+		nm, err := s.metrics.GetNodeMetrics(ctx)
+		if err == nil && len(nm) > 0 {
+			nodeMetrics = nm
+			break
+		}
+		if attempt < 5 {
+			slog.Warn("metrics fetch failed, retrying", "attempt", attempt, "maxRetries", 5, "error", err)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		} else {
+			slog.Error("metrics fetch failed after all retries", "attempts", 5, "error", err)
+		}
+	}
 	metricsMap := make(map[string]*pkgmetrics.NodeMetrics, len(nodeMetrics))
-	for i := range nodeMetrics {
-		metricsMap[nodeMetrics[i].Name] = &nodeMetrics[i]
+	if len(nodeMetrics) > 0 {
+		for i := range nodeMetrics {
+			metricsMap[nodeMetrics[i].Name] = &nodeMetrics[i]
+		}
+	} else if s.lastNodeMetrics != nil && time.Since(s.lastMetricsUpdate) < 5*time.Minute {
+		// Use cached metrics from last successful fetch
+		slog.Info("using cached node metrics", "age", time.Since(s.lastMetricsUpdate).Round(time.Second))
+		metricsMap = s.lastNodeMetrics
 	}
 
 	// Build pod-to-node mapping — include ALL scheduled pods regardless of phase
@@ -148,18 +172,36 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	}
 
 	// Get pod metrics BEFORE acquiring the lock to avoid blocking readers
-	// during this network call.
-	podMetrics, _ := s.metrics.GetPodMetrics(ctx, "") // best effort, all namespaces
+	// during this network call. Retry up to 5 times for resilience.
+	var podMetrics []pkgmetrics.PodMetrics
+	for attempt := 1; attempt <= 5; attempt++ {
+		pm, err := s.metrics.GetPodMetrics(ctx, "")
+		if err == nil && len(pm) > 0 {
+			podMetrics = pm
+			break
+		}
+		if attempt < 5 {
+			slog.Warn("pod metrics fetch failed, retrying", "attempt", attempt, "maxRetries", 5, "error", err)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		} else {
+			slog.Error("pod metrics fetch failed after all retries", "attempts", 5, "error", err)
+		}
+	}
 	podMetricsMap := make(map[string]*pkgmetrics.PodMetrics, len(podMetrics))
-	for i := range podMetrics {
-		key := podMetrics[i].Namespace + "/" + podMetrics[i].Name
-		podMetricsMap[key] = &podMetrics[i]
+	if len(podMetrics) > 0 {
+		for i := range podMetrics {
+			key := podMetrics[i].Namespace + "/" + podMetrics[i].Name
+			podMetricsMap[key] = &podMetrics[i]
+		}
+	} else if s.lastPodMetrics != nil && time.Since(s.lastMetricsUpdate) < 5*time.Minute {
+		slog.Info("using cached pod metrics", "age", time.Since(s.lastMetricsUpdate).Round(time.Second))
+		podMetricsMap = s.lastPodMetrics
 	}
 
 	// Detect if metrics server is available.
 	metricsAvailable := len(metricsMap) > 0
 	if !metricsAvailable && len(nodeList.Items) > 0 {
-		slog.Warn("metrics server unavailable, using resource requests as approximate utilization")
+		slog.Warn("metrics server unavailable, node utilization data will be zero")
 	}
 
 	s.mu.Lock()
@@ -167,6 +209,11 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 
 	s.MetricsAvailable = metricsAvailable
 	s.NodesWithMetrics = len(metricsMap)
+	// Cache successful metrics data for reuse across sync cycles
+	if len(metricsMap) > 0 {
+		s.lastNodeMetrics = metricsMap
+		s.lastMetricsUpdate = time.Now()
+	}
 
 	// Update nodes
 	newNodes := make(map[string]*NodeState, len(nodeList.Items))
@@ -276,6 +323,10 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	}
 
 	// Apply pod metrics (actual usage from Metrics Server, fetched above without lock).
+	// Cache successful pod metrics for reuse across sync cycles.
+	if len(podMetricsMap) > 0 {
+		s.lastPodMetrics = podMetricsMap
+	}
 	podsWithMetrics := 0
 	for key, ps := range newPods {
 		if pm, ok := podMetricsMap[key]; ok {

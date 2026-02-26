@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg } from '../utils.js';
-import { skeleton, makeSortable, filterBar, attachFilterHandlers, exportCSV, cardHeader } from '../components.js';
+import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader } from '../components.js';
 
 export async function renderNodes(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -82,10 +82,11 @@ export async function renderNodes(targetEl) {
 
     makeSortable($('#ng-table'));
     makeSortable($('#node-table'));
+    const pag = attachPagination($('#node-table'));
 
     // Attach filter handlers
     const fb = container().querySelector('.filter-bar');
-    if (fb) attachFilterHandlers(fb, $('#node-table'));
+    if (fb) attachFilterHandlers(fb, $('#node-table'), pag);
 
     // CSV exports
     window.__exportNgCSV = () => {

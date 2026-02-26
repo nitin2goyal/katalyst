@@ -52,7 +52,15 @@ export function filterBar(options = {}) {
   </div>`;
 }
 
-export function attachFilterHandlers(containerEl, tableEl) {
+/**
+ * Attach filter handlers to a filter bar + table.
+ * Uses data-filtered="hide" attribute to mark filtered rows, which
+ * coordinates cleanly with attachPagination.
+ * @param {HTMLElement} containerEl - The filter bar container
+ * @param {HTMLElement} tableEl - The table element
+ * @param {object} [pagination] - Pagination controller from attachPagination (optional)
+ */
+export function attachFilterHandlers(containerEl, tableEl, pagination) {
   if (!containerEl || !tableEl) return;
   const input = containerEl.querySelector('.filter-search');
   const selects = containerEl.querySelectorAll('.filter-select');
@@ -78,8 +86,12 @@ export function attachFilterHandlers(containerEl, tableEl) {
           matchFilters = matchFilters && text.includes(val);
         }
       }
-      row.style.display = matchSearch && matchFilters ? '' : 'none';
+      const show = matchSearch && matchFilters;
+      row.dataset.filtered = show ? '' : 'hide';
+      row.style.display = show ? '' : 'none';
     });
+    // Re-paginate after filter changes
+    if (pagination) pagination.refresh();
   }
 
   input?.addEventListener('input', applyFilters);
@@ -207,4 +219,101 @@ export function cardHeader(title, rightHtml = '') {
 
 export function exportButton(onClick) {
   return `<button class="btn btn-gray btn-sm" onclick="${onClick}">Export CSV</button>`;
+}
+
+// ── Pagination ──
+
+const DEFAULT_PAGE_SIZE = 50;
+
+/**
+ * Attach pagination to an existing table.
+ * Uses data-filtered attribute to coordinate with filter system.
+ * Call AFTER rendering table rows and makeSortable.
+ * @param {HTMLElement} tableEl - The <table> element
+ * @param {object} opts - { pageSize: number }
+ * @returns {{ refresh: Function }} - call refresh() after filtering/sorting changes
+ */
+export function attachPagination(tableEl, opts = {}) {
+  if (!tableEl) return { refresh() {} };
+  const pageSize = opts.pageSize || DEFAULT_PAGE_SIZE;
+  const tbody = $('tbody', tableEl);
+  if (!tbody) return { refresh() {} };
+
+  // Create pagination container after the table wrap
+  let pagEl = tableEl.closest('.table-wrap')?.parentElement?.querySelector('.pagination');
+  if (!pagEl) {
+    pagEl = document.createElement('div');
+    pagEl.className = 'pagination';
+    const wrap = tableEl.closest('.table-wrap');
+    if (wrap) wrap.after(pagEl);
+    else tableEl.after(pagEl);
+  }
+
+  let currentPage = 1;
+
+  function render() {
+    const allRows = Array.from(tbody.querySelectorAll('tr'));
+    // Rows that pass filters (not marked as filtered out)
+    const matchedRows = allRows.filter(r => r.dataset.filtered !== 'hide');
+    const totalPages = Math.max(1, Math.ceil(matchedRows.length / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+
+    const start = (currentPage - 1) * pageSize;
+    const end = start + pageSize;
+
+    // Apply page visibility on top of filter state
+    allRows.forEach(r => {
+      if (r.dataset.filtered === 'hide') {
+        r.style.display = 'none';
+      }
+    });
+    matchedRows.forEach((r, i) => {
+      r.style.display = (i >= start && i < end) ? '' : 'none';
+    });
+
+    // Render controls
+    if (matchedRows.length <= pageSize) {
+      pagEl.innerHTML = `<span class="pag-info">${matchedRows.length} items</span>`;
+      return;
+    }
+
+    const pages = [];
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
+        pages.push(i);
+      } else if (pages[pages.length - 1] !== '...') {
+        pages.push('...');
+      }
+    }
+
+    pagEl.innerHTML = `
+      <span class="pag-info">Showing ${start + 1}-${Math.min(end, matchedRows.length)} of ${matchedRows.length}</span>
+      <div class="pag-controls">
+        <button class="pag-btn" ${currentPage <= 1 ? 'disabled' : ''} data-page="${currentPage - 1}">&laquo;</button>
+        ${pages.map(p => p === '...'
+          ? '<span class="pag-ellipsis">...</span>'
+          : `<button class="pag-btn ${p === currentPage ? 'pag-active' : ''}" data-page="${p}">${p}</button>`
+        ).join('')}
+        <button class="pag-btn" ${currentPage >= totalPages ? 'disabled' : ''} data-page="${currentPage + 1}">&raquo;</button>
+      </div>`;
+
+    pagEl.querySelectorAll('.pag-btn[data-page]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = parseInt(btn.dataset.page, 10);
+        if (p >= 1 && p <= totalPages) {
+          currentPage = p;
+          render();
+        }
+      });
+    });
+  }
+
+  render();
+
+  return {
+    refresh() {
+      currentPage = 1;
+      render();
+    }
+  };
 }

@@ -78,6 +78,8 @@ func main() {
 		path := r.URL.Path
 		if strings.HasSuffix(path, "/summary") {
 			writeJSON(w, recSummary())
+		} else if strings.HasSuffix(path, "/debug") {
+			writeJSON(w, recDebug())
 		} else if strings.Contains(path, "/approve") || strings.Contains(path, "/dismiss") {
 			writeJSON(w, map[string]string{"status": "ok"})
 		} else {
@@ -752,6 +754,31 @@ func recSummary() any {
 	return map[string]any{
 		"total": 7, "pending": 4, "approved": 2, "dismissed": 1,
 		"totalEstimatedSavings": 2046.44,
+	}
+}
+
+func recDebug() any {
+	return map[string]any{
+		"nodes": map[string]any{
+			"total": 12, "withUsageData": 12, "empty": 0, "spot": 2,
+			"totalCPUCap": 48000, "totalCPUUsed": 18200,
+			"cpuUtilPct": 37.9,
+			"totalMemCap": 201326592000, "totalMemUsed": 82174361600,
+			"memUtilPct": 40.8,
+			"totalHourlyCost": 11.34, "totalMonthlyCost": 8283.87,
+		},
+		"pods": map[string]any{
+			"total": 45, "withUsageData": 45,
+			"totalCPUReq": 9800, "totalCPUUsage": 5600,
+			"totalMemReq": 12884901888, "totalMemUsage": 7516192768,
+			"hasMetrics": true,
+		},
+		"recommendations": map[string]any{
+			"total": 7,
+			"byType":       map[string]any{"rightsizing": 3, "spot": 1, "consolidation": 2, "commitment": 1},
+			"savingsByType": map[string]any{"rightsizing": 808.8, "spot": 580.0, "consolidation": 135.44, "commitment": 522.2},
+			"totalSavings":  2046.44,
+		},
 	}
 }
 

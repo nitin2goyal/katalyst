@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
 import { makeChart } from '../charts.js';
-import { skeleton, makeSortable, filterBar, attachFilterHandlers, cardHeader, badge, exportCSV } from '../components.js';
+import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, cardHeader, badge, exportCSV } from '../components.js';
 import { computeRecommendations } from '../recommendations-engine.js';
 
 export async function renderSavings(targetEl) {
@@ -111,10 +111,11 @@ export async function renderSavings(targetEl) {
       </tr>`;
     }).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No savings identified</td></tr>';
     makeSortable($('#savings-detail-table'));
+    const sPag = attachPagination($('#savings-detail-table'));
 
     // Filter
     const fb = container().querySelector('.filter-bar');
-    if (fb) attachFilterHandlers(fb, $('#savings-detail-table'));
+    if (fb) attachFilterHandlers(fb, $('#savings-detail-table'), sPag);
 
     // Scenario simulator interactivity
     const spotSlider = $('#sim-spot');

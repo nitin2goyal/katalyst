@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
-import { skeleton, makeSortable, filterBar, attachFilterHandlers, exportCSV, cardHeader, badge } from '../components.js';
+import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge } from '../components.js';
 
 function fmtCPUm(v) {
   if (v == null) return '0m';
@@ -87,10 +87,11 @@ export async function renderWorkloads(targetEl) {
     }).join('') : '<tr><td colspan="9" style="color:var(--text-muted)">No workloads</td></tr>';
 
     makeSortable($('#wl-table'));
+    const pag = attachPagination($('#wl-table'));
 
     // Attach filter
     const fb = container().querySelector('.filter-bar');
-    if (fb) attachFilterHandlers(fb, $('#wl-table'));
+    if (fb) attachFilterHandlers(fb, $('#wl-table'), pag);
 
     // CSV export
     window.__exportWlCSV = () => {

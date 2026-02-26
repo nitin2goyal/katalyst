@@ -35,7 +35,7 @@ type ComputedOpportunity struct {
 
 const (
 	minSavingsThreshold = 5.0 // $5/mo minimum to surface a recommendation
-	cacheTTL            = 60 * time.Second
+	cacheTTL            = 5 * time.Minute
 )
 
 var systemNamespaces = map[string]bool{
@@ -121,6 +121,10 @@ func appendEmptyNodeRecs(recs []ComputedRecommendation, nodes []*state.NodeState
 func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.NodeState, now string) []ComputedRecommendation {
 	for _, n := range nodes {
 		if n.IsGPUNode || n.IsEmpty() {
+			continue
+		}
+		// Skip nodes where usage is 0 but pods exist — indicates missing metrics, not true idle
+		if n.CPUUsed == 0 && n.MemoryUsed == 0 && len(n.Pods) > 0 {
 			continue
 		}
 		if !n.IsUnderutilized(20) {
@@ -211,6 +215,20 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		nodeCPUReqMap[n.Node.Name] = n.CPURequested
 	}
 
+	// Check if pod-level metrics are available. Without metrics, we cannot
+	// make accurate rightsizing recommendations — skip entirely.
+	metricsCount := 0
+	for _, p := range pods {
+		if p.CPUUsage > 0 || p.MemoryUsage > 0 {
+			metricsCount++
+		}
+	}
+	hasMetrics := metricsCount > len(pods)/10
+	if !hasMetrics {
+		// No metrics data available — cannot compute rightsizing recommendations.
+		return recs
+	}
+
 	type ownerGroup struct {
 		namespace string
 		ownerKind string
@@ -229,6 +247,7 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		if !p.IsOverProvisioned(0.5) {
 			continue
 		}
+
 		kind, name := p.OwnerKind, p.OwnerName
 		if name == "" {
 			kind, name = "Pod", p.Name
@@ -273,6 +292,7 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			priority = "medium"
 		}
 		target := og.namespace + "/" + og.ownerKind + "/" + og.ownerName
+
 		recs = append(recs, ComputedRecommendation{
 			ID:               computedID("rightsizing", key),
 			Type:             "rightsizing",
@@ -308,6 +328,10 @@ func appendNodeGroupRightsizingRecs(recs []ComputedRecommendation, nodeGroups []
 
 		cpuUtil := ng.CPUUtilization()
 		memUtil := ng.MemoryUtilization()
+		// Skip groups with 0% utilization — likely missing metrics, not truly idle
+		if cpuUtil == 0 && memUtil == 0 {
+			continue
+		}
 		if cpuUtil >= 25 || memUtil >= 25 {
 			continue
 		}

@@ -77,6 +77,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		// Recommendations (literal routes before parameterized)
 		r.Get("/recommendations", recHandler.List)
 		r.Get("/recommendations/summary", recHandler.GetSummary)
+		r.Get("/recommendations/debug", recHandler.Debug)
 		r.Get("/recommendations/{id}", recHandler.Get)
 		r.Post("/recommendations/{id}/approve", recHandler.Approve)
 		r.Post("/recommendations/{id}/dismiss", recHandler.Dismiss)

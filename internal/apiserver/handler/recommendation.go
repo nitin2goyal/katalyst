@@ -137,6 +137,102 @@ func (h *RecommendationHandler) Dismiss(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, rec)
 }
 
+// Debug returns raw metrics availability info for data validation.
+func (h *RecommendationHandler) Debug(w http.ResponseWriter, r *http.Request) {
+	nodes := h.state.GetAllNodes()
+	pods := h.state.GetAllPods()
+
+	nodesWithUsage := 0
+	totalNodeCPUCap := int64(0)
+	totalNodeCPUUsed := int64(0)
+	totalNodeMemCap := int64(0)
+	totalNodeMemUsed := int64(0)
+	totalNodeHourly := 0.0
+	emptyNodes := 0
+	spotNodes := 0
+
+	for _, n := range nodes {
+		totalNodeCPUCap += n.CPUCapacity
+		totalNodeCPUUsed += n.CPUUsed
+		totalNodeMemCap += n.MemoryCapacity
+		totalNodeMemUsed += n.MemoryUsed
+		totalNodeHourly += n.HourlyCostUSD
+		if n.CPUUsed > 0 || n.MemoryUsed > 0 {
+			nodesWithUsage++
+		}
+		if n.IsEmpty() {
+			emptyNodes++
+		}
+		if n.IsSpot {
+			spotNodes++
+		}
+	}
+
+	podsWithUsage := 0
+	totalPodCPUReq := int64(0)
+	totalPodCPUUsage := int64(0)
+	totalPodMemReq := int64(0)
+	totalPodMemUsage := int64(0)
+	for _, p := range pods {
+		totalPodCPUReq += p.CPURequest
+		totalPodCPUUsage += p.CPUUsage
+		totalPodMemReq += p.MemoryRequest
+		totalPodMemUsage += p.MemoryUsage
+		if p.CPUUsage > 0 || p.MemoryUsage > 0 {
+			podsWithUsage++
+		}
+	}
+
+	computed := ComputeRecommendations(h.state)
+	recsByType := map[string]int{}
+	savingsByType := map[string]float64{}
+	for _, r := range computed {
+		recsByType[r.Type]++
+		savingsByType[r.Type] += r.EstimatedSavings
+	}
+
+	cpuUtilPct := 0.0
+	if totalNodeCPUCap > 0 {
+		cpuUtilPct = float64(totalNodeCPUUsed) / float64(totalNodeCPUCap) * 100
+	}
+	memUtilPct := 0.0
+	if totalNodeMemCap > 0 {
+		memUtilPct = float64(totalNodeMemUsed) / float64(totalNodeMemCap) * 100
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"nodes": map[string]interface{}{
+			"total":         len(nodes),
+			"withUsageData": nodesWithUsage,
+			"empty":         emptyNodes,
+			"spot":          spotNodes,
+			"totalCPUCap":   totalNodeCPUCap,
+			"totalCPUUsed":  totalNodeCPUUsed,
+			"cpuUtilPct":    cpuUtilPct,
+			"totalMemCap":   totalNodeMemCap,
+			"totalMemUsed":  totalNodeMemUsed,
+			"memUtilPct":    memUtilPct,
+			"totalHourlyCost": totalNodeHourly,
+			"totalMonthlyCost": totalNodeHourly * 730.5,
+		},
+		"pods": map[string]interface{}{
+			"total":          len(pods),
+			"withUsageData":  podsWithUsage,
+			"totalCPUReq":    totalPodCPUReq,
+			"totalCPUUsage":  totalPodCPUUsage,
+			"totalMemReq":    totalPodMemReq,
+			"totalMemUsage":  totalPodMemUsage,
+			"hasMetrics":     podsWithUsage > len(pods)/10,
+		},
+		"recommendations": map[string]interface{}{
+			"total":        len(computed),
+			"byType":       recsByType,
+			"savingsByType": savingsByType,
+			"totalSavings": ComputeTotalPotentialSavings(computed),
+		},
+	})
+}
+
 func (h *RecommendationHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()

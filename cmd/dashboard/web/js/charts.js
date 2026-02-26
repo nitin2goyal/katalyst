@@ -4,10 +4,14 @@ const charts = {};
 export function destroyCharts() {
   Object.keys(charts).forEach(k => {
     try {
-      if (charts[k] && typeof charts[k].destroy === 'function') {
-        // Disable animations before destroying to prevent NaN SVG errors
-        if (charts[k].opts) charts[k].opts.chart = { ...charts[k].opts.chart, animations: { enabled: false } };
-        charts[k].destroy();
+      if (charts[k]) {
+        // Clear SVG content from DOM first to prevent NaN attribute errors
+        // from in-flight animation frames that execute after destroy()
+        const el = charts[k].el;
+        if (el) el.innerHTML = '';
+        if (typeof charts[k].destroy === 'function') {
+          charts[k].destroy();
+        }
       }
     } catch (_) { /* ignore teardown errors */ }
     delete charts[k];

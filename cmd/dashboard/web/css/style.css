@@ -624,12 +624,33 @@ strong.high, .text-high { color: #ef4444; }
   100% { background-position: -200% 0; }
 }
 
-/* Recommendation description: truncate in table, expand on click */
-.rec-desc { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+/* Recommendation description: truncate in table, expand on hover/click */
+.rec-desc { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; position: relative; }
 .rec-desc-expanded { white-space: normal; overflow: visible; }
+.rec-desc:hover .rec-tooltip { display: block; }
+.rec-tooltip {
+  display: none; position: absolute; left: 0; top: 100%; z-index: 100;
+  background: var(--card-bg, #1e1e3a); color: var(--text, #e2e8f0); border: 1px solid var(--border, #2d2d52);
+  padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;
+  white-space: normal; width: 420px; max-width: 90vw;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4); pointer-events: none;
+}
 
 /* Info banner for computed recommendations */
 .info-banner { padding: 10px 16px; background: rgba(99,102,241,0.15); color: #a5b4fc; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+
+/* Pagination */
+.pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; font-size: 12px; }
+.pag-info { color: var(--text-muted); }
+.pag-controls { display: flex; gap: 4px; align-items: center; }
+.pag-btn {
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; background: transparent;
+  color: var(--text); cursor: pointer; font-size: 12px; min-width: 32px; text-align: center;
+}
+.pag-btn:hover:not([disabled]) { background: var(--hover); }
+.pag-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+.pag-btn.pag-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pag-ellipsis { color: var(--text-muted); padding: 0 4px; }
 
 .error-msg {
   padding: 12px;

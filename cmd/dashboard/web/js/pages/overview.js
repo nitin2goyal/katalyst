@@ -28,17 +28,20 @@ export async function renderOverview() {
     // 1. Backend cluster/summary (now includes computed engine results)
     // 2. cost/summary endpoint
     // 3. Client-side computation
+    let _savingsSource = s.potentialSavings ? 'cluster/summary API' : '';
     if (!s.potentialSavings) {
       try {
         const costSummary = await api('/cost/summary').catch(() => null);
         if (costSummary?.potentialSavings) {
           s.potentialSavings = costSummary.potentialSavings;
+          _savingsSource = 'cost/summary API';
         }
       } catch {}
     }
     if (!s.potentialSavings) {
       const computed = await computeRecommendations();
       s.potentialSavings = computed.totalSavings;
+      _savingsSource = 'Client-side JS engine';
     }
     const controllerStatuses = (health && health.controllers) || {};
     const eff = efficiency || {};
@@ -95,7 +98,7 @@ export async function renderOverview() {
       <div class="page-header"><h1>Cluster Overview</h1><p>Real-time cluster health and cost summary</p></div>
       <div class="kpi-grid">
         <div class="kpi-card"><div class="label">Monthly Cost</div><div class="value">${fmt$(s.monthlyCostUSD)}</div><div class="sub">current month estimate</div></div>
-        <div class="kpi-card"><div class="label">Potential Savings</div><div class="value green">${fmt$(s.potentialSavings)}</div><div class="sub">identified opportunities</div></div>
+        <div class="kpi-card"><div class="label">Potential Savings</div><div class="value green">${fmt$(s.potentialSavings)}</div><div class="sub">src: ${_savingsSource}</div></div>
         <div class="kpi-card"><div class="label">Nodes</div><div class="value blue">${s.nodeCount || 0}</div><div class="sub">across ${s.nodeGroupCount || 0} groups</div></div>
         <div class="kpi-card"><div class="label">Pods</div><div class="value">${s.podCount || 0}</div><div class="sub">running workloads</div></div>
         <div class="kpi-card"><div class="label">Operating Mode</div><div class="value">${(s.mode || 'unknown').toUpperCase()}</div><div class="sub">${s.cloudProvider || ''}</div></div>

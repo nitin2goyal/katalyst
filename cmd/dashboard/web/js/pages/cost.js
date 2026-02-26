@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
 import { makeBarChart, makeAreaChart, makeDonutChart, destroyCharts } from '../charts.js';
-import { skeleton, makeSortable, filterBar, attachFilterHandlers, cardHeader, dateRangePicker, badge, exportCSV } from '../components.js';
+import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, cardHeader, dateRangePicker, badge, exportCSV } from '../components.js';
 import { renderSavings } from './savings.js';
 import { computeRecommendations } from '../recommendations-engine.js';
 
@@ -194,10 +194,11 @@ async function renderCostDashboard(targetEl) {
       <td><strong>${fmt$(w.monthlyCostUSD)}</strong></td>
     </tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted)">No workload cost data</td></tr>';
     makeSortable($('#wl-cost-table'));
+    const pag = attachPagination($('#wl-cost-table'));
 
     // Attach filter
     const fb = targetEl.querySelector('.filter-bar');
-    if (fb) attachFilterHandlers(fb, $('#wl-cost-table'));
+    if (fb) attachFilterHandlers(fb, $('#wl-cost-table'), pag);
 
     // CSV exports
     window.__exportSavingsCSV = () => {
@@ -296,9 +297,10 @@ async function renderWorkloadBreakdown(targetEl) {
       <td>${fmtPct(total > 0 ? (w.monthlyCostUSD || 0) / total * 100 : 0)}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No workload cost data</td></tr>';
     makeSortable($('#wl-breakdown-table'));
+    const wlPag = attachPagination($('#wl-breakdown-table'));
 
     const fb = targetEl.querySelector('.filter-bar');
-    if (fb) attachFilterHandlers(fb, $('#wl-breakdown-table'));
+    if (fb) attachFilterHandlers(fb, $('#wl-breakdown-table'), wlPag);
 
     window.__exportWlBreakdownCSV = () => {
       exportCSV(['Namespace', 'Kind', 'Name', 'Monthly Cost', '% of Total'],

@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
-import { skeleton, makeSortable, exportCSV, cardHeader, badge } from '../components.js';
+import { skeleton, makeSortable, attachPagination, exportCSV, cardHeader, badge } from '../components.js';
 
 export async function renderSpot(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -45,6 +45,7 @@ export async function renderSpot(targetEl) {
       </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No nodes</td></tr>';
     }
     makeSortable($('#spot-table'));
+    attachPagination($('#spot-table'));
 
     window.__exportSpotCSV = () => {
       exportCSV(['Name', 'Instance Type', 'Lifecycle', 'Zone', 'Cost/hr'],
