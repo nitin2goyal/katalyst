@@ -126,6 +126,8 @@ func main() {
 	mux.HandleFunc("/api/v1/audit", jsonHandler(auditEvents))
 	mux.HandleFunc("/api/v1/notifications", jsonHandler(notificationsData))
 	mux.HandleFunc("/api/v1/events", jsonHandler(eventsData))
+	mux.HandleFunc("/api/v1/spot/summary", jsonHandler(spotSummary))
+	mux.HandleFunc("/api/v1/spot/nodes", jsonHandler(spotNodes))
 	mux.HandleFunc("/api/v1/clusters", jsonHandler(clustersData))
 	mux.HandleFunc("/api/v1/metrics", metricsHandler)
 	mux.HandleFunc("/api/v1/idle-resources", jsonHandler(idleResources))
@@ -986,6 +988,28 @@ func policiesData() any {
 			{"name": "Memory-intensive Packing", "description": "Bin-pack memory-heavy pods on r5 nodes", "type": "bin-packing", "target": "production/cache,production/api-server", "enabled": false},
 			{"name": "Cost-aware Scheduling", "description": "Prefer cheaper nodes when resource requirements are flexible", "type": "cost-aware", "target": "*/*", "enabled": true},
 		},
+	}
+}
+
+// ── Spot ──
+func spotSummary() any {
+	return map[string]any{
+		"spotNodes":                  2,
+		"onDemandNodes":              10,
+		"spotPercentage":             16.7,
+		"estimatedMonthlySavingsUSD": 580.00,
+		"spotHourlyCostUSD":          0.52,
+		"onDemandHourlyCostUSD":      8.40,
+	}
+}
+
+func spotNodes() any {
+	return []map[string]any{
+		{"name": "ip-10-0-5-201.ec2", "instanceType": "m5.xlarge", "lifecycle": "spot", "zone": "us-east-1a", "hourlyCostUSD": 0.26},
+		{"name": "ip-10-0-5-202.ec2", "instanceType": "m5.xlarge", "lifecycle": "spot", "zone": "us-east-1b", "hourlyCostUSD": 0.26},
+		{"name": "ip-10-0-1-101.ec2", "instanceType": "m5.xlarge", "lifecycle": "on-demand", "zone": "us-east-1a", "hourlyCostUSD": 0.84},
+		{"name": "ip-10-0-1-102.ec2", "instanceType": "m5.2xlarge", "lifecycle": "on-demand", "zone": "us-east-1a", "hourlyCostUSD": 1.68},
+		{"name": "ip-10-0-2-101.ec2", "instanceType": "c5.xlarge", "lifecycle": "on-demand", "zone": "us-east-1b", "hourlyCostUSD": 0.72},
 	}
 }
 
