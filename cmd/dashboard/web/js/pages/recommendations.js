@@ -96,7 +96,7 @@ function renderRecTable(recList) {
     return `<tr class="clickable-row">
       <td>${badge(r.type || r.Type || r.category || '', 'blue')}</td>
       <td><strong>${r.target || r.resource || ''}</strong></td>
-      <td class="rec-desc" title="${escapeHtml(desc)}">${desc}</td>
+      <td class="rec-desc" title="${escapeHtml(desc)}">${escapeHtml(desc)}</td>
       <td class="value green">${fmt$(r.estimatedSavings)}</td>
       <td>${confBadge(r.confidence)}</td>
       <td>${statusBadge}</td>

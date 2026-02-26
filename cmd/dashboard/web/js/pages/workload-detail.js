@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, fmt$, fmtPct, errorMsg } from '../utils.js';
+import { $, fmt$, fmtPct, errorMsg, escapeHtml } from '../utils.js';
 import { skeleton, breadcrumbs, tabs, attachTabHandlers, badge } from '../components.js';
 import { makeChart } from '../charts.js';
 
@@ -121,7 +121,7 @@ export async function renderWorkloadDetail(params) {
                 </div>
               </div>
             </div>
-            ${rs.reason ? `<div class="card" style="margin-top:16px;background:#f0fdf4"><p>${rs.reason}</p></div>` : ''}
+            ${rs.reason ? `<div class="card" style="margin-top:16px;background:#f0fdf4"><p>${escapeHtml(rs.reason)}</p></div>` : ''}
           </div>`;
       } else if (tab === 'scaling') {
         if (!sc.hpa && !sc.replicas) {

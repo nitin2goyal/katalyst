@@ -24,7 +24,18 @@ export async function renderOverview() {
       api('/cluster/score').catch(() => null),
     ]);
     const s = summary || {};
-    // Fallback: compute potentialSavings from live node data when API returns 0
+    // Fallback chain for potentialSavings:
+    // 1. Backend cluster/summary (now includes computed engine results)
+    // 2. cost/summary endpoint
+    // 3. Client-side computation
+    if (!s.potentialSavings) {
+      try {
+        const costSummary = await api('/cost/summary').catch(() => null);
+        if (costSummary?.potentialSavings) {
+          s.potentialSavings = costSummary.potentialSavings;
+        }
+      } catch {}
+    }
     if (!s.potentialSavings) {
       const computed = await computeRecommendations();
       s.potentialSavings = computed.totalSavings;

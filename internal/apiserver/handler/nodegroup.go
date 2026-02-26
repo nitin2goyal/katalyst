@@ -22,12 +22,15 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 	groups := h.state.GetNodeGroups().GetAll()
 	var result []map[string]interface{}
 	for _, g := range groups {
+		// Use actual node count from K8s (len(g.Nodes)) instead of cloud
+		// provider's reported count (g.CurrentCount) which can be stale.
+		nodeCount := len(g.Nodes)
 		result = append(result, map[string]interface{}{
 			"id":             g.ID,
 			"name":           g.Name,
 			"instanceType":   g.InstanceType,
 			"instanceFamily": g.InstanceFamily,
-			"currentCount":   g.CurrentCount,
+			"currentCount":   nodeCount,
 			"minCount":       g.MinCount,
 			"maxCount":       g.MaxCount,
 			"desiredCount":   g.DesiredCount,
@@ -53,7 +56,7 @@ func (h *NodeGroupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"name":           g.Name,
 		"instanceType":   g.InstanceType,
 		"instanceFamily": g.InstanceFamily,
-		"currentCount":   g.CurrentCount,
+		"currentCount":   len(g.Nodes),
 		"minCount":       g.MinCount,
 		"maxCount":       g.MaxCount,
 		"desiredCount":   g.DesiredCount,
@@ -92,7 +95,7 @@ func (h *NodeGroupHandler) GetEmpty(w http.ResponseWriter, r *http.Request) {
 				"id":           g.ID,
 				"name":         g.Name,
 				"instanceType": g.InstanceType,
-				"currentCount": g.CurrentCount,
+				"currentCount": len(g.Nodes),
 			})
 		}
 	}

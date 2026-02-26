@@ -50,6 +50,24 @@ func (h *ClusterHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	cpuAlloc := safePct(reqCPU, totalCPU)
 	memAlloc := safePct(reqMem, totalMem)
 
+	// Compute potential savings from recommendation engine.
+	potentialSavings := 0.0
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	var recList koptv1alpha1.RecommendationList
+	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err == nil {
+		for _, rec := range recList.Items {
+			if rec.Status.State == "pending" || rec.Status.State == "approved" || rec.Status.State == "" {
+				potentialSavings += rec.Spec.EstimatedSaving.MonthlySavingsUSD
+			}
+		}
+	}
+	// Fallback: compute from live data if no CRD recommendations exist.
+	if potentialSavings == 0 {
+		computed := ComputeRecommendations(h.state)
+		potentialSavings = ComputeTotalPotentialSavings(computed)
+	}
+
 	resp := map[string]interface{}{
 		"mode":              h.config.Mode,
 		"cloudProvider":     h.config.CloudProvider,
@@ -61,6 +79,7 @@ func (h *ClusterHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		"cpuAllocationPct":  cpuAlloc,
 		"memAllocationPct":  memAlloc,
 		"monthlyCostUSD":    totalCost * cost.HoursPerMonth,
+		"potentialSavings":  potentialSavings,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, utilBar, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, utilBar, errorMsg, escapeHtml } from '../utils.js';
 import { skeleton, makeSortable, exportCSV, cardHeader, badge } from '../components.js';
 
 export async function renderGPU(targetEl) {
@@ -44,7 +44,7 @@ export async function renderGPU(targetEl) {
     if (recList.length) {
       $('#gpu-rec-body').innerHTML = recList.map(r => `<tr>
         <td>${badge(r.type || '', 'purple')}</td><td>${r.target || r.node || ''}</td>
-        <td>${r.description || ''}</td><td class="value green">${fmt$(r.estimatedSavings)}</td>
+        <td>${escapeHtml(r.description || '')}</td><td class="value green">${fmt$(r.estimatedSavings)}</td>
       </tr>`).join('');
       makeSortable($('#gpu-rec-table'));
     }

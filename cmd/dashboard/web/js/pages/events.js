@@ -78,8 +78,8 @@ export async function renderEvents(targetEl) {
               <span class="audit-event-time">${timeAgo(e.timestamp)}</span>
             </div>
             <div class="audit-event-details">
-              <span class="audit-event-target">${e.target || ''}</span>
-              <span class="audit-event-desc">${e.details || ''}</span>
+              <span class="audit-event-target">${escapeHtml(e.target || '')}</span>
+              <span class="audit-event-desc">${escapeHtml(e.details || '')}</span>
             </div>
             <div class="audit-event-meta">
               <span>User: ${e.user || 'system'}</span>

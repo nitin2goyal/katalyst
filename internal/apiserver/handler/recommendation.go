@@ -85,6 +85,14 @@ func (h *RecommendationHandler) Approve(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	id := chi.URLParam(r, "id")
+	// Computed recommendations (from the engine) cannot be approved via CRD update.
+	if len(id) > 9 && id[:9] == "computed-" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id, "status": "acknowledged",
+			"message": "Computed recommendation noted. Switch to OPTIMIZE mode to enable automatic execution.",
+		})
+		return
+	}
 	var rec koptv1alpha1.Recommendation
 	if err := h.client.Get(ctx, types.NamespacedName{
 		Namespace: "koptimizer-system",
@@ -105,6 +113,14 @@ func (h *RecommendationHandler) Dismiss(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	id := chi.URLParam(r, "id")
+	// Computed recommendations cannot be dismissed via CRD update.
+	if len(id) > 9 && id[:9] == "computed-" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id, "status": "dismissed",
+			"message": "Computed recommendation dismissed.",
+		})
+		return
+	}
 	var rec koptv1alpha1.Recommendation
 	if err := h.client.Get(ctx, types.NamespacedName{
 		Namespace: "koptimizer-system",

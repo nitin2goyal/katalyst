@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, errorMsg, timeAgo } from '../utils.js';
+import { $, toArray, errorMsg, timeAgo, escapeHtml } from '../utils.js';
 import { skeleton, filterBar, attachFilterHandlers, exportCSV, cardHeader, badge } from '../components.js';
 
 const actionColors = {
@@ -46,8 +46,8 @@ export async function renderAudit(targetEl) {
             <span class="audit-event-time">${ev.timestamp ? timeAgo(ev.timestamp) : ''}</span>
           </div>
           <div class="audit-event-details">
-            <span class="audit-event-target">${ev.target || ''}</span>
-            ${ev.details ? `<span class="audit-event-desc">${ev.details}</span>` : ''}
+            <span class="audit-event-target">${escapeHtml(ev.target || '')}</span>
+            ${ev.details ? `<span class="audit-event-desc">${escapeHtml(ev.details)}</span>` : ''}
           </div>
           <div class="audit-event-meta">
             <span>by ${ev.user || 'system'}</span>
