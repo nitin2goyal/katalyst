@@ -38,6 +38,9 @@ type ClusterState struct {
 	lastNodeMetrics   map[string]*pkgmetrics.NodeMetrics
 	lastPodMetrics    map[string]*pkgmetrics.PodMetrics
 	lastMetricsUpdate time.Time
+	// Suppress repeated warnings
+	pricingWarned map[string]bool
+	metricsWarned bool
 }
 
 // NewClusterState creates a new ClusterState. If db and writer are non-nil,
@@ -123,8 +126,10 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	var nodeMetrics []pkgmetrics.NodeMetrics
 	if nm, err := s.metrics.GetNodeMetrics(ctx); err == nil && len(nm) > 0 {
 		nodeMetrics = nm
-	} else if err != nil {
+		s.metricsWarned = false // reset so we warn again if it breaks later
+	} else if err != nil && !s.metricsWarned {
 		slog.Warn("node metrics unavailable, continuing without live metrics", "error", err)
+		s.metricsWarned = true
 	}
 	metricsMap := make(map[string]*pkgmetrics.NodeMetrics, len(nodeMetrics))
 	if len(nodeMetrics) > 0 {
@@ -167,9 +172,13 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	for region := range regionSet {
 		if pi, err := s.provider.GetCurrentPricing(ctx, region); err == nil {
 			pricingByRegion[region] = pi.Prices
-		} else {
+		} else if !s.pricingWarned[region] {
 			slog.Warn("pricing API unavailable for region, will use capacity-based fallback",
 				"region", region, "error", err)
+			if s.pricingWarned == nil {
+				s.pricingWarned = make(map[string]bool)
+			}
+			s.pricingWarned[region] = true
 		}
 	}
 	// Default pricingMap for backward compatibility
@@ -179,7 +188,7 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	var podMetrics []pkgmetrics.PodMetrics
 	if pm, err := s.metrics.GetPodMetrics(ctx, ""); err == nil && len(pm) > 0 {
 		podMetrics = pm
-	} else if err != nil {
+	} else if err != nil && !s.metricsWarned {
 		slog.Warn("pod metrics unavailable, continuing without live metrics", "error", err)
 	}
 	podMetricsMap := make(map[string]*pkgmetrics.PodMetrics, len(podMetrics))

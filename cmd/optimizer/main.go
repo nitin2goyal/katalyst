@@ -76,7 +76,7 @@ func main() {
 	// Load configuration
 	cfg, err := config.LoadFromFile(configFile)
 	if err != nil {
-		setupLog.Error(err, "Failed to load config file, falling back to defaults/env", "path", configFile)
+		setupLog.Info("Config file not found, using hardcoded defaults", "path", configFile)
 		cfg = config.DefaultConfig()
 	}
 
