@@ -191,9 +191,13 @@ type DatabaseConfig struct {
 }
 
 // DefaultConfig returns a Config with sensible defaults.
+// Cloud provider and region can be set via CLOUD_PROVIDER and REGION env vars.
 func DefaultConfig() *Config {
 	cfg := &Config{
 		Mode:              "recommend",
+		CloudProvider:     os.Getenv("CLOUD_PROVIDER"),
+		Region:            os.Getenv("REGION"),
+		ClusterName:       os.Getenv("CLUSTER_NAME"),
 		ReconcileInterval: 60 * time.Second,
 		CostMonitor: CostMonitorConfig{
 			Enabled:        true,
@@ -321,6 +325,7 @@ func DefaultConfig() *Config {
 	cfg.Rebalancer.BusyRedistribution.OverloadedThresholdPct = 90.0
 	cfg.Rebalancer.BusyRedistribution.TargetUtilizationPct = 70.0
 
+	cfg.applyEnvOverrides()
 	return cfg
 }
 
@@ -337,7 +342,41 @@ func LoadFromFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
+	cfg.applyEnvOverrides()
 	return cfg, nil
+}
+
+// applyEnvOverrides fills in empty fields from environment variables.
+// This handles cases where the config file has empty values but cloud-specific
+// env vars are set (e.g., by the Helm chart or the cloud platform).
+func (c *Config) applyEnvOverrides() {
+	if c.CloudProvider == "" {
+		if v := os.Getenv("CLOUD_PROVIDER"); v != "" {
+			c.CloudProvider = v
+		} else if os.Getenv("GOOGLE_CLOUD_PROJECT") != "" {
+			c.CloudProvider = "gcp"
+		} else if os.Getenv("AWS_REGION") != "" || os.Getenv("AWS_DEFAULT_REGION") != "" {
+			c.CloudProvider = "aws"
+		} else if os.Getenv("AZURE_SUBSCRIPTION_ID") != "" {
+			c.CloudProvider = "azure"
+		}
+	}
+	if c.Region == "" {
+		if v := os.Getenv("REGION"); v != "" {
+			c.Region = v
+		} else if v := os.Getenv("AWS_REGION"); v != "" {
+			c.Region = v
+		} else if v := os.Getenv("AWS_DEFAULT_REGION"); v != "" {
+			c.Region = v
+		}
+	}
+	if c.ClusterName == "" {
+		if v := os.Getenv("CLUSTER_NAME"); v != "" {
+			c.ClusterName = v
+		} else if v := os.Getenv("KOPTIMIZER_CLUSTER_NAME"); v != "" {
+			c.ClusterName = v
+		}
+	}
 }
 
 // Validate checks the config for errors.
@@ -349,7 +388,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.CloudProvider == "" {
-		return fmt.Errorf("cloudProvider is required")
+		return fmt.Errorf("cloudProvider is required: set in config file or CLOUD_PROVIDER env var (aws, gcp, azure)")
 	}
 	switch c.CloudProvider {
 	case "aws", "gcp", "azure":
@@ -358,7 +397,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Region == "" {
-		return fmt.Errorf("region is required")
+		return fmt.Errorf("region is required: set in config file or REGION env var")
 	}
 
 	if c.NodeAutoscaler.ScaleUpThreshold <= c.NodeAutoscaler.ScaleDownThreshold {

@@ -73,12 +73,16 @@ func main() {
 	// Load configuration
 	cfg, err := config.LoadFromFile(configFile)
 	if err != nil {
-		setupLog.Info("Config file not found, using defaults", "path", configFile, "error", err)
+		setupLog.Error(err, "Failed to load config file, falling back to defaults/env", "path", configFile)
 		cfg = config.DefaultConfig()
 	}
 
 	if err := cfg.ValidateDetailed(); err != nil {
-		setupLog.Error(err, "Invalid configuration")
+		setupLog.Error(err, "Invalid configuration",
+			"cloudProvider", cfg.CloudProvider,
+			"region", cfg.Region,
+			"configFile", configFile,
+		)
 		os.Exit(1)
 	}
 
