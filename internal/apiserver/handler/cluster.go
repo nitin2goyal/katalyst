@@ -342,9 +342,16 @@ func (h *ClusterHandler) GetDiagnostics(w http.ResponseWriter, r *http.Request) 
 
 	nodesWithoutMetrics := 0
 	podsWithoutMetrics := 0
+	podsWithRequests := 0
+	podsWithoutRequests := 0
+	var totalReqCPU, totalReqMem, totalCapCPU, totalCapMem int64
 	var anomalies []string
 
 	for _, n := range nodes {
+		totalCapCPU += n.CPUCapacity
+		totalCapMem += n.MemoryCapacity
+		totalReqCPU += n.CPURequested
+		totalReqMem += n.MemoryRequested
 		// Node with CPUUsed == CPURequested means metrics fallback was used
 		if n.CPUUsed == n.CPURequested && n.CPURequested > 0 {
 			nodesWithoutMetrics++
@@ -354,27 +361,71 @@ func (h *ClusterHandler) GetDiagnostics(w http.ResponseWriter, r *http.Request) 
 			anomalies = append(anomalies, fmt.Sprintf("Node %s: CPUUsed=%dm exceeds 2x capacity=%dm", n.Node.Name, n.CPUUsed, n.CPUCapacity))
 		}
 	}
+
+	// Per-namespace pod count and request totals
+	nsStats := make(map[string]map[string]interface{})
 	for _, p := range pods {
 		if p.CPUUsage == 0 && p.CPURequest > 0 {
 			podsWithoutMetrics++
+		}
+		if p.CPURequest > 0 || p.MemoryRequest > 0 {
+			podsWithRequests++
+		} else {
+			podsWithoutRequests++
+		}
+		ns := p.Pod.Namespace
+		stat, ok := nsStats[ns]
+		if !ok {
+			stat = map[string]interface{}{"pods": 0, "cpuRequestMillis": int64(0), "memRequestBytes": int64(0)}
+			nsStats[ns] = stat
+		}
+		stat["pods"] = stat["pods"].(int) + 1
+		stat["cpuRequestMillis"] = stat["cpuRequestMillis"].(int64) + p.CPURequest
+		stat["memRequestBytes"] = stat["memRequestBytes"].(int64) + p.MemoryRequest
+	}
+
+	// Top 5 nodes by pod count for spot check
+	type nodeDebug struct {
+		Name         string `json:"name"`
+		PodCount     int    `json:"podCount"`
+		CPURequested int64  `json:"cpuRequestedMillis"`
+		MemRequested int64  `json:"memRequestedBytes"`
+		CPUCapacity  int64  `json:"cpuCapacityMillis"`
+	}
+	var topNodes []nodeDebug
+	for _, n := range nodes {
+		if len(topNodes) < 5 || len(n.Pods) > topNodes[len(topNodes)-1].PodCount {
+			topNodes = append(topNodes, nodeDebug{
+				Name:         n.Node.Name,
+				PodCount:     len(n.Pods),
+				CPURequested: n.CPURequested,
+				MemRequested: n.MemoryRequested,
+				CPUCapacity:  n.CPUCapacity,
+			})
 		}
 	}
 
 	resp := map[string]interface{}{
 		"metricsServer": map[string]interface{}{
-			"available":          h.state.MetricsAvailable,
-			"nodesWithMetrics":   h.state.NodesWithMetrics,
-			"totalNodes":         len(nodes),
-			"nodesWithoutMetrics": nodesWithoutMetrics,
-			"podsWithMetrics":    h.state.PodsWithMetrics,
-			"totalPods":          len(pods),
-			"podsWithoutMetrics": podsWithoutMetrics,
+			"available":         h.state.MetricsAvailable,
+			"nodesWithMetrics":  h.state.NodesWithMetrics,
+			"totalNodes":        len(nodes),
+			"podsWithMetrics":   h.state.PodsWithMetrics,
+			"totalPods":         len(pods),
+			"podsWithRequests":  podsWithRequests,
+			"podsWithoutRequests": podsWithoutRequests,
 		},
-		"costAllocation": map[string]interface{}{
-			"method": "capacity-based (50% CPU + 50% memory)",
-			"note":   "Cost = node_monthly_cost × (0.5 × cpuReq/cpuCapacity + 0.5 × memReq/memCapacity)",
+		"clusterAllocation": map[string]interface{}{
+			"totalCPUCapacityMillis":  totalCapCPU,
+			"totalCPURequestedMillis": totalReqCPU,
+			"cpuAllocPct":             safePct(totalReqCPU, totalCapCPU),
+			"totalMemCapacityBytes":   totalCapMem,
+			"totalMemRequestedBytes":  totalReqMem,
+			"memAllocPct":             safePct(totalReqMem, totalCapMem),
 		},
-		"anomalies": anomalies,
+		"namespaceStats": nsStats,
+		"topNodesByPodCount": topNodes,
+		"anomalies":          anomalies,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
