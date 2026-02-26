@@ -28,6 +28,10 @@ type NodeState struct {
 	MemoryUsed int64
 	GPUsUsed   int
 
+	// Disk (ephemeral storage)
+	DiskCapacity int64 // bytes (from node Status.Capacity ephemeral-storage)
+	DiskUsed     int64 // bytes (from kubelet stats summary)
+
 	// Cost
 	HourlyCostUSD float64
 	IsSpot        bool
@@ -48,6 +52,14 @@ func (n *NodeState) MemoryUtilization() float64 {
 		return 0
 	}
 	return float64(n.MemoryUsed) / float64(n.MemoryCapacity) * 100
+}
+
+// DiskUtilization returns disk utilization as a percentage of capacity.
+func (n *NodeState) DiskUtilization() float64 {
+	if n.DiskCapacity == 0 {
+		return 0
+	}
+	return float64(n.DiskUsed) / float64(n.DiskCapacity) * 100
 }
 
 // CPURequestUtilization returns CPU requests as a percentage of capacity.
@@ -108,11 +120,13 @@ func isDaemonSetPod(pod *corev1.Pod) bool {
 	return false
 }
 
-// ExtractNodeCapacity extracts CPU and memory allocatable resources from a node.
+// ExtractNodeCapacity extracts CPU, memory, and disk allocatable resources from a node.
 // Uses Allocatable (capacity minus system reservations) for CPU and memory
 // to avoid 5-15% inflation in utilization calculations. Falls back to
 // Capacity for GPUs since Allocatable may not include extended resources.
-func ExtractNodeCapacity(node *corev1.Node) (cpuMilli int64, memBytes int64, gpus int) {
+// Disk capacity uses Capacity (not Allocatable) since we compare against
+// actual used bytes from kubelet stats, which reports against total disk.
+func ExtractNodeCapacity(node *corev1.Node) (cpuMilli int64, memBytes int64, gpus int, diskBytes int64) {
 	if cpu, ok := node.Status.Allocatable[corev1.ResourceCPU]; ok {
 		cpuMilli = cpu.MilliValue()
 	} else if cpu, ok := node.Status.Capacity[corev1.ResourceCPU]; ok {
@@ -130,6 +144,11 @@ func ExtractNodeCapacity(node *corev1.Node) (cpuMilli int64, memBytes int64, gpu
 		gpus = int(gpu.Value())
 	} else if gpu, ok := node.Status.Capacity[gpuRes]; ok {
 		gpus = int(gpu.Value())
+	}
+	// Disk: use Capacity for total disk since kubelet stats report against
+	// the full filesystem, not the allocatable portion.
+	if disk, ok := node.Status.Capacity[corev1.ResourceEphemeralStorage]; ok {
+		diskBytes = disk.Value()
 	}
 	return
 }

@@ -41,6 +41,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	notifHandler := handler.NewNotificationHandler(clusterState.AuditLog, cfg)
 	metricsHandler := handler.NewMetricsHandler(clusterState, provider, k8sClient, cfg)
 	policyHandler := handler.NewPolicyHandler(clusterState, cfg)
+	actionsHandler := handler.NewActionsHandler(clusterState, k8sClient)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Cluster
@@ -123,6 +124,10 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		r.Get("/notifications", notifHandler.Get)
 		r.Get("/policies", policyHandler.Get)
 		r.Get("/metrics", metricsHandler.Get)
+
+		// Actions
+		r.Get("/actions/bad-pods", actionsHandler.ListBadPods)
+		r.Post("/actions/delete-pods", actionsHandler.DeletePods)
 	})
 
 	return r

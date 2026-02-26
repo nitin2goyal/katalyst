@@ -3,6 +3,7 @@ import { destroyCharts } from '../charts.js';
 import { renderNodes } from './nodes.js';
 import { renderWorkloads } from './workloads.js';
 import { renderRecsTab } from './recommendations.js';
+import { renderActions } from './actions.js';
 
 const container = () => $('#page-container');
 
@@ -10,12 +11,14 @@ const tabDefs = [
   { id: 'nodes', label: 'Nodes' },
   { id: 'workloads', label: 'Workloads' },
   { id: 'recommendations', label: 'Recommendations' },
+  { id: 'actions', label: 'Actions' },
 ];
 
 const renderers = {
   nodes: renderNodes,
   workloads: renderWorkloads,
   recommendations: renderRecsTab,
+  actions: renderActions,
 };
 
 export async function renderResources(params) {

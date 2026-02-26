@@ -3,12 +3,15 @@ package state
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
@@ -40,8 +43,11 @@ type ClusterState struct {
 	lastPodMetrics    map[string]*pkgmetrics.PodMetrics
 	lastMetricsUpdate time.Time
 	// Suppress repeated warnings
-	pricingWarned map[string]bool
-	metricsWarned bool
+	pricingWarned    map[string]bool
+	metricsWarned    bool
+	diskStatsWarned  bool
+	// Kubernetes clientset for kubelet proxy calls (disk stats)
+	kubeClientset *kubernetes.Clientset
 }
 
 // NewClusterState creates a new ClusterState. If db and writer are non-nil,
@@ -72,6 +78,73 @@ func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc p
 		NodeLock:     NewNodeLock(),
 		Breaker:      NewCircuitBreaker(0.5, 5*time.Minute),
 	}
+}
+
+// SetRESTConfig sets the Kubernetes REST config for kubelet proxy calls (disk stats).
+func (s *ClusterState) SetRESTConfig(cfg *rest.Config) {
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		slog.Warn("failed to create kubernetes clientset for disk stats", "error", err)
+		return
+	}
+	s.kubeClientset = cs
+}
+
+// kubeletStatsSummary is a minimal struct for parsing kubelet /stats/summary.
+type kubeletStatsSummary struct {
+	Node struct {
+		Fs *struct {
+			CapacityBytes  int64 `json:"capacityBytes"`
+			UsedBytes      int64 `json:"usedBytes"`
+			AvailableBytes int64 `json:"availableBytes"`
+		} `json:"fs"`
+	} `json:"node"`
+}
+
+// fetchDiskStats fetches disk utilization for all nodes via kubelet proxy.
+// Returns a map of nodeName -> [capacityBytes, usedBytes].
+func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) map[string][2]int64 {
+	if s.kubeClientset == nil {
+		return nil
+	}
+
+	var mu sync.Mutex
+	diskMap := make(map[string][2]int64, len(nodeNames))
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10) // limit concurrency
+
+	for _, name := range nodeNames {
+		wg.Add(1)
+		sem <- struct{}{} // acquire slot
+		go func(nodeName string) {
+			defer wg.Done()
+			defer func() { <-sem }() // release slot
+
+			data, err := s.kubeClientset.CoreV1().RESTClient().
+				Get().
+				Resource("nodes").
+				Name(nodeName).
+				SubResource("proxy", "stats", "summary").
+				DoRaw(ctx)
+			if err != nil {
+				return
+			}
+
+			var summary kubeletStatsSummary
+			if err := json.Unmarshal(data, &summary); err != nil {
+				return
+			}
+			if summary.Node.Fs != nil {
+				mu.Lock()
+				diskMap[nodeName] = [2]int64{summary.Node.Fs.CapacityBytes, summary.Node.Fs.UsedBytes}
+				mu.Unlock()
+			}
+		}(name)
+	}
+
+	wg.Wait()
+	return diskMap
 }
 
 // listAllNodes fetches all nodes using pagination to avoid OOM on large clusters.
@@ -221,6 +294,24 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		}
 	}
 
+	// Fetch disk utilization from kubelet stats summary (parallel, best-effort).
+	var diskStatsMap map[string][2]int64
+	if s.kubeClientset != nil {
+		nodeNames := make([]string, len(nodeList.Items))
+		for i := range nodeList.Items {
+			nodeNames[i] = nodeList.Items[i].Name
+		}
+		diskCtx, diskCancel := context.WithTimeout(ctx, 15*time.Second)
+		diskStatsMap = s.fetchDiskStats(diskCtx, nodeNames)
+		diskCancel()
+		if len(diskStatsMap) == 0 && !s.diskStatsWarned {
+			slog.Warn("kubelet disk stats unavailable, disk utilization will use capacity only")
+			s.diskStatsWarned = true
+		} else if len(diskStatsMap) > 0 {
+			s.diskStatsWarned = false
+		}
+	}
+
 	// Detect if metrics server is available.
 	metricsAvailable := len(metricsMap) > 0
 	if !metricsAvailable && len(nodeList.Items) > 0 {
@@ -242,7 +333,7 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	newNodes := make(map[string]*NodeState, len(nodeList.Items))
 	for i := range nodeList.Items {
 		node := &nodeList.Items[i]
-		cpuCap, memCap, gpuCap := ExtractNodeCapacity(node)
+		cpuCap, memCap, gpuCap, diskCap := ExtractNodeCapacity(node)
 
 		instanceType, _ := s.provider.GetNodeInstanceType(ctx, node)
 		family, _ := familylock.ExtractFamily(instanceType)
@@ -255,6 +346,7 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 			CPUCapacity:    cpuCap,
 			MemoryCapacity: memCap,
 			GPUCapacity:    gpuCap,
+			DiskCapacity:   diskCap,
 			IsGPUNode:      gpuCap > 0,
 		}
 
@@ -286,6 +378,14 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		if m, ok := metricsMap[node.Name]; ok {
 			ns.CPUUsed = m.CPUUsage
 			ns.MemoryUsed = m.MemoryUsage
+		}
+
+		// Apply disk stats from kubelet (best-effort).
+		if ds, ok := diskStatsMap[node.Name]; ok {
+			if ds[0] > 0 {
+				ns.DiskCapacity = ds[0]
+			}
+			ns.DiskUsed = ds[1]
 		}
 
 		// Compute cost from pre-fetched pricing (avoids per-node API call).

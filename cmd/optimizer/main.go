@@ -187,6 +187,7 @@ func main() {
 
 	// Initialize cluster state (audit log backed by SQLite when available)
 	clusterState := state.NewClusterState(mgr.GetClient(), provider, metricsCollector, sqlDBRef, dbWriter, metricsStore, directClient)
+	clusterState.SetRESTConfig(mgr.GetConfig())
 
 	// Initialize cost store (nil-safe)
 	costStore := store.NewCostStore(sqlDBRef)
