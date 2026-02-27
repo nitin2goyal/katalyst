@@ -210,19 +210,52 @@ export async function renderActions(targetEl) {
       confirmDialog(
         `Delete <strong>${selected.length}</strong> pod${selected.length > 1 ? 's' : ''}?<br><br>${detail}`,
         async () => {
+          // Show blocking overlay
+          const overlay = document.createElement('div');
+          overlay.className = 'modal-overlay';
+          overlay.style.cssText = 'cursor:wait;';
+          overlay.innerHTML = `<div class="modal" style="text-align:center;min-width:320px">
+            <div class="loading" style="padding:24px 0;font-size:14px;font-weight:500">Deleting ${selected.length} pod${selected.length > 1 ? 's' : ''}...</div>
+            <div id="purge-progress" style="padding:0 20px 20px;font-size:12px;color:var(--text-muted)">Sending delete requests to cluster</div>
+          </div>`;
+          document.body.appendChild(overlay);
+
           try {
             const result = await apiPost('/actions/delete-pods', {
               pods: selected.map(p => ({ name: p.name, namespace: p.namespace })),
             });
+            overlay.remove();
+
             const errCount = (result.errors || []).length;
-            if (errCount > 0) {
-              toast(`Deleted ${result.deleted} pods, ${errCount} failed`, 'warning');
-            } else {
-              toast(`Deleted ${result.deleted} pods`, 'success');
-            }
-            // Refresh data
-            renderActions(targetEl);
+            const deleted = result.deleted || 0;
+
+            // Show result modal
+            const resultOverlay = document.createElement('div');
+            resultOverlay.className = 'modal-overlay';
+            const errDetail = errCount > 0
+              ? `<div style="margin-top:12px;font-size:12px;color:var(--red)">${result.errors.map(e => `<div>${escapeHtml(e.namespace)}/${escapeHtml(e.name)}: ${escapeHtml(e.error)}</div>`).join('')}</div>`
+              : '';
+            resultOverlay.innerHTML = `<div class="modal" style="min-width:360px">
+              <div class="modal-header"><h3>Purge Complete</h3><button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button></div>
+              <div class="modal-body">
+                <div style="display:flex;gap:16px;margin-bottom:12px">
+                  <div class="kpi-card" style="flex:1;animation:none;opacity:1"><div class="label">Deleted</div><div class="value green">${deleted}</div></div>
+                  <div class="kpi-card" style="flex:1;animation:none;opacity:1"><div class="label">Failed</div><div class="value ${errCount > 0 ? 'red' : ''}">${errCount}</div></div>
+                </div>
+                ${errDetail}
+              </div>
+              <div class="modal-actions"><button class="btn btn-blue" id="purge-done-btn">Done</button></div>
+            </div>`;
+            document.body.appendChild(resultOverlay);
+            resultOverlay.querySelector('#purge-done-btn').onclick = () => {
+              resultOverlay.remove();
+              renderActions(targetEl);
+            };
+            resultOverlay.onclick = (e) => {
+              if (e.target === resultOverlay) { resultOverlay.remove(); renderActions(targetEl); }
+            };
           } catch (err) {
+            overlay.remove();
             toast('Delete failed: ' + err.message, 'error');
           }
         }
