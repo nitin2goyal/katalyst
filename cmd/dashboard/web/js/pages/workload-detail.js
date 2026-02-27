@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, fmt$, fmtPct, errorMsg, escapeHtml } from '../utils.js';
+import { $, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, escapeHtml } from '../utils.js';
 import { skeleton, breadcrumbs, tabs, attachTabHandlers, badge } from '../components.js';
 import { makeChart } from '../charts.js';
 
@@ -21,14 +21,6 @@ export async function renderWorkloadDetail(params) {
     // Normalize API field names (List API uses totalCPU/totalMem; Get API uses totalCPURequestMilli/totalMemRequestBytes)
     const cpuMillis = wl.totalCPURequestMilli ?? wl.totalCPU ?? 0;
     const memBytes = wl.totalMemRequestBytes ?? wl.totalMem ?? 0;
-    const fmtCPU = (v) => typeof v === 'number' ? v + 'm' : (v || '0m');
-    const fmtMem = (v) => {
-      if (typeof v !== 'number') return v || '0Mi';
-      if (v >= 1073741824) return (v / 1073741824).toFixed(1) + 'Gi';
-      if (v >= 1048576) return Math.round(v / 1048576) + 'Mi';
-      if (v >= 1024) return Math.round(v / 1024) + 'Ki';
-      return v + 'B';
-    };
 
     container().innerHTML = `
       ${breadcrumbs([

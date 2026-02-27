@@ -1,7 +1,7 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, utilBar, badge, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, utilBar, badge, errorMsg } from '../utils.js';
 import { skeleton, breadcrumbs, makeSortable } from '../components.js';
-import { makeChart } from '../charts.js';
+import { makeBarChart } from '../charts.js';
 
 const container = () => $('#page-container');
 
@@ -48,11 +48,11 @@ export async function renderNodeDetail(params) {
       <div class="grid-2">
         <div class="card">
           <h2>CPU Usage</h2>
-          <div class="chart-container"><canvas id="node-cpu-chart"></canvas></div>
+          <div class="chart-container" id="node-cpu-chart"></div>
         </div>
         <div class="card">
           <h2>Memory Usage</h2>
-          <div class="chart-container"><canvas id="node-mem-chart"></canvas></div>
+          <div class="chart-container" id="node-mem-chart"></div>
         </div>
       </div>
       <div class="card">
@@ -63,61 +63,78 @@ export async function renderNodeDetail(params) {
         </table></div>
       </div>`;
 
-    // Resource charts
-    const cpuUsed = parseFloat(node.cpuUsed) || 0;
-    const cpuCap = parseFloat(node.cpuCapacity) || 1;
-    makeChart('node-cpu-chart', {
-      type: 'bar',
-      data: {
-        labels: ['CPU'],
-        datasets: [
-          { label: 'Used', data: [cpuUsed], backgroundColor: '#4361ee', borderRadius: 4 },
-          { label: 'Capacity', data: [cpuCap - cpuUsed], backgroundColor: '#e2e8f0', borderRadius: 4 },
-        ]
-      },
-      options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { position: 'bottom' } }, scales: { x: { stacked: true, beginAtZero: true }, y: { stacked: true } } }
+    // Resource charts — values are in millicores (CPU) and bytes (Memory)
+    const cpuUsedMilli = parseFloat(node.cpuUsed) || 0;
+    const cpuCapMilli = parseFloat(node.cpuCapacity) || 1;
+    const cpuUsedCores = cpuUsedMilli / 1000;
+    const cpuCapCores = cpuCapMilli / 1000;
+    makeBarChart('node-cpu-chart', {
+      categories: ['CPU (cores)'],
+      series: [
+        { name: 'Used', data: [parseFloat(cpuUsedCores.toFixed(1))] },
+        { name: 'Available', data: [parseFloat((cpuCapCores - cpuUsedCores).toFixed(1))] },
+      ],
+      colors: ['#4361ee', '#e2e8f0'],
+      horizontal: true,
+      stacked: true,
+      noCurrency: true,
     });
 
-    const memUsed = parseFloat(node.memUsed) || 0;
-    const memCap = parseFloat(node.memCapacity) || 1;
-    makeChart('node-mem-chart', {
-      type: 'bar',
-      data: {
-        labels: ['Memory'],
-        datasets: [
-          { label: 'Used', data: [memUsed], backgroundColor: '#8b5cf6', borderRadius: 4 },
-          { label: 'Capacity', data: [memCap - memUsed], backgroundColor: '#e2e8f0', borderRadius: 4 },
-        ]
-      },
-      options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { position: 'bottom' } }, scales: { x: { stacked: true, beginAtZero: true }, y: { stacked: true } } }
+    const memUsedBytes = parseFloat(node.memUsed) || 0;
+    const memCapBytes = parseFloat(node.memCapacity) || 1;
+    const memUsedGB = memUsedBytes / 1073741824;
+    const memCapGB = memCapBytes / 1073741824;
+    makeBarChart('node-mem-chart', {
+      categories: ['Memory (GB)'],
+      series: [
+        { name: 'Used', data: [parseFloat(memUsedGB.toFixed(1))] },
+        { name: 'Available', data: [parseFloat((memCapGB - memUsedGB).toFixed(1))] },
+      ],
+      colors: ['#8b5cf6', '#e2e8f0'],
+      horizontal: true,
+      stacked: true,
+      noCurrency: true,
     });
 
-    const fmtCPUm = (v) => typeof v === 'number' ? v + 'm' : (v || '0m');
-    const fmtMemB = (v) => {
-      if (typeof v !== 'number') return v || '0Mi';
-      if (v >= 1073741824) return (v / 1073741824).toFixed(1) + 'Gi';
-      if (v >= 1048576) return Math.round(v / 1048576) + 'Mi';
-      if (v >= 1024) return Math.round(v / 1024) + 'Ki';
-      return v + 'B';
-    };
+    // Use shared fmtCPU / fmtMem from utils.js
 
     // Pods table — color-code unhealthy statuses
     const podStatusColor = (s) => {
       if (!s) return 'gray';
       const lower = s.toLowerCase();
-      if (lower === 'running' || lower === 'succeeded') return 'green';
-      if (lower === 'pending' || lower === 'containercreating') return 'blue';
+      if (lower === 'running' || lower === 'succeeded' || lower === 'completed') return 'green';
+      if (lower === 'pending' || lower === 'containercreating' || lower === 'podinitializing') return 'blue';
       if (lower.includes('backoff') || lower.includes('error') || lower.includes('oomkilled') || lower === 'failed') return 'red';
       if (lower.includes('pull') || lower.includes('terminating')) return 'amber';
       return 'amber';
+    };
+    const podStatusReason = (s) => {
+      if (!s) return '';
+      const reasons = {
+        'running': 'Pod is running normally',
+        'succeeded': 'Pod completed successfully',
+        'completed': 'Pod completed successfully',
+        'pending': 'Pod is waiting to be scheduled',
+        'containercreating': 'Container image is being pulled and container is starting',
+        'podinitializing': 'Init containers are running',
+        'imagepullbackoff': 'Failed to pull container image — retrying with exponential backoff',
+        'errimagepull': 'Error pulling container image — check image name and registry access',
+        'crashloopbackoff': 'Container keeps crashing — check logs for the root cause',
+        'oomkilled': 'Container was killed due to exceeding memory limits',
+        'error': 'Container exited with an error',
+        'failed': 'Pod has failed',
+        'terminating': 'Pod is being deleted',
+        'containerstatusunknown': 'Container status cannot be determined — node may be unreachable',
+      };
+      return reasons[s.toLowerCase()] || s;
     };
     // Sort: app pods first, system pods second
     const sortedPods = [...pods].sort((a, b) => (a.isSystem ? 1 : 0) - (b.isSystem ? 1 : 0));
     $('#node-pods-body').innerHTML = sortedPods.length ? sortedPods.map(p => `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
       <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
-      <td>${fmtCPUm(p.cpuRequest)}</td><td>${fmtMemB(p.memRequest)}</td>
-      <td>${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
+      <td>${fmtCPU(p.cpuRequest)}</td><td>${fmtMem(p.memRequest)}</td>
+      <td title="${podStatusReason(p.status)}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
     </tr>`).join('') : '<tr><td colspan="6" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
 

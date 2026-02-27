@@ -104,7 +104,7 @@ export function makeBarChart(containerId, { categories, series, colors, horizont
   const ax = baseAxis();
   const distributed = series.length === 1 && Array.isArray(colors) && colors.length > 1;
   const fmtVal = noCurrency
-    ? (val) => { if (val >= 1000) return (val / 1000).toFixed(1) + 'k'; return Number(val).toFixed(0); }
+    ? (val) => { if (val >= 1000) return (val / 1000).toFixed(1) + 'k'; return val % 1 === 0 ? Number(val).toFixed(0) : Number(val).toFixed(1); }
     : null;
 
   return renderApex(containerId, {

@@ -1,23 +1,8 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge } from '../components.js';
 
-function fmtCPUm(v) {
-  if (v == null) return '0m';
-  if (typeof v === 'number') return v + 'm';
-  return v;
-}
-
-function fmtMemB(v) {
-  if (v == null) return '0Mi';
-  if (typeof v === 'number') {
-    if (v >= 1073741824) return (v / 1073741824).toFixed(1) + 'Gi';
-    if (v >= 1048576) return Math.round(v / 1048576) + 'Mi';
-    if (v >= 1024) return Math.round(v / 1024) + 'Ki';
-    return v + 'B';
-  }
-  return v;
-}
+// Use shared fmtCPU / fmtMem from utils.js
 
 export async function renderWorkloads(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -61,7 +46,7 @@ export async function renderWorkloads(targetEl) {
           ]
         })}
         <div class="table-wrap"><table id="wl-table">
-          <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Replicas</th><th>CPU Req</th><th>CPU Lim</th><th>Mem Req</th><th>Mem Lim</th><th>Total CPU</th><th>Total Mem</th><th>Image</th><th>CPU Eff.</th><th>Mem Eff.</th><th>Wasted</th></tr></thead>
+          <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Replicas</th><th>CPU Req (cores)</th><th>CPU Lim</th><th>Mem Req</th><th>Mem Lim</th><th>Total CPU</th><th>Total Mem</th><th>Image</th><th>CPU Eff.</th><th>Mem Eff.</th><th>Wasted</th></tr></thead>
           <tbody id="wl-body"></tbody>
         </table></div>
       </div>`;
@@ -86,12 +71,12 @@ export async function renderWorkloads(targetEl) {
       return `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
         <td>${w.namespace || ''}</td><td>${w.kind || ''}</td><td>${w.name || ''}</td>
         <td>${w.replicas ?? ''}</td>
-        <td>${fmtCPUm(w.cpuRequest)}</td>
-        <td>${fmtCPUm(w.cpuLimit)}</td>
-        <td>${fmtMemB(w.memRequest)}</td>
-        <td>${fmtMemB(w.memLimit)}</td>
-        <td>${fmtCPUm(w.totalCPU)}</td>
-        <td>${fmtMemB(w.totalMem)}</td>
+        <td>${fmtCPU(w.cpuRequest)}</td>
+        <td>${fmtCPU(w.cpuLimit)}</td>
+        <td>${fmtMem(w.memRequest)}</td>
+        <td>${fmtMem(w.memLimit)}</td>
+        <td>${fmtCPU(w.totalCPU)}</td>
+        <td>${fmtMem(w.totalMem)}</td>
         <td title="${w.image || ''}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)">${shortImg(w.image)}</td>
         <td>${effBadge(eff?.cpuEfficiencyPct, eff?.hasMetrics)}</td>
         <td>${effBadge(eff?.memEfficiencyPct, eff?.hasMetrics)}</td>

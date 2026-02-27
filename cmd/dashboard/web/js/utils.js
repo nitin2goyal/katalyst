@@ -21,8 +21,51 @@ export function fmt$(v) {
 }
 
 export function fmtPct(v) { return v == null ? '0%' : Number(v).toFixed(1) + '%'; }
-export function fmtCPU(v) { return v || '0m'; }
-export function fmtMem(v) { return v || '0Mi'; }
+/** Format CPU: millicores (number) or string like "100m" → human-readable cores.
+ *  1000m → "1", 1200m → "1.2", 250m → "0.25", "100m" → "0.1" */
+export function fmtCPU(v) {
+  if (v == null) return '0';
+  let milli;
+  if (typeof v === 'number') {
+    milli = v;
+  } else {
+    const s = String(v).trim();
+    if (s.endsWith('m')) milli = parseFloat(s);
+    else { const n = parseFloat(s); return isNaN(n) ? v : (n >= 1 ? n.toString() : n + ''); }
+  }
+  if (isNaN(milli) || milli === 0) return '0';
+  const cores = milli / 1000;
+  if (cores >= 1) return cores % 1 === 0 ? cores.toString() : cores.toFixed(1);
+  return cores.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+/** Format memory: bytes (number) or string like "1907Mi" → human-readable GB.
+ *  1073741824 → "1 GB", "1907Mi" → "1.9 GB" */
+export function fmtMem(v) {
+  if (v == null) return '0';
+  let bytes;
+  if (typeof v === 'number') {
+    bytes = v;
+  } else {
+    const s = String(v).trim();
+    const m = s.match(/^([\d.]+)\s*(Ti|Gi|Mi|Ki|B)?$/i);
+    if (m) {
+      const n = parseFloat(m[1]);
+      const unit = (m[2] || '').toLowerCase();
+      if (unit === 'ti') bytes = n * 1099511627776;
+      else if (unit === 'gi') bytes = n * 1073741824;
+      else if (unit === 'mi') bytes = n * 1048576;
+      else if (unit === 'ki') bytes = n * 1024;
+      else bytes = n;
+    } else return v;
+  }
+  if (isNaN(bytes) || bytes === 0) return '0';
+  const gb = bytes / 1073741824;
+  if (gb >= 1) return gb.toFixed(1).replace(/\.0$/, '') + ' GB';
+  const mb = bytes / 1048576;
+  if (mb >= 1) return Math.round(mb) + ' MB';
+  return Math.round(bytes / 1024) + ' KB';
+}
 
 export function utilClass(pct) {
   if (pct < 50) return 'low';

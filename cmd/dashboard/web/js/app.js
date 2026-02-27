@@ -141,7 +141,27 @@ window.addEventListener('kopt-theme-toggle', () => {
 // Refresh indicator update
 setInterval(updateRefreshIndicator, 5000);
 
+// Sidebar collapse toggle
+function initSidebarCollapse() {
+  const saved = localStorage.getItem('kopt-sidebar-collapsed');
+  if (saved === 'true') {
+    document.getElementById('sidebar')?.classList.add('collapsed');
+    document.body.classList.add('sidebar-collapsed');
+    const btn = document.getElementById('sidebar-collapse');
+    if (btn) btn.title = 'Expand sidebar';
+  }
+}
+
+document.querySelector('.sidebar-header')?.addEventListener('click', () => {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  const collapsed = sidebar.classList.toggle('collapsed');
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  localStorage.setItem('kopt-sidebar-collapsed', collapsed);
+});
+
 // Init
+initSidebarCollapse();
 initTheme();
 updateModeBadge();
 initRouter();

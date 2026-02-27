@@ -71,7 +71,7 @@ export async function renderSavings(targetEl) {
           { key: '0', label: 'Type', options: [...new Set(list.map(s => s.type).filter(Boolean))] }
         ] })}
         <div class="table-wrap"><table id="savings-detail-table">
-          <thead><tr><th>Type</th><th>Target</th><th>Description</th><th>Est. Monthly Savings</th><th>Impact</th></tr></thead>
+          <thead><tr><th>Type</th><th>Target</th><th>Description</th><th>Est. Monthly Savings</th><th>Impact</th><th>Action</th></tr></thead>
           <tbody id="savings-detail-body"></tbody>
         </table></div>
       </div>`;
@@ -100,16 +100,25 @@ export async function renderSavings(targetEl) {
       const cls = l === 'high' ? 'red' : l === 'medium' ? 'amber' : 'gray';
       return badge(l, cls);
     };
+    const savingsAction = (s) => {
+      const name = s.name || s.target || '';
+      // Parse namespace/kind/name pattern for workload drilldown
+      const parts = name.split('/');
+      if (parts.length === 3) return `<a href="#/workloads/${parts[0]}/${parts[1]}/${parts[2]}" class="btn btn-gray btn-sm">View</a>`;
+      if (s.type === 'spot') return `<a href="#/infrastructure/spot" class="btn btn-gray btn-sm">View</a>`;
+      return `<a href="#/resources/recommendations" class="btn btn-gray btn-sm">View</a>`;
+    };
     $('#savings-detail-body').innerHTML = list.length ? list.map(s => {
       const amt = s.estimatedSavings || s.savings || 0;
       return `<tr>
         <td>${badge(s.type || 'optimization', 'blue')}</td>
         <td><strong>${s.name || s.target || ''}</strong></td>
-        <td>${s.description || ''}</td>
+        <td style="white-space:normal;max-width:400px;line-height:1.5">${s.description || ''}</td>
         <td class="value green">${fmt$(amt)}</td>
         <td>${impactBadge(amt)}</td>
+        <td>${savingsAction(s)}</td>
       </tr>`;
-    }).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No savings identified</td></tr>';
+    }).join('') : '<tr><td colspan="6" style="color:var(--text-muted)">No savings identified</td></tr>';
     makeSortable($('#savings-detail-table'));
     const sPag = attachPagination($('#savings-detail-table'));
 

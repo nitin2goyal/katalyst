@@ -166,10 +166,11 @@ const sortState = new Map();
 function parseNum(s) {
   const cleaned = s.replace(/[$,%]/g, '');
   // K8s resource units: Ti, Gi, Mi, Ki, m (millicores)
-  const u = cleaned.match(/^(-?[\d.]+)\s*(Ti|Gi|Mi|Ki|m|k)$/i);
+  const u = cleaned.match(/^(-?[\d.]+)\s*(Ti|Gi|Mi|Ki|GB|MB|KB|m|k)$/i);
   if (u) {
     const v = parseFloat(u[1]);
-    switch (u[2]) {
+    const unit = u[2];
+    switch (unit) {
       case 'Ti': return v * 1099511627776;
       case 'Gi': return v * 1073741824;
       case 'Mi': return v * 1048576;
@@ -177,6 +178,9 @@ function parseNum(s) {
       case 'm':  return v / 1000;
       case 'k': case 'K': return v * 1000;
     }
+    if (unit.toLowerCase() === 'gb') return v * 1073741824;
+    if (unit.toLowerCase() === 'mb') return v * 1048576;
+    if (unit.toLowerCase() === 'kb') return v * 1024;
   }
   return parseFloat(cleaned);
 }

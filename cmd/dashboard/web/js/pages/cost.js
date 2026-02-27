@@ -75,8 +75,15 @@ async function renderCostDashboard(targetEl) {
     }
     const totalIdentified = savingsList.reduce((s, r) => s + (r.estimatedSavings || r.savings || 0), 0);
 
-    const nsMap = (byNs && typeof byNs === 'object' && !Array.isArray(byNs)) ? byNs : {};
-    const nsEntries = Object.entries(nsMap).filter(([_, v]) => typeof v === 'number').sort((a, b) => b[1] - a[1]);
+    // Parse namespace cost — API may return {data:[{namespace,monthlyCostUSD}]} or flat {ns:cost}
+    let nsEntries;
+    const nsArr = toArray(byNs, 'data', 'namespaces');
+    if (nsArr.length && nsArr[0]?.namespace != null) {
+      nsEntries = nsArr.filter(n => n.monthlyCostUSD > 0).map(n => [n.namespace, n.monthlyCostUSD]).sort((a, b) => b[1] - a[1]);
+    } else {
+      const nsMap = (byNs && typeof byNs === 'object' && !Array.isArray(byNs)) ? byNs : {};
+      nsEntries = Object.entries(nsMap).filter(([k, v]) => typeof v === 'number' && !['total','page','pageSize','totalPages'].includes(k)).sort((a, b) => b[1] - a[1]);
+    }
     const topNs = nsEntries.slice(0, 8);
 
     const trendPoints = trend ? toArray(trend, 'dataPoints', 'points') : [];
@@ -110,7 +117,7 @@ async function renderCostDashboard(targetEl) {
       </div>` : ''}
       ${savingsList.length ? `<div class="card">
         ${cardHeader('Savings opportunities', '<button class="btn btn-gray btn-sm" onclick="window.__exportSavingsCSV()">Export CSV</button>')}
-        <div class="table-wrap"><table id="savings-table"><thead><tr><th>Type</th><th>Description</th><th>Est. savings</th></tr></thead><tbody id="savings-body"></tbody></table></div>
+        <div class="table-wrap"><table id="savings-table"><thead><tr><th>Type</th><th>Description</th><th>Est. savings</th><th>Action</th></tr></thead><tbody id="savings-body"></tbody></table></div>
       </div>` : ''}
       <div class="card">
         ${cardHeader('Cost by workload', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlCostCSV()">Export CSV</button>')}
@@ -165,26 +172,37 @@ async function renderCostDashboard(targetEl) {
           const changeDisplay = isNew
             ? '<span class="badge badge-blue">New</span>'
             : `${arrow} ${fmtPct(Math.abs(change))}`;
-          return `<tr>
-            <td><strong>${n.namespace || ''}</strong></td>
+          return `<tr class="clickable-row" onclick="location.hash='#/cost/workload?ns=${encodeURIComponent(n.namespace)}'">
+            <td><a href="#/cost/workload?ns=${encodeURIComponent(n.namespace)}" class="link"><strong>${n.namespace || ''}</strong></a></td>
             <td>${fmt$(n.previousCost)}</td>
             <td>${fmt$(n.currentCost)}</td>
             <td class="${changeClass}">${changeDisplay}</td>
           </tr>`;
         }).join('');
         makeSortable($('#mom-table'));
+        attachPagination($('#mom-table'), { pageSize: 15 });
       }
     }
 
     // Savings table
     if (savingsList.length) {
       const sb = $('#savings-body');
-      if (sb) sb.innerHTML = savingsList.map(s => `<tr class="savings-row">
-        <td>${badge(s.type || 'optimization', 'green')}</td>
-        <td>${s.description || s.name || ''}</td>
-        <td class="value green">${fmt$(s.estimatedSavings || s.savings)}</td>
-      </tr>`).join('');
+      if (sb) sb.innerHTML = savingsList.map(s => {
+        const name = s.name || s.target || '';
+        const parts = name.split('/');
+        const action = parts.length === 3
+          ? `<a href="#/workloads/${parts[0]}/${parts[1]}/${parts[2]}" class="btn btn-gray btn-sm">View</a>`
+          : s.type === 'spot' ? `<a href="#/infrastructure/spot" class="btn btn-gray btn-sm">View</a>`
+          : `<a href="#/resources/recommendations" class="btn btn-gray btn-sm">View</a>`;
+        return `<tr class="savings-row">
+          <td>${badge(s.type || 'optimization', 'green')}</td>
+          <td style="white-space:normal;max-width:400px;line-height:1.5">${s.description || s.name || ''}</td>
+          <td class="value green">${fmt$(s.estimatedSavings || s.savings)}</td>
+          <td>${action}</td>
+        </tr>`;
+      }).join('');
       makeSortable($('#savings-table'));
+      attachPagination($('#savings-table'), { pageSize: 10 });
     }
 
     // Workload cost table
@@ -221,8 +239,14 @@ async function renderNamespaceBreakdown(targetEl) {
   targetEl.innerHTML = skeleton(3);
   try {
     const byNs = await api('/cost/by-namespace');
-    const nsMap = (byNs && typeof byNs === 'object' && !Array.isArray(byNs)) ? byNs : {};
-    const nsEntries = Object.entries(nsMap).filter(([_, v]) => typeof v === 'number').sort((a, b) => b[1] - a[1]);
+    let nsEntries;
+    const nsArr = toArray(byNs, 'data', 'namespaces');
+    if (nsArr.length && nsArr[0]?.namespace != null) {
+      nsEntries = nsArr.map(n => [n.namespace, n.monthlyCostUSD || 0]).sort((a, b) => b[1] - a[1]);
+    } else {
+      const nsMap = (byNs && typeof byNs === 'object' && !Array.isArray(byNs)) ? byNs : {};
+      nsEntries = Object.entries(nsMap).filter(([k, v]) => typeof v === 'number' && !['total','page','pageSize','totalPages'].includes(k)).sort((a, b) => b[1] - a[1]);
+    }
     const total = nsEntries.reduce((s, [_, v]) => s + v, 0);
 
     targetEl.innerHTML = `
@@ -252,12 +276,13 @@ async function renderNamespaceBreakdown(targetEl) {
       });
     }
 
-    $('#ns-cost-body').innerHTML = nsEntries.length ? nsEntries.map(([ns, cost]) => `<tr>
-      <td><strong>${ns}</strong></td>
+    $('#ns-cost-body').innerHTML = nsEntries.length ? nsEntries.map(([ns, cost]) => `<tr class="clickable-row" onclick="location.hash='#/cost/workload?ns=${encodeURIComponent(ns)}'">
+      <td><a href="#/cost/workload?ns=${encodeURIComponent(ns)}" class="link"><strong>${ns}</strong></a></td>
       <td>${fmt$(cost)}</td>
       <td>${fmtPct(total > 0 ? cost / total * 100 : 0)}</td>
     </tr>`).join('') : '<tr><td colspan="3" style="color:var(--text-muted)">No namespace cost data</td></tr>';
     makeSortable($('#ns-cost-table'));
+    attachPagination($('#ns-cost-table'));
 
     window.__exportNsCSV = () => {
       exportCSV(['Namespace', 'Monthly Cost', '% of Total'],
@@ -273,17 +298,25 @@ async function renderWorkloadBreakdown(targetEl) {
   targetEl.innerHTML = skeleton(3);
   try {
     const byWl = await api('/cost/by-workload');
-    const wlList = Array.isArray(byWl) ? byWl : (byWl && byWl.workloads ? byWl.workloads : []);
+    let wlList = Array.isArray(byWl) ? byWl : (byWl && byWl.workloads ? byWl.workloads : toArray(byWl, 'data'));
     wlList.sort((a, b) => (b.monthlyCostUSD || 0) - (a.monthlyCostUSD || 0));
+
+    // Pre-filter by namespace if ?ns= query param is present
+    const hashQuery = location.hash.split('?')[1] || '';
+    const qp = new URLSearchParams(hashQuery);
+    const filterNs = qp.get('ns');
+    if (filterNs) wlList = wlList.filter(w => w.namespace === filterNs);
+
     const total = wlList.reduce((s, w) => s + (w.monthlyCostUSD || 0), 0);
 
     targetEl.innerHTML = `
+      ${filterNs ? `<div class="breadcrumbs"><a href="#/cost/namespace" class="bc-link">Namespaces</a><span class="bc-sep">/</span><span class="bc-current">${filterNs}</span></div>` : ''}
       <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr)">
-        <div class="kpi-card"><div class="label">Total Monthly Cost</div><div class="value">${fmt$(total)}</div></div>
+        <div class="kpi-card"><div class="label">${filterNs ? filterNs + ' Cost' : 'Total Monthly Cost'}</div><div class="value">${fmt$(total)}</div></div>
         <div class="kpi-card"><div class="label">Workloads</div><div class="value">${wlList.length}</div></div>
       </div>
       <div class="card">
-        ${cardHeader('Cost by Workload', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlBreakdownCSV()">Export CSV</button>')}
+        ${cardHeader(filterNs ? `Workloads in ${filterNs}` : 'Cost by Workload', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlBreakdownCSV()">Export CSV</button>')}
         ${filterBar({ placeholder: 'Search workloads...', filters: [] })}
         <div class="table-wrap"><table id="wl-breakdown-table">
           <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Monthly Cost</th><th>% of Total</th></tr></thead>
