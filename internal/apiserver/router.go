@@ -110,6 +110,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		// Config
 		r.Get("/config", configHandler.Get)
 		r.Put("/config/mode", configHandler.SetMode)
+		r.Put("/config/pod-purger", configHandler.SetPodPurger)
 
 		// Audit
 		r.Get("/audit", auditHandler.List)
@@ -122,6 +123,9 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		r.Get("/clusters", clusterHandler.GetClusters)
 		r.Get("/idle-resources", idleHandler.Get)
 		r.Get("/notifications", notifHandler.Get)
+		r.Post("/notifications/channels", notifHandler.AddChannel)
+		r.Put("/notifications/channels/{idx}", notifHandler.ToggleChannel)
+		r.Delete("/notifications/channels/{idx}", notifHandler.DeleteChannel)
 		r.Get("/policies", policyHandler.Get)
 		r.Get("/metrics", metricsHandler.Get)
 

@@ -31,6 +31,7 @@ import (
 	"github.com/koptimizer/koptimizer/internal/controller/gpu"
 	"github.com/koptimizer/koptimizer/internal/controller/hibernation"
 	"github.com/koptimizer/koptimizer/internal/controller/network"
+	"github.com/koptimizer/koptimizer/internal/controller/podpurger"
 	"github.com/koptimizer/koptimizer/internal/controller/nodeautoscaler"
 	"github.com/koptimizer/koptimizer/internal/controller/nodetemplates"
 	"github.com/koptimizer/koptimizer/internal/controller/nodegroupmgr"
@@ -266,6 +267,13 @@ func main() {
 			setupLog.Error(err, "Unable to create controller", "controller", "Evictor")
 			os.Exit(1)
 		}
+	}
+
+	// Pod purger — always registered so it can be toggled at runtime via API.
+	// The run() loop checks config.PodPurger.Enabled each tick.
+	if err := podpurger.NewController(mgr, clusterState, cfg).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create controller", "controller", "PodPurger")
+		os.Exit(1)
 	}
 
 	if cfg.Rebalancer.Enabled {

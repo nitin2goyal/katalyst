@@ -74,6 +74,9 @@ func makePod(ns, name, nodeName string, cpuReqMilli, memReqBytes, cpuUsageMilli,
 				},
 			}},
 		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
 	}
 	if ownerKind != "" {
 		pod.OwnerReferences = []metav1.OwnerReference{{Kind: ownerKind, Name: ownerName}}
@@ -268,9 +271,9 @@ func TestSpotAdoptionRecs(t *testing.T) {
 			if r.Target != "web-pool" {
 				t.Errorf("spot rec target: got %s, want web-pool", r.Target)
 			}
-			// 2 nodes * $0.10/h * 0.65 * 730.5 = $94.965
-			if r.EstimatedSavings < 90 || r.EstimatedSavings > 100 {
-				t.Errorf("spot savings: got %.2f, want ~95", r.EstimatedSavings)
+			// 2 nodes * $0.10/h * 0.60 * 730.5 = $87.66
+			if r.EstimatedSavings < 83 || r.EstimatedSavings > 92 {
+				t.Errorf("spot savings: got %.2f, want ~88", r.EstimatedSavings)
 			}
 		}
 	}
@@ -440,6 +443,30 @@ func TestComputeTotalPotentialSavings_Dedup(t *testing.T) {
 	total := ComputeTotalPotentialSavings(recs)
 	if total != 350.00 {
 		t.Errorf("total savings with dedup: got %.2f, want 350.00", total)
+	}
+}
+
+func TestComputeTotalPotentialSavings_MultipleTargets(t *testing.T) {
+	recs := []ComputedRecommendation{
+		{Type: "consolidation", Target: "node-1", EstimatedSavings: 5000},
+		{Type: "rightsizing", Target: "wl-1", EstimatedSavings: 8000},
+		{Type: "spot", Target: "ng-1", EstimatedSavings: 3000},
+	}
+	total := ComputeTotalPotentialSavings(recs)
+	if total != 16000 {
+		t.Errorf("total savings: got %.2f, want 16000.00", total)
+	}
+}
+
+func TestComputeTotalPotentialSavings_SpotAndConsolidationDedup(t *testing.T) {
+	// Same target with consolidation AND spot should only count once (max)
+	recs := []ComputedRecommendation{
+		{Type: "consolidation", Target: "my-nodegroup", EstimatedSavings: 4000},
+		{Type: "spot", Target: "my-nodegroup", EstimatedSavings: 3000},
+	}
+	total := ComputeTotalPotentialSavings(recs)
+	if total != 4000 {
+		t.Errorf("same target should dedup to max: got %.2f, want 4000.00", total)
 	}
 }
 

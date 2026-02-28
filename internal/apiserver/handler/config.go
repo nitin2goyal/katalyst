@@ -33,6 +33,7 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"gpu":            h.config.GPU.Enabled,
 			"commitments":    h.config.Commitments.Enabled,
 			"aiGate":         h.config.AIGate.Enabled,
+			"podPurger":      h.config.PodPurger.Enabled,
 		},
 	})
 }
@@ -58,4 +59,22 @@ func (h *ConfigHandler) SetMode(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid mode, must be monitor, recommend, or active"})
 	}
+}
+
+func (h *ConfigHandler) SetPodPurger(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	h.config.PodPurger.Enabled = req.Enabled
+	writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": h.config.PodPurger.Enabled})
 }

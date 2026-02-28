@@ -118,7 +118,15 @@ export async function computeRecommendations() {
   // Sort by savings desc
   recs.sort((a, b) => b.estimatedSavings - a.estimatedSavings);
 
-  const totalSavings = recs.reduce((s, r) => s + r.estimatedSavings, 0);
+  // Dedup by target (take max) to avoid counting consolidation + spot for same group
+  const bestByTarget = {};
+  for (const r of recs) {
+    if (!bestByTarget[r.target] || r.estimatedSavings > bestByTarget[r.target]) {
+      bestByTarget[r.target] = r.estimatedSavings;
+    }
+  }
+  const totalSavings = Object.values(bestByTarget).reduce((s, v) => s + v, 0);
+
   const opportunities = recs.map(r => ({
     type: r.type,
     name: r.target,

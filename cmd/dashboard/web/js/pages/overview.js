@@ -88,8 +88,8 @@ export async function renderOverview() {
           <div class="eff-breakdown">
             <div class="eff-item"><span class="eff-label">CPU Utilization</span><span class="eff-val">${fmtPct(eff.breakdown?.cpu)}</span></div>
             <div class="eff-item"><span class="eff-label">Memory Utilization</span><span class="eff-val">${fmtPct(eff.breakdown?.memory)}</span></div>
-            <div class="eff-item"><span class="eff-label">Savings Captured</span><span class="eff-val">${fmtPct(eff.breakdown?.savings)}</span></div>
-            <div class="eff-item"><span class="eff-label">Commitment Utilization</span><span class="eff-val">${fmtPct(eff.breakdown?.commitments)}</span></div>
+            <div class="eff-item"><span class="eff-label">CPU Allocation Eff.</span><span class="eff-val">${fmtPct(eff.breakdown?.cpuAllocationEff)}</span></div>
+            <div class="eff-item"><span class="eff-label">Mem Allocation Eff.</span><span class="eff-val">${fmtPct(eff.breakdown?.memAllocationEff)}</span></div>
           </div>
         </div>
       </div>` : '';

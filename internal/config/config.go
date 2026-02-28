@@ -22,6 +22,7 @@ type Config struct {
 	Rightsizer     RightsizingConfig    `yaml:"rightsizer"`
 	WorkloadScaler WorkloadScalerConfig `yaml:"workloadScaler"`
 	Evictor        EvictorConfig        `yaml:"evictor"`
+	PodPurger      PodPurgerConfig      `yaml:"podPurger"`
 	Rebalancer     RebalancerConfig     `yaml:"rebalancer"`
 	GPU            GPUConfig            `yaml:"gpu"`
 	Spot           SpotConfig           `yaml:"spot"`
@@ -98,6 +99,12 @@ type EvictorConfig struct {
 	DryRun                 bool          `yaml:"dryRun"`
 }
 
+type PodPurgerConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	PollInterval time.Duration `yaml:"pollInterval"`
+	MinPodAge    time.Duration `yaml:"minPodAge"`
+}
+
 type RebalancerConfig struct {
 	Enabled                bool          `yaml:"enabled"`
 	DryRun                 bool          `yaml:"dryRun"`
@@ -154,13 +161,22 @@ type NetworkMonitorConfig struct {
 	EnablePodAnnotations    bool    `yaml:"enablePodAnnotations"`    // Annotate pods with network cost
 }
 
+// NotificationChannel represents a dynamically-added notification channel.
+type NotificationChannel struct {
+	Type    string `yaml:"type" json:"type"`       // "slack", "teams"
+	Name    string `yaml:"name" json:"name"`
+	URL     string `yaml:"url" json:"url"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+}
+
 type AlertsConfig struct {
-	Enabled            bool     `yaml:"enabled"`
-	SlackWebhookURL    string   `yaml:"slackWebhookURL"`
-	EmailRecipients    []string `yaml:"emailRecipients"`
-	Webhooks           []string `yaml:"webhooks"`
-	CostAnomalyStdDev float64  `yaml:"costAnomalyStdDev"` // Std deviations for anomaly (default 2.0)
-	CooldownMinutes    int      `yaml:"cooldownMinutes"`   // Min time between repeat alerts (default 60)
+	Enabled            bool                  `yaml:"enabled"`
+	SlackWebhookURL    string                `yaml:"slackWebhookURL"`
+	EmailRecipients    []string              `yaml:"emailRecipients"`
+	Webhooks           []string              `yaml:"webhooks"`
+	Channels           []NotificationChannel `yaml:"channels"`
+	CostAnomalyStdDev float64               `yaml:"costAnomalyStdDev"` // Std deviations for anomaly (default 2.0)
+	CooldownMinutes    int                   `yaml:"cooldownMinutes"`   // Min time between repeat alerts (default 60)
 }
 
 type CommitmentsConfig struct {
@@ -246,6 +262,11 @@ func DefaultConfig() *Config {
 			MaxConcurrentEvictions: 5,
 			DrainTimeout:           5 * time.Minute,
 			PartialDrainTTL:        30 * time.Minute,
+		},
+		PodPurger: PodPurgerConfig{
+			Enabled:      false,
+			PollInterval: 5 * time.Minute,
+			MinPodAge:    30 * time.Minute,
 		},
 		Rebalancer: RebalancerConfig{
 			Enabled:               true,

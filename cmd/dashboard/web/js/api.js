@@ -72,3 +72,9 @@ export async function apiPut(path, body) {
   store.clear();
   return res.json();
 }
+
+export async function apiDelete(path) {
+  const res = await fetchWithRetry('/api/v1' + path, { method: 'DELETE' });
+  store.clear();
+  return res.json();
+}

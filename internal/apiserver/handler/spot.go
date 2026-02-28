@@ -5,6 +5,7 @@ import (
 
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
+	"github.com/koptimizer/koptimizer/pkg/cost"
 )
 
 type SpotHandler struct {
@@ -60,7 +61,7 @@ func (h *SpotHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	if avgDiscount > 0 && avgDiscount < 1 {
 		estimatedODEquivalent = spotHourlyCost / (1 - avgDiscount)
 	}
-	estimatedSavings := (estimatedODEquivalent - spotHourlyCost) * 730
+	estimatedSavings := (estimatedODEquivalent - spotHourlyCost) * cost.HoursPerMonth
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"spotNodes":                    spotNodes,

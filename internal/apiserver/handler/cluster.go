@@ -131,39 +131,39 @@ func (h *ClusterHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) {
 		memUtil = float64(usedMem) / float64(totalMem) * 100
 	}
 
-	// Spot savings score: ratio of spot nodes (more spot = better savings capture).
-	spotNodes := 0
+	// Allocation efficiency: how close requests are to actual usage.
+	// Perfect = 100 (requests match usage). Over-provisioned = lower score.
+	var reqCPU, reqMem int64
 	for _, n := range nodes {
-		if n.IsSpot {
-			spotNodes++
+		reqCPU += n.CPURequested
+		reqMem += n.MemoryRequested
+	}
+	cpuAllocEff := 0.0
+	if reqCPU > 0 {
+		cpuAllocEff = float64(usedCPU) / float64(reqCPU) * 100
+		if cpuAllocEff > 100 {
+			cpuAllocEff = 100
 		}
 	}
-	savingsScore := 0.0
-	if len(nodes) > 0 {
-		spotRatio := float64(spotNodes) / float64(len(nodes))
-		// Score: 70% spot penetration = 100 score, linear
-		savingsScore = spotRatio / 0.70 * 100
-		if savingsScore > 100 {
-			savingsScore = 100
+	memAllocEff := 0.0
+	if reqMem > 0 {
+		memAllocEff = float64(usedMem) / float64(reqMem) * 100
+		if memAllocEff > 100 {
+			memAllocEff = 100
 		}
 	}
 
-	// Commitment utilization: based on node group utilization as a proxy.
-	// High overall resource utilization means commitments (if any) are well-used.
-	commitScore := 0.0
-	if cpuUtil > 0 || memUtil > 0 {
-		commitScore = (cpuUtil + memUtil) / 2
-	}
-
-	score := cpuUtil*0.30 + memUtil*0.30 + savingsScore*0.20 + commitScore*0.20
+	// Efficiency = weighted average of utilization (how well nodes are used)
+	// and allocation efficiency (how well requests match usage).
+	score := cpuUtil*0.25 + memUtil*0.25 + cpuAllocEff*0.25 + memAllocEff*0.25
 
 	resp := map[string]interface{}{
 		"score": score,
 		"breakdown": map[string]interface{}{
-			"cpu":         cpuUtil,
-			"memory":      memUtil,
-			"savings":     savingsScore,
-			"commitments": commitScore,
+			"cpu":                cpuUtil,
+			"memory":             memUtil,
+			"cpuAllocationEff":   cpuAllocEff,
+			"memAllocationEff":   memAllocEff,
 		},
 	}
 	writeJSON(w, http.StatusOK, resp)

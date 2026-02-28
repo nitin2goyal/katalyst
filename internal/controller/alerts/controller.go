@@ -218,7 +218,7 @@ func (c *Controller) fireAlert(ctx context.Context, alert Alert) {
 
 	intmetrics.AlertsFired.WithLabelValues(alert.Type, alert.Severity).Inc()
 
-	// Send to Slack
+	// Send to Slack (static config)
 	if c.config.Alerts.SlackWebhookURL != "" {
 		if err := c.sendSlack(ctx, alert); err != nil {
 			logger.Error(err, "Failed to send Slack alert")
@@ -229,6 +229,23 @@ func (c *Controller) fireAlert(ctx context.Context, alert Alert) {
 	if len(c.config.Alerts.EmailRecipients) > 0 {
 		if err := c.sendEmail(ctx, alert); err != nil {
 			logger.Error(err, "Failed to send email alert")
+		}
+	}
+
+	// Send to dynamically-added channels
+	for _, ch := range c.config.Alerts.Channels {
+		if !ch.Enabled {
+			continue
+		}
+		switch ch.Type {
+		case "slack":
+			if err := c.sendSlackToURL(ctx, alert, ch.URL); err != nil {
+				logger.Error(err, "Failed to send Slack alert to channel", "channel", ch.Name)
+			}
+		case "teams":
+			if err := c.sendTeams(ctx, alert, ch.URL); err != nil {
+				logger.Error(err, "Failed to send Teams alert", "channel", ch.Name)
+			}
 		}
 	}
 
@@ -283,6 +300,90 @@ func (c *Controller) sendSlack(ctx context.Context, alert Alert) error {
 		return fmt.Errorf("Slack returned status %d", resp.StatusCode)
 	}
 
+	return nil
+}
+
+func (c *Controller) sendSlackToURL(ctx context.Context, alert Alert, webhookURL string) error {
+	color := "#36a64f" // green
+	switch alert.Severity {
+	case SeverityCritical:
+		color = "#ff0000"
+	case SeverityWarning:
+		color = "#ffcc00"
+	}
+
+	payload := map[string]interface{}{
+		"attachments": []map[string]interface{}{
+			{
+				"color":  color,
+				"title":  fmt.Sprintf("[KOptimizer] %s", alert.Title),
+				"text":   alert.Message,
+				"footer": "KOptimizer Cost Alerts",
+				"ts":     alert.Timestamp.Unix(),
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling Slack payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating Slack request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("sending Slack alert: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("Slack returned status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *Controller) sendTeams(ctx context.Context, alert Alert, webhookURL string) error {
+	themeColor := "00FF00" // green
+	switch alert.Severity {
+	case SeverityCritical:
+		themeColor = "FF0000"
+	case SeverityWarning:
+		themeColor = "FFCC00"
+	}
+
+	payload := map[string]interface{}{
+		"@type":      "MessageCard",
+		"@context":   "http://schema.org/extensions",
+		"themeColor": themeColor,
+		"title":      fmt.Sprintf("[KOptimizer] %s", alert.Title),
+		"text":       alert.Message,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling Teams payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating Teams request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("sending Teams alert: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("Teams returned status %d", resp.StatusCode)
+	}
 	return nil
 }
 

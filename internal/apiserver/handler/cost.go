@@ -343,13 +343,6 @@ func (h *CostHandler) GetComparison(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build namespace comparison using mock-matching field names
-	type nsComparison struct {
-		Namespace    string  `json:"namespace"`
-		CurrentCost  float64 `json:"currentCost"`
-		PreviousCost float64 `json:"previousCost"`
-		Change       float64 `json:"change"`
-	}
 	allNS := make(map[string]bool)
 	for ns := range currentByNS {
 		allNS[ns] = true
@@ -386,15 +379,22 @@ func (h *CostHandler) GetComparison(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var byNamespace []nsComparison
+	type nsComparison2 struct {
+		Namespace    string   `json:"namespace"`
+		CurrentCost  float64  `json:"currentCost"`
+		PreviousCost float64  `json:"previousCost"`
+		Change       *float64 `json:"change"` // nil when prev=0 (new namespace)
+	}
+	var byNamespace []nsComparison2
 	for ns := range allNS {
 		cur := currentByNS[ns]
 		prev := previousByNS[ns]
-		changePct := 0.0
+		var changePct *float64
 		if prev > 0 {
-			changePct = (cur - prev) / prev * 100
+			v := (cur - prev) / prev * 100
+			changePct = &v
 		}
-		byNamespace = append(byNamespace, nsComparison{
+		byNamespace = append(byNamespace, nsComparison2{
 			Namespace:    ns,
 			CurrentCost:  cur,
 			PreviousCost: prev,
@@ -405,34 +405,25 @@ func (h *CostHandler) GetComparison(w http.ResponseWriter, r *http.Request) {
 		return byNamespace[i].CurrentCost > byNamespace[j].CurrentCost
 	})
 
-	// Estimate cost breakdown: compute ~75%, storage ~15%, network ~4%, other ~6%
-	// These ratios are typical for Kubernetes clusters
-	computeCurrent := currentTotal * 0.75
-	storageCurrent := currentTotal * 0.15
-	networkCurrent := currentTotal * 0.04
-	otherCurrent := currentTotal - computeCurrent - storageCurrent - networkCurrent
-
-	computePrevious := previousTotal * 0.75
-	storagePrevious := previousTotal * 0.15
-	networkPrevious := previousTotal * 0.04
-	otherPrevious := previousTotal - computePrevious - storagePrevious - networkPrevious
-
+	// Only compute (node) costs are tracked. Storage and network costs
+	// are not available from the Kubernetes API — return 0 instead of
+	// fabricating numbers with arbitrary ratios.
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"currentPeriod":  currentPeriod,
 		"previousPeriod": previousPeriod,
 		"current": map[string]interface{}{
 			"totalCost":   currentTotal,
-			"computeCost": computeCurrent,
-			"storageCost": storageCurrent,
-			"networkCost": networkCurrent,
-			"otherCost":   otherCurrent,
+			"computeCost": currentTotal,
+			"storageCost": 0,
+			"networkCost": 0,
+			"otherCost":   0,
 		},
 		"previous": map[string]interface{}{
 			"totalCost":   previousTotal,
-			"computeCost": computePrevious,
-			"storageCost": storagePrevious,
-			"networkCost": networkPrevious,
-			"otherCost":   otherPrevious,
+			"computeCost": previousTotal,
+			"storageCost": 0,
+			"networkCost": 0,
+			"otherCost":   0,
 		},
 		"byNamespace": byNamespace,
 	})

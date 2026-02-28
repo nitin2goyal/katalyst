@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
@@ -41,6 +44,10 @@ const (
 	// Minimum data points required for historical analysis
 	minNodeDataPoints = 360  // 6h at 60s intervals
 	minPodDataPoints  = 1440 // 24h at 60s intervals
+
+	// Default estimated spot discount (varies 40-90% by instance family).
+	// Used when no cloud-provider-specific estimator is available.
+	defaultSpotDiscount = 0.60
 )
 
 var systemNamespaces = map[string]bool{
@@ -215,20 +222,21 @@ func appendSpotAdoptionRecs(recs []ComputedRecommendation, nodes []*state.NodeSt
 		sg.count++
 	}
 	for gid, sg := range groups {
-		savings := sg.totalHourly * 0.65 * cost.HoursPerMonth
+		savings := sg.totalHourly * defaultSpotDiscount * cost.HoursPerMonth
 		if savings < minSavingsThreshold {
 			continue
 		}
+		discountPct := int(defaultSpotDiscount * 100)
 		recs = append(recs, ComputedRecommendation{
 			ID:               computedID("spot", gid),
 			Type:             "spot",
 			Target:           sg.groupName,
-			Description:      fmt.Sprintf("Convert %d on-demand nodes (%s) to spot instances to save $%.0f/mo (est. 65%% discount).", sg.count, sg.groupName, savings),
+			Description:      fmt.Sprintf("Convert %d on-demand nodes (%s) to spot instances to save $%.0f/mo (est. %d%% discount).", sg.count, sg.groupName, savings, discountPct),
 			EstimatedSavings: roundCents(savings),
 			Status:           "pending",
 			Priority:         "medium",
 			CreatedAt:        now,
-			Confidence:       0.75,
+			Confidence:       0.70,
 		})
 	}
 	return recs
@@ -273,6 +281,12 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 	owners := make(map[string]*ownerGroup)
 	for _, p := range pods {
 		if systemNamespaces[p.Namespace] || p.CPURequest == 0 {
+			continue
+		}
+		// Only consider running pods — completed/failed Job pods still have
+		// spec.nodeName set but are NOT counted in the node's CPURequested,
+		// which causes fraction > 1.0 and inflated savings.
+		if p.Pod != nil && p.Pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
 		// Skip pods younger than 10 minutes — insufficient metrics history
@@ -512,20 +526,48 @@ func ComputeSavingsOpportunities(recs []ComputedRecommendation) []ComputedOpport
 }
 
 // ComputeTotalPotentialSavings sums estimated savings across all recommendations,
-// deduplicating by target key (type/target) to avoid double-counting when multiple
-// recommendation algorithms flag the same resource.
+// deduplicating by target to avoid double-counting. For example, a node group can't
+// be both consolidated AND converted to spot — we take the higher savings.
+// Individual node recs that overlap with a nodegroup rec are excluded.
 func ComputeTotalPotentialSavings(recs []ComputedRecommendation) float64 {
-	total := 0.0
-	// Deduplicate: keep highest savings per target
+	// Dedup by target — keep highest savings per target regardless of type.
+	// This prevents consolidation + spot for the same nodegroup being summed.
 	bestByTarget := make(map[string]float64)
 	for _, r := range recs {
-		key := r.Type + "/" + r.Target
-		if r.EstimatedSavings > bestByTarget[key] {
-			bestByTarget[key] = r.EstimatedSavings
+		if r.EstimatedSavings > bestByTarget[r.Target] {
+			bestByTarget[r.Target] = r.EstimatedSavings
 		}
 	}
-	for _, v := range bestByTarget {
-		total += v
+
+	// Identify nodegroup-level targets to avoid double-counting
+	// individual nodes that are covered by a nodegroup recommendation.
+	nodegroupTargets := make(map[string]bool)
+	for _, r := range recs {
+		if r.Type == "consolidation" || r.Type == "spot" {
+			// Nodegroup targets don't contain "/" (individual nodes/workloads do)
+			if !strings.Contains(r.Target, "/") && !strings.HasPrefix(r.Target, "gke-") && !strings.HasPrefix(r.Target, "eks-") && !strings.HasPrefix(r.Target, "aks-") {
+				nodegroupTargets[r.Target] = true
+			}
+		}
 	}
+
+	// Sum savings, skipping individual node recs whose node belongs
+	// to a nodegroup that already has a recommendation (the nodegroup rec
+	// already accounts for removing those nodes).
+	total := 0.0
+	for target, savings := range bestByTarget {
+		skip := false
+		for ng := range nodegroupTargets {
+			if target != ng && strings.Contains(target, ng) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+		total += savings
+	}
+
 	return total
 }

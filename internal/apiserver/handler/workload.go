@@ -349,13 +349,16 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 			wastedMem = 0
 		}
 
-		// Wasted cost: proportional to unused CPU fraction
+		// Wasted cost: based on max(cpuEff, memEff) so we account for
+		// whichever resource is the binding constraint. Without metrics
+		// (cpuEff=0, memEff=0) we cannot determine waste — skip.
 		wastedCost := 0.0
-		if wl.CPUReq > 0 {
-			wastedCost = wl.MonthlyCost * (1.0 - float64(wl.CPUUsed)/float64(wl.CPUReq))
-			if wastedCost < 0 {
-				wastedCost = 0
+		if wl.HasMetrics && wl.MonthlyCost > 0 {
+			maxEff := cpuEff / 100
+			if memEff/100 > maxEff {
+				maxEff = memEff / 100
 			}
+			wastedCost = wl.MonthlyCost * (1.0 - maxEff)
 		}
 		totalWastedCost += wastedCost
 

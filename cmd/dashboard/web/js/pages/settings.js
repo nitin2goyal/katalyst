@@ -1,8 +1,82 @@
-import { api, apiPut } from '../api.js';
+import { api, apiPut, apiPost, apiDelete } from '../api.js';
 import { $, toArray, timeAgo, errorMsg } from '../utils.js';
-import { skeleton, toast, badge, cardHeader, emptyState } from '../components.js';
+import { skeleton, toast, badge, cardHeader, emptyState, modal, confirmDialog } from '../components.js';
 
 const container = () => $('#page-container');
+
+function channelTypeBadge(type) {
+  const colors = { slack: 'blue', teams: 'purple', email: 'green', webhook: 'gray' };
+  return badge(type || 'webhook', colors[type] || 'blue');
+}
+
+function truncateURL(url, max = 50) {
+  if (!url || url.length <= max) return url || '';
+  return url.slice(0, max) + '...';
+}
+
+function renderChannelCard(ch) {
+  const isStatic = ch.static;
+  return `<div class="channel-card">
+    <div class="channel-header">
+      <span class="channel-type">${channelTypeBadge(ch.type)}</span>
+      <span class="channel-status">${badge(ch.enabled ? 'active' : 'disabled', ch.enabled ? 'green' : 'gray')}</span>
+    </div>
+    <div class="channel-name">${ch.name || ch.type || ''}</div>
+    <div class="channel-detail" title="${ch.target || ''}">${truncateURL(ch.target)}</div>
+    ${!isStatic ? `<div class="channel-actions" style="margin-top:8px;display:flex;gap:8px">
+      <button class="btn ${ch.enabled ? 'btn-gray' : 'btn-green'} btn-sm" data-toggle-channel="${ch.id}">
+        ${ch.enabled ? 'Disable' : 'Enable'}
+      </button>
+      <button class="btn btn-red btn-sm" data-delete-channel="${ch.id}">Delete</button>
+    </div>` : '<div style="margin-top:8px"><span style="color:var(--text-muted);font-size:11px">From config file</span></div>'}
+  </div>`;
+}
+
+function showAddChannelModal() {
+  const overlay = document.createElement('div');
+  overlay.innerHTML = modal('Add Notification Channel',
+    `<div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-muted)">Type</label>
+        <select class="filter-select" id="add-ch-type" style="width:100%">
+          <option value="slack">Slack</option>
+          <option value="teams">Teams</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-muted)">Name</label>
+        <input type="text" class="filter-search" id="add-ch-name" placeholder="e.g. #ops-alerts" style="width:100%;box-sizing:border-box">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-muted)">Webhook URL</label>
+        <input type="text" class="filter-search" id="add-ch-url" placeholder="https://hooks.slack.com/..." style="width:100%;box-sizing:border-box">
+      </div>
+    </div>`,
+    `<button class="btn btn-gray" data-action="cancel">Cancel</button>
+     <button class="btn btn-blue" data-action="add">Add Channel</button>`
+  );
+  const el = overlay.firstElementChild;
+  document.body.appendChild(el);
+
+  el.querySelector('[data-action="cancel"]').onclick = () => el.remove();
+  el.querySelector('[data-action="add"]').onclick = async () => {
+    const type = el.querySelector('#add-ch-type').value;
+    const name = el.querySelector('#add-ch-name').value.trim();
+    const url = el.querySelector('#add-ch-url').value.trim();
+
+    if (!name) { toast('Name is required', 'error'); return; }
+    if (!url) { toast('Webhook URL is required', 'error'); return; }
+
+    try {
+      await apiPost('/notifications/channels', { type, name, url });
+      toast(`${type.charAt(0).toUpperCase() + type.slice(1)} channel "${name}" added`, 'success');
+      el.remove();
+      renderSettings();
+    } catch (err) {
+      toast('Failed to add channel: ' + err.message, 'error');
+    }
+  };
+}
 
 export async function renderSettings() {
   container().innerHTML = skeleton(5);
@@ -55,6 +129,17 @@ export async function renderSettings() {
       </div>
 
       <div class="card">
+        <h2>Auto Pod Purger</h2>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Automatically delete pods stuck in error states (CrashLoopBackOff, OOMKilled, etc.) that have been in a bad state for at least 30 minutes</p>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="btn ${controllers.podPurger ? 'btn-green' : 'btn-gray'} btn-sm" id="pod-purger-toggle">
+            ${controllers.podPurger ? 'ON' : 'OFF'}
+          </button>
+          <span style="color:var(--text-muted);font-size:12px">${controllers.podPurger ? 'Purger is actively cleaning up bad pods' : 'Purger is disabled'}</span>
+        </div>
+      </div>
+
+      <div class="card">
         <h2>Controllers</h2>
         <div class="controllers-grid" id="controllers-grid"></div>
       </div>
@@ -93,18 +178,9 @@ export async function renderSettings() {
       </div>
 
       <div class="card">
-        ${cardHeader('Notification Channels')}
+        ${cardHeader('Notification Channels', '<button class="btn btn-blue btn-sm" id="add-channel-btn">Add Channel</button>')}
         <div class="channels-grid" id="channels-grid">
-          ${channels.length ? channels.map(ch => `
-            <div class="channel-card">
-              <div class="channel-header">
-                <span class="channel-type">${badge(ch.type || 'webhook', 'blue')}</span>
-                <span class="channel-status">${badge(ch.enabled ? 'active' : 'disabled', ch.enabled ? 'green' : 'gray')}</span>
-              </div>
-              <div class="channel-name">${ch.name || ch.type || ''}</div>
-              <div class="channel-detail">${ch.target || ''}</div>
-            </div>
-          `).join('') : emptyState('&#128276;', 'No notification channels configured')}
+          ${channels.length ? channels.map(ch => renderChannelCard(ch)).join('') : emptyState('&#128276;', 'No notification channels configured')}
         </div>
       </div>
 
@@ -189,12 +265,59 @@ export async function renderSettings() {
       }
     });
 
+    // Pod purger toggle
+    $('#pod-purger-toggle').addEventListener('click', async () => {
+      const newState = !controllers.podPurger;
+      try {
+        await apiPut('/config/pod-purger', { enabled: newState });
+        toast(`Auto Pod Purger ${newState ? 'enabled' : 'disabled'}`, 'success');
+        renderSettings();
+      } catch (e) {
+        toast('Failed to toggle pod purger: ' + e.message, 'error');
+      }
+    });
+
     // Theme toggle
     $('#theme-toggle-settings').addEventListener('click', () => {
       window.dispatchEvent(new CustomEvent('kopt-theme-toggle'));
       renderSettings();
     });
 
+    // Add Channel button
+    $('#add-channel-btn').addEventListener('click', () => showAddChannelModal());
+
+    // Channel toggle and delete handlers (event delegation on the grid)
+    $('#channels-grid').addEventListener('click', async (e) => {
+      const toggleBtn = e.target.closest('[data-toggle-channel]');
+      if (toggleBtn) {
+        const idx = toggleBtn.dataset.toggleChannel;
+        const ch = channels.find(c => String(c.id) === idx);
+        if (!ch) return;
+        try {
+          await apiPut(`/notifications/channels/${idx}`, { enabled: !ch.enabled });
+          toast(`Channel ${ch.enabled ? 'disabled' : 'enabled'}`, 'success');
+          renderSettings();
+        } catch (err) {
+          toast('Failed to toggle channel: ' + err.message, 'error');
+        }
+        return;
+      }
+
+      const deleteBtn = e.target.closest('[data-delete-channel]');
+      if (deleteBtn) {
+        const idx = deleteBtn.dataset.deleteChannel;
+        const ch = channels.find(c => String(c.id) === idx);
+        confirmDialog(`Delete channel "${ch?.name || ''}"?`, async () => {
+          try {
+            await apiDelete(`/notifications/channels/${idx}`);
+            toast('Channel deleted', 'success');
+            renderSettings();
+          } catch (err) {
+            toast('Failed to delete channel: ' + err.message, 'error');
+          }
+        });
+      }
+    });
 
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load settings: ' + e.message);
