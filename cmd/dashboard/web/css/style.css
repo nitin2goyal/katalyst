@@ -990,22 +990,60 @@ strong.high, .text-high { color: #ef4444; }
 
 /* === Controllers Grid === */
 .controllers-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .controller-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: rgba(255,255,255,0.04);
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: 8px;
+  font-size: 13px;
 }
 
-.controller-name { font-weight: 500; }
+.controller-name { font-weight: 600; }
+
+/* Segmented control for OFF / DRY RUN / LIVE */
+.ctrl-seg {
+  display: inline-flex;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+.ctrl-seg button {
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.ctrl-seg button:not(:last-child) {
+  border-right: 1px solid var(--glass-border);
+}
+.ctrl-seg button:hover {
+  background: rgba(255,255,255,0.06);
+}
+.ctrl-seg button.seg-active-off {
+  background: var(--glass-border);
+  color: var(--text);
+}
+.ctrl-seg button.seg-active-dryrun {
+  background: rgba(255,170,0,0.15);
+  color: var(--amber);
+}
+.ctrl-seg button.seg-active-live {
+  background: rgba(0,200,80,0.15);
+  color: var(--green);
+}
 
 /* === Audit Timeline === */
 .audit-timeline {

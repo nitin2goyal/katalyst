@@ -220,61 +220,74 @@ export async function renderSettings() {
 
     // Controllers — categorized by risk level with toggles
     const controllerMeta = {
-      costMonitor:    { label: 'Cost Monitor',      desc: 'Tracks cluster cost data and trends',                        category: 'monitoring' },
+      costMonitor:    { label: 'Cost Monitor',       desc: 'Tracks cluster cost data and trends',                        category: 'monitoring' },
+      commitments:    { label: 'Commitments',        desc: 'Monitors reserved instance and CUD coverage',               category: 'monitoring' },
       nodegroupMgr:   { label: 'Node Group Manager', desc: 'Adjusts node group min counts based on utilization',         category: 'non-intrusive' },
       gpu:            { label: 'GPU Optimizer',      desc: 'Optimizes GPU node scheduling and utilization',              category: 'non-intrusive' },
-      commitments:    { label: 'Commitments',        desc: 'Monitors reserved instance and CUD coverage',               category: 'monitoring' },
       nodeAutoscaler: { label: 'Node Autoscaler',    desc: 'Scales nodes up/down based on utilization thresholds',       category: 'mildly-intrusive', hasDryRun: true },
       evictor:        { label: 'Evictor',            desc: 'Drains underutilized nodes to consolidate workloads',        category: 'mildly-intrusive', hasDryRun: true },
       rebalancer:     { label: 'Rebalancer',         desc: 'Rebalances pods across nodes for better distribution',       category: 'mildly-intrusive', hasDryRun: true },
-      rightsizer:     { label: 'Rightsizer',          desc: 'Adjusts workload CPU/memory requests to match actual usage', category: 'intrusive' },
+      rightsizer:     { label: 'Rightsizer',         desc: 'Adjusts workload CPU/memory requests to match actual usage', category: 'intrusive' },
       workloadScaler: { label: 'Workload Scaler',    desc: 'Scales workload replicas and configures HPAs',               category: 'intrusive' },
-      aiGate:         { label: 'AI Safety Gate',      desc: 'AI review for high-impact changes (cost >$500 or >3 nodes)', category: 'safety' },
+      aiGate:         { label: 'AI Safety Gate',     desc: 'AI review for high-impact changes (cost >$500 or >3 nodes)', category: 'safety' },
     };
 
     const categories = [
-      { key: 'monitoring',        label: 'Monitoring',                      color: 'blue',  desc: 'Read-only data collection — no cluster changes' },
-      { key: 'non-intrusive',     label: 'Non-Intrusive',                   color: 'green', desc: 'Adjusts infrastructure settings, does not move or restart pods' },
-      { key: 'mildly-intrusive',  label: 'Mildly Intrusive',                color: 'amber', desc: 'May move pods between nodes but does not modify workload specs' },
-      { key: 'intrusive',         label: 'Intrusive',                       color: 'red',   desc: 'Modifies workload specs (requests/limits/replicas) — triggers restarts' },
-      { key: 'safety',            label: 'Safety',                          color: 'purple', desc: 'Safety controls for high-impact actions' },
+      { key: 'monitoring',       label: 'Monitoring',       color: 'blue',   desc: 'Read-only data collection' },
+      { key: 'non-intrusive',    label: 'Non-Intrusive',    color: 'green',  desc: 'Infrastructure settings only' },
+      { key: 'mildly-intrusive', label: 'Mildly Intrusive', color: 'amber',  desc: 'May move pods between nodes' },
+      { key: 'intrusive',        label: 'Intrusive',        color: 'red',    desc: 'Modifies workload specs, triggers restarts' },
+      { key: 'safety',           label: 'Safety',           color: 'purple', desc: 'Safety controls' },
     ];
+
+    // Determine state for 3-state segmented control: 'off' | 'dryrun' | 'live'
+    const ctrlState = (name, meta) => {
+      if (!(controllers[name] ?? false)) return 'off';
+      if (meta.hasDryRun && (dryRun[name] ?? true)) return 'dryrun';
+      return 'live';
+    };
 
     const cs = $('#controllers-section');
     cs.innerHTML = categories.map(cat => {
       const items = Object.entries(controllerMeta).filter(([, m]) => m.category === cat.key);
       if (!items.length) return '';
       return `<div style="margin-bottom:20px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
           ${badge(cat.label, cat.color)}
           <span style="color:var(--text-muted);font-size:12px">${cat.desc}</span>
         </div>
         <div class="controllers-grid">${items.map(([name, meta]) => {
-          const enabled = controllers[name] ?? false;
-          const isDryRun = meta.hasDryRun && (dryRun[name] ?? true);
-          return `<div class="controller-item" style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div class="controller-name" style="display:flex;align-items:center;gap:6px">
-                ${meta.label}
-                ${enabled && isDryRun ? badge('Dry Run', 'amber') : ''}
+          const st = ctrlState(name, meta);
+          if (meta.hasDryRun) {
+            // 3-state segmented: OFF | DRY RUN | LIVE
+            return `<div class="controller-item">
+              <div style="min-width:0">
+                <div class="controller-name">${meta.label}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${meta.desc}</div>
               </div>
+              <div class="ctrl-seg" data-ctrl="${name}">
+                <button data-state="off" class="${st === 'off' ? 'seg-active-off' : ''}">OFF</button>
+                <button data-state="dryrun" class="${st === 'dryrun' ? 'seg-active-dryrun' : ''}">DRY RUN</button>
+                <button data-state="live" class="${st === 'live' ? 'seg-active-live' : ''}">LIVE</button>
+              </div>
+            </div>`;
+          }
+          // Simple ON/OFF toggle
+          const enabled = controllers[name] ?? false;
+          return `<div class="controller-item">
+            <div style="min-width:0">
+              <div class="controller-name">${meta.label}</div>
               <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${meta.desc}</div>
-              ${enabled && isDryRun ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">Logging only — actions are not being executed</div>' : ''}
             </div>
-            <div style="display:flex;gap:6px;align-items:center">
-              ${meta.hasDryRun && enabled ? `<button class="btn ${isDryRun ? 'btn-amber' : 'btn-blue'} btn-sm dryrun-toggle" data-ctrl="${name}" style="min-width:70px;font-size:11px" title="${isDryRun ? 'Currently in dry-run mode — click to execute actions for real' : 'Currently executing actions — click to switch to dry-run'}">
-                ${isDryRun ? 'DRY RUN' : 'LIVE'}
-              </button>` : ''}
-              <button class="btn ${enabled ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle" data-ctrl="${name}" style="min-width:50px">
-                ${enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
+            <button class="btn ${enabled ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle" data-ctrl="${name}" style="min-width:50px">
+              ${enabled ? 'ON' : 'OFF'}
+            </button>
           </div>`;
         }).join('')}</div>
       </div>`;
     }).join('');
 
-    // Controller toggle handlers
+    // Controller toggle handlers — simple ON/OFF
     cs.addEventListener('click', async (e) => {
       const btn = e.target.closest('.ctrl-toggle');
       if (btn) {
@@ -285,33 +298,59 @@ export async function renderSettings() {
         try {
           await apiPut(`/config/controllers/${name}`, { enabled: newState });
           controllers[name] = newState;
+          btn.className = `btn ${newState ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle`;
+          btn.textContent = newState ? 'ON' : 'OFF';
           toast(`${controllerMeta[name]?.label || name} ${newState ? 'enabled' : 'disabled'}`, 'success');
-          renderSettings(); // re-render to show/hide dry-run button
         } catch (err) {
           btn.textContent = controllers[name] ? 'ON' : 'OFF';
-          toast('Failed to toggle controller: ' + err.message, 'error');
-          btn.disabled = false;
+          toast('Failed: ' + err.message, 'error');
         }
+        btn.disabled = false;
         return;
       }
 
-      const dryBtn = e.target.closest('.dryrun-toggle');
-      if (dryBtn) {
-        const name = dryBtn.dataset.ctrl;
-        const newDryRun = !(dryRun[name] ?? true);
-        dryBtn.disabled = true;
-        dryBtn.textContent = '...';
-        try {
-          await apiPut(`/config/controllers/${name}/dry-run`, { dryRun: newDryRun });
-          dryRun[name] = newDryRun;
-          toast(`${controllerMeta[name]?.label || name} ${newDryRun ? 'set to dry-run' : 'set to LIVE — actions will be executed'}`, newDryRun ? 'info' : 'success');
-          renderSettings();
-        } catch (err) {
-          dryBtn.textContent = (dryRun[name] ?? true) ? 'DRY RUN' : 'LIVE';
-          toast('Failed to toggle dry-run: ' + err.message, 'error');
-          dryBtn.disabled = false;
+      // 3-state segmented control click
+      const segBtn = e.target.closest('.ctrl-seg button');
+      if (!segBtn) return;
+      const seg = segBtn.closest('.ctrl-seg');
+      const name = seg.dataset.ctrl;
+      const target = segBtn.dataset.state; // 'off' | 'dryrun' | 'live'
+      const meta = controllerMeta[name];
+      const current = ctrlState(name, meta);
+      if (target === current) return;
+
+      // Disable all buttons in this segment during the request
+      seg.querySelectorAll('button').forEach(b => b.disabled = true);
+      try {
+        if (target === 'off') {
+          await apiPut(`/config/controllers/${name}`, { enabled: false });
+          controllers[name] = false;
+        } else if (target === 'dryrun') {
+          if (!controllers[name]) await apiPut(`/config/controllers/${name}`, { enabled: true });
+          await apiPut(`/config/controllers/${name}/dry-run`, { dryRun: true });
+          controllers[name] = true;
+          dryRun[name] = true;
+        } else {
+          if (!controllers[name]) await apiPut(`/config/controllers/${name}`, { enabled: true });
+          await apiPut(`/config/controllers/${name}/dry-run`, { dryRun: false });
+          controllers[name] = true;
+          dryRun[name] = false;
         }
+        // Update active classes
+        seg.querySelectorAll('button').forEach(b => b.className = '');
+        segBtn.className = target === 'off' ? 'seg-active-off' : target === 'dryrun' ? 'seg-active-dryrun' : 'seg-active-live';
+        const labels = { off: 'disabled', dryrun: 'set to dry-run', live: 'set to LIVE' };
+        toast(`${meta.label} ${labels[target]}`, target === 'live' ? 'success' : 'info');
+      } catch (err) {
+        toast('Failed: ' + err.message, 'error');
+        // Restore original active state
+        seg.querySelectorAll('button').forEach(b => {
+          b.className = b.dataset.state === current
+            ? (current === 'off' ? 'seg-active-off' : current === 'dryrun' ? 'seg-active-dryrun' : 'seg-active-live')
+            : '';
+        });
       }
+      seg.querySelectorAll('button').forEach(b => b.disabled = false);
     });
 
     // Node template cards

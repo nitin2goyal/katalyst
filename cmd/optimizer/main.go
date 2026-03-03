@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -209,6 +210,19 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "Unable to create manager")
+		os.Exit(1)
+	}
+
+	// Register field index for spec.nodeName so controllers can list pods by node.
+	// Without this, MatchingFields{"spec.nodeName": ...} fails at runtime.
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+		pod := o.(*corev1.Pod)
+		if pod.Spec.NodeName == "" {
+			return nil
+		}
+		return []string{pod.Spec.NodeName}
+	}); err != nil {
+		setupLog.Error(err, "Unable to create field index for spec.nodeName")
 		os.Exit(1)
 	}
 
