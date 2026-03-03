@@ -9,7 +9,10 @@ import (
 	"sync"
 	"time"
 
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,6 +24,14 @@ import (
 	pkgmetrics "github.com/koptimizer/koptimizer/pkg/metrics"
 )
 
+// AutoscalerInfo holds the autoscaler configuration for a workload.
+type AutoscalerInfo struct {
+	Kind        string // "HPA" or "ScaledObject"
+	Name        string
+	MinReplicas int32
+	MaxReplicas int32
+}
+
 // ClusterState maintains an in-memory cache of the cluster state.
 type ClusterState struct {
 	mu               sync.RWMutex
@@ -30,6 +41,7 @@ type ClusterState struct {
 	metrics          pkgmetrics.MetricsCollector
 	nodes            map[string]*NodeState
 	pods             map[string]*PodState // key: namespace/name
+	autoscalers      map[string]*AutoscalerInfo // key: namespace/Kind/targetName
 	nodeGroups       *NodeGroupState
 	AuditLog         *AuditLog
 	NodeLock         *NodeLock
@@ -73,6 +85,7 @@ func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc p
 		metricsStore: metricsStore,
 		nodes:        make(map[string]*NodeState),
 		pods:         make(map[string]*PodState),
+		autoscalers:  make(map[string]*AutoscalerInfo),
 		nodeGroups:   NewNodeGroupState(),
 		AuditLog:     auditLog,
 		NodeLock:     NewNodeLock(),
@@ -99,17 +112,30 @@ type kubeletStatsSummary struct {
 			AvailableBytes int64 `json:"availableBytes"`
 		} `json:"fs"`
 	} `json:"node"`
+	Pods []kubeletPodStats `json:"pods"`
+}
+
+type kubeletPodStats struct {
+	PodRef struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"podRef"`
+	EphemeralStorage *struct {
+		UsedBytes int64 `json:"usedBytes"`
+	} `json:"ephemeral-storage"`
 }
 
 // fetchDiskStats fetches disk utilization for all nodes via kubelet proxy.
-// Returns a map of nodeName -> [capacityBytes, usedBytes].
-func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) map[string][2]int64 {
+// Returns node disk stats (nodeName -> [capacityBytes, usedBytes]) and
+// per-pod ephemeral storage usage (namespace/podName -> usedBytes).
+func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) (map[string][2]int64, map[string]int64) {
 	if s.kubeClientset == nil {
-		return nil
+		return nil, nil
 	}
 
 	var mu sync.Mutex
 	diskMap := make(map[string][2]int64, len(nodeNames))
+	podDiskMap := make(map[string]int64)
 	var firstErr error // capture first error for logging
 
 	var wg sync.WaitGroup
@@ -141,11 +167,17 @@ func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) m
 			if err := json.Unmarshal(data, &summary); err != nil {
 				return
 			}
+			mu.Lock()
 			if summary.Node.Fs != nil {
-				mu.Lock()
 				diskMap[nodeName] = [2]int64{summary.Node.Fs.CapacityBytes, summary.Node.Fs.UsedBytes}
-				mu.Unlock()
 			}
+			for _, ps := range summary.Pods {
+				if ps.EphemeralStorage != nil {
+					key := ps.PodRef.Namespace + "/" + ps.PodRef.Name
+					podDiskMap[key] = ps.EphemeralStorage.UsedBytes
+				}
+			}
+			mu.Unlock()
 		}(name)
 	}
 
@@ -153,7 +185,7 @@ func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) m
 	if firstErr != nil && len(diskMap) == 0 {
 		slog.Warn("kubelet disk stats fetch failed", "error", firstErr, "nodes", len(nodeNames))
 	}
-	return diskMap
+	return diskMap, podDiskMap
 }
 
 // listAllNodes fetches all nodes using pagination to avoid OOM on large clusters.
@@ -305,13 +337,14 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 
 	// Fetch disk utilization from kubelet stats summary (parallel, best-effort).
 	var diskStatsMap map[string][2]int64
+	var podDiskMap map[string]int64
 	if s.kubeClientset != nil {
 		nodeNames := make([]string, len(nodeList.Items))
 		for i := range nodeList.Items {
 			nodeNames[i] = nodeList.Items[i].Name
 		}
 		diskCtx, diskCancel := context.WithTimeout(ctx, 15*time.Second)
-		diskStatsMap = s.fetchDiskStats(diskCtx, nodeNames)
+		diskStatsMap, podDiskMap = s.fetchDiskStats(diskCtx, nodeNames)
 		diskCancel()
 		if len(diskStatsMap) == 0 && !s.diskStatsWarned {
 			slog.Warn("kubelet disk stats unavailable, disk utilization will use capacity only")
@@ -320,6 +353,9 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 			s.diskStatsWarned = false
 		}
 	}
+
+	// Discover autoscalers (HPAs + KEDA ScaledObjects) for workload metadata.
+	autoscalerMap := s.fetchAutoscalers(ctx)
 
 	// Detect if metrics server is available.
 	metricsAvailable := len(metricsMap) > 0
@@ -332,6 +368,7 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 
 	s.MetricsAvailable = metricsAvailable
 	s.NodesWithMetrics = len(metricsMap)
+	s.autoscalers = autoscalerMap
 	// Cache successful metrics data for reuse across sync cycles
 	if len(metricsMap) > 0 {
 		s.lastNodeMetrics = metricsMap
@@ -479,6 +516,13 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		// CPUUsage/MemoryUsage at 0 so efficiency calculations show
 		// accurate data instead of a misleading 100%.
 	}
+	// Apply per-pod disk usage from kubelet ephemeral-storage stats.
+	for key, ps := range newPods {
+		if usage, ok := podDiskMap[key]; ok {
+			ps.DiskUsage = usage
+		}
+	}
+
 	s.pods = newPods
 	s.PodsWithMetrics = podsWithMetrics
 
@@ -533,6 +577,96 @@ func (s *ClusterState) GetAllPods() []*PodState {
 // GetNodeGroups returns the node group state.
 func (s *ClusterState) GetNodeGroups() *NodeGroupState {
 	return s.nodeGroups
+}
+
+// GetAutoscaler returns autoscaler info for a workload identified by namespace/kind/name.
+func (s *ClusterState) GetAutoscaler(namespace, kind, name string) (*AutoscalerInfo, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, ok := s.autoscalers[namespace+"/"+kind+"/"+name]
+	return a, ok
+}
+
+// fetchAutoscalers discovers HPAs and KEDA ScaledObjects, returning a map
+// keyed by namespace/Kind/targetName (matching the workload key format).
+func (s *ClusterState) fetchAutoscalers(ctx context.Context) map[string]*AutoscalerInfo {
+	result := make(map[string]*AutoscalerInfo)
+
+	// Fetch HPAs
+	hpaList := &autoscalingv2.HorizontalPodAutoscalerList{}
+	if err := s.reader.List(ctx, hpaList); err != nil {
+		slog.Warn("failed to list HPAs for autoscaler discovery", "error", err)
+	} else {
+		for i := range hpaList.Items {
+			hpa := &hpaList.Items[i]
+			ref := hpa.Spec.ScaleTargetRef
+			minReplicas := int32(1)
+			if hpa.Spec.MinReplicas != nil {
+				minReplicas = *hpa.Spec.MinReplicas
+			}
+			key := hpa.Namespace + "/" + ref.Kind + "/" + ref.Name
+			result[key] = &AutoscalerInfo{
+				Kind:        "HPA",
+				Name:        hpa.Name,
+				MinReplicas: minReplicas,
+				MaxReplicas: hpa.Spec.MaxReplicas,
+			}
+		}
+	}
+
+	// Fetch KEDA ScaledObjects (best-effort — fails silently if CRDs not installed)
+	soList := &unstructured.UnstructuredList{}
+	soList.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "keda.sh",
+		Version: "v1alpha1",
+		Kind:    "ScaledObjectList",
+	})
+	if err := s.reader.List(ctx, soList); err == nil {
+		for _, item := range soList.Items {
+			ns := item.GetNamespace()
+			spec, ok := item.Object["spec"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			ref, ok := spec["scaleTargetRef"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			targetKind, _ := ref["kind"].(string)
+			targetName, _ := ref["name"].(string)
+			if targetKind == "" || targetName == "" {
+				continue
+			}
+			minReplicas := int32(0)
+			if v, ok := spec["minReplicaCount"]; ok {
+				minReplicas = toInt32(v)
+			}
+			maxReplicas := int32(0)
+			if v, ok := spec["maxReplicaCount"]; ok {
+				maxReplicas = toInt32(v)
+			}
+			key := ns + "/" + targetKind + "/" + targetName
+			result[key] = &AutoscalerInfo{
+				Kind:        "ScaledObject",
+				Name:        item.GetName(),
+				MinReplicas: minReplicas,
+				MaxReplicas: maxReplicas,
+			}
+		}
+	}
+
+	return result
+}
+
+// toInt32 converts an unstructured value (int64 or float64) to int32.
+func toInt32(v interface{}) int32 {
+	switch n := v.(type) {
+	case int64:
+		return int32(n)
+	case float64:
+		return int32(n)
+	}
+	return 0
 }
 
 // buildNodeGroupMapping maps node names to their node group IDs.

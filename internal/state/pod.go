@@ -23,6 +23,7 @@ type PodState struct {
 	// Actual usage
 	CPUUsage    int64
 	MemoryUsage int64
+	DiskUsage   int64 // bytes (from kubelet ephemeral-storage stats)
 
 	// Flags
 	IsGPUWorkload bool

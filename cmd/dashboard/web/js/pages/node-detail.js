@@ -57,7 +57,7 @@ export async function renderNodeDetail(params) {
       <div class="card">
         <h2>Pods on this Node</h2>
         <div class="table-wrap"><table id="node-pods-table">
-          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>CPU Request</th><th>CPU % of Node</th><th>Memory Request</th><th>Mem % of Node</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>CPU Request</th><th>CPU % of Node</th><th>Memory Request</th><th>Mem % of Node</th><th>Disk Usage</th><th>Status</th></tr></thead>
           <tbody id="node-pods-body"></tbody>
         </table></div>
       </div>`;
@@ -163,9 +163,10 @@ export async function renderNodeDetail(params) {
       <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
       <td>${fmtCPU(p.cpuRequest)}</td><td>${utilBar(cpuPct)}</td>
       <td>${fmtMem(p.memRequest)}</td><td>${utilBar(memPctVal)}</td>
+      <td>${p.diskUsage ? fmtMem(p.diskUsage) : '-'}</td>
       <td title="${podStatusReason(p.status)}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
     </tr>`;
-    }).join('') : '<tr><td colspan="8" style="color:var(--text-muted)">No pods found</td></tr>';
+    }).join('') : '<tr><td colspan="9" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
 
   } catch (e) {

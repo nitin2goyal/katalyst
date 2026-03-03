@@ -1423,3 +1423,20 @@ strong.high, .text-high { color: #ef4444; }
 @media (max-width: 480px) {
   .kpi-grid { grid-template-columns: 1fr; }
 }
+
+/* === Column Toggle === */
+.col-toggle { position: relative; display: inline-block; }
+.col-toggle-dropdown {
+  display: none; position: absolute; right: 0; top: 100%;
+  background: var(--card-bg); border: 1px solid var(--glass-border);
+  border-radius: 8px; padding: 8px; z-index: 100;
+  min-width: 160px; max-height: 400px; overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.col-toggle.open .col-toggle-dropdown { display: block; }
+.col-toggle-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; cursor: pointer; font-size: 13px;
+  border-radius: 4px; white-space: nowrap;
+}
+.col-toggle-item:hover { background: var(--bg); }

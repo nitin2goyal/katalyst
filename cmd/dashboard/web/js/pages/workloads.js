@@ -1,8 +1,36 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg } from '../utils.js';
-import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge } from '../components.js';
+import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge, columnToggle, attachColumnToggle } from '../components.js';
 
-// Use shared fmtCPU / fmtMem from utils.js
+const COLUMNS = [
+  { key: 'namespace',   label: 'Namespace',     default: false },
+  { key: 'kind',        label: 'Kind',          default: false },
+  { key: 'name',        label: 'Name',          default: true },
+  { key: 'replicas',    label: 'Replicas',      default: true },
+  { key: 'cpuReq',      label: 'CPU Req',       default: true },
+  { key: 'cpuLim',      label: 'CPU Lim',       default: true },
+  { key: 'memReq',      label: 'Mem Req',       default: false },
+  { key: 'memLim',      label: 'Mem Lim',       default: false },
+  { key: 'totalCPU',    label: 'Total CPU',     default: true },
+  { key: 'totalCPULim', label: 'Total CPU Lim', default: true },
+  { key: 'totalMem',    label: 'Total Mem',     default: false },
+  { key: 'totalMemLim', label: 'Total Mem Lim', default: false },
+  { key: 'min',         label: 'Min',           default: true },
+  { key: 'max',         label: 'Max',           default: true },
+  { key: 'autoscaler',  label: 'Autoscaler',    default: false },
+  { key: 'xmx',         label: 'Xmx',          default: false },
+  { key: 'image',       label: 'Image',         default: false },
+  { key: 'cpuEff',      label: 'CPU Eff.',      default: false },
+  { key: 'memEff',      label: 'Mem Eff.',      default: false },
+  { key: 'wasted',      label: 'Wasted',        default: false },
+];
+
+const COL_STORAGE_KEY = 'kopt-wl-columns';
+
+// Compute column index by key for filter selects
+function colIndex(key) {
+  return COLUMNS.findIndex(c => c.key === key);
+}
 
 export async function renderWorkloads(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -26,6 +54,9 @@ export async function renderWorkloads(targetEl) {
     const podsWithMetrics = effData?.summary?.podsWithMetrics || 0;
     const totalPods = effData?.summary?.totalPods || 0;
 
+    const headerActions = columnToggle(COLUMNS) +
+      ' <button class="btn btn-gray btn-sm" onclick="window.__exportWlCSV()">Export CSV</button>';
+
     container().innerHTML = `
       ${!targetEl ? '<div class="page-header"><h1>Workloads</h1><p>Workload resource usage, efficiency, and scaling status</p></div>' : ''}
       ${metricsAvail === false ? '<div class="info-banner">Metrics Server unavailable — efficiency data is estimated from resource requests. Install metrics-server for accurate usage data.</div>' : ''}
@@ -37,16 +68,16 @@ export async function renderWorkloads(targetEl) {
         <div class="kpi-card"><div class="label">Wasted Cost</div><div class="value red">${fmt$(totalWasted)}</div><div class="sub">resources requested but unused</div></div>
       </div>
       <div class="card">
-        ${cardHeader('Workload List', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlCSV()">Export CSV</button>')}
+        ${cardHeader('Workload List', headerActions)}
         ${filterBar({
           placeholder: 'Search workloads...',
           filters: [
-            { key: '0', label: 'Namespace', options: namespaces },
-            { key: '1', label: 'Kind', options: kinds },
+            { key: String(colIndex('namespace')), label: 'Namespace', options: namespaces },
+            { key: String(colIndex('kind')), label: 'Kind', options: kinds },
           ]
         })}
         <div class="table-wrap"><table id="wl-table">
-          <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Replicas</th><th>CPU Req (cores)</th><th>CPU Lim</th><th>Mem Req</th><th>Mem Lim</th><th>Total CPU</th><th>Total Mem</th><th>Image</th><th>CPU Eff.</th><th>Mem Eff.</th><th>Wasted</th></tr></thead>
+          <thead><tr>${COLUMNS.map(c => `<th>${c.label}</th>`).join('')}</tr></thead>
           <tbody id="wl-body"></tbody>
         </table></div>
       </div>`;
@@ -60,44 +91,68 @@ export async function renderWorkloads(targetEl) {
 
     const shortImg = (img) => {
       if (!img) return '';
-      // Show last path segment + short digest/tag
       const parts = img.split('/');
       const last = parts[parts.length - 1];
       return last.length > 40 ? last.substring(0, 37) + '...' : last;
     };
 
+    const colSpan = COLUMNS.length;
     $('#wl-body').innerHTML = wlList.length ? wlList.map(w => {
       const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
       return `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
-        <td>${w.namespace || ''}</td><td>${w.kind || ''}</td><td>${w.name || ''}</td>
+        <td>${w.namespace || ''}</td>
+        <td>${w.kind || ''}</td>
+        <td>${w.name || ''}</td>
         <td>${w.replicas ?? ''}</td>
         <td>${fmtCPU(w.cpuRequest)}</td>
         <td>${fmtCPU(w.cpuLimit)}</td>
         <td>${fmtMem(w.memRequest)}</td>
         <td>${fmtMem(w.memLimit)}</td>
         <td>${fmtCPU(w.totalCPU)}</td>
+        <td>${fmtCPU(w.totalCPULim)}</td>
         <td>${fmtMem(w.totalMem)}</td>
+        <td>${fmtMem(w.totalMemLim)}</td>
+        <td>${w.minReplicas ?? '-'}</td>
+        <td>${w.maxReplicas ?? '-'}</td>
+        <td>${w.autoscaler ? badge(w.autoscaler, 'blue') : '-'}</td>
+        <td>${w.xmx || '-'}</td>
         <td title="${w.image || ''}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)">${shortImg(w.image)}</td>
         <td>${effBadge(eff?.cpuEfficiencyPct, eff?.hasMetrics)}</td>
         <td>${effBadge(eff?.memEfficiencyPct, eff?.hasMetrics)}</td>
         <td>${eff ? '<span class="red">' + fmt$(eff.wastedCostUSD) + '</span>' : '-'}</td>
       </tr>`;
-    }).join('') : '<tr><td colspan="14" style="color:var(--text-muted)">No workloads</td></tr>';
+    }).join('') : `<tr><td colspan="${colSpan}" style="color:var(--text-muted)">No workloads</td></tr>`;
 
-    makeSortable($('#wl-table'));
-    const pag = attachPagination($('#wl-table'));
+    const tableEl = $('#wl-table');
+    const cardEl = tableEl.closest('.card');
+
+    // Apply column visibility
+    attachColumnToggle(cardEl, tableEl, COL_STORAGE_KEY, COLUMNS);
+
+    makeSortable(tableEl);
+    const pag = attachPagination(tableEl);
 
     // Attach filter
     const fb = container().querySelector('.filter-bar');
-    if (fb) attachFilterHandlers(fb, $('#wl-table'), pag);
+    if (fb) attachFilterHandlers(fb, tableEl, pag);
 
-    // CSV export
+    // CSV export (includes all columns regardless of visibility)
     window.__exportWlCSV = () => {
-      exportCSV(['Namespace', 'Kind', 'Name', 'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim', 'Total CPU', 'Total Mem', 'Image', 'CPU Eff %', 'Mem Eff %', 'Wasted Cost'],
+      exportCSV(
+        ['Namespace', 'Kind', 'Name', 'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim',
+         'Total CPU', 'Total CPU Lim', 'Total Mem', 'Total Mem Lim',
+         'Min Replicas', 'Max Replicas', 'Autoscaler', 'Xmx',
+         'Image', 'CPU Eff %', 'Mem Eff %', 'Wasted Cost'],
         wlList.map(w => {
           const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
-          return [w.namespace, w.kind, w.name, w.replicas, fmtCPU(w.cpuRequest), fmtCPU(w.cpuLimit), fmtMem(w.memRequest), fmtMem(w.memLimit), fmtCPU(w.totalCPU), fmtMem(w.totalMem), w.image || '',
-            eff?.cpuEfficiencyPct != null ? fmtPct(eff.cpuEfficiencyPct) : '', eff?.memEfficiencyPct != null ? fmtPct(eff.memEfficiencyPct) : '', eff?.wastedCostUSD != null ? fmt$(eff.wastedCostUSD) : ''];
+          return [w.namespace, w.kind, w.name, w.replicas,
+            fmtCPU(w.cpuRequest), fmtCPU(w.cpuLimit), fmtMem(w.memRequest), fmtMem(w.memLimit),
+            fmtCPU(w.totalCPU), fmtCPU(w.totalCPULim), fmtMem(w.totalMem), fmtMem(w.totalMemLim),
+            w.minReplicas ?? '', w.maxReplicas ?? '', w.autoscaler || '', w.xmx || '',
+            w.image || '',
+            eff?.cpuEfficiencyPct != null ? fmtPct(eff.cpuEfficiencyPct) : '',
+            eff?.memEfficiencyPct != null ? fmtPct(eff.memEfficiencyPct) : '',
+            eff?.wastedCostUSD != null ? fmt$(eff.wastedCostUSD) : ''];
         }),
         'koptimizer-workloads.csv');
     };

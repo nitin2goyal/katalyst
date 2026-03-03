@@ -160,6 +160,91 @@ export function exportCSV(headers, rows, filename) {
   URL.revokeObjectURL(url);
 }
 
+// ── Column Toggle ──
+
+/**
+ * Returns HTML for a column visibility toggle dropdown.
+ * @param {Array<{key: string, label: string, default: boolean}>} columns
+ * @returns {string} HTML string
+ */
+export function columnToggle(columns) {
+  return `<div class="col-toggle">
+    <button class="btn btn-gray btn-sm col-toggle-btn">Columns</button>
+    <div class="col-toggle-dropdown">
+      ${columns.map(c => `<label class="col-toggle-item">
+        <input type="checkbox" data-col="${c.key}" ${c.default ? 'checked' : ''}> ${c.label}
+      </label>`).join('')}
+    </div>
+  </div>`;
+}
+
+/**
+ * Attach column toggle behavior: reads/saves state from localStorage,
+ * shows/hides table columns by index, toggles dropdown.
+ * @param {HTMLElement} containerEl - Element containing .col-toggle
+ * @param {HTMLElement} tableEl - The <table> element
+ * @param {string} storageKey - localStorage key for persisting visibility
+ * @param {Array<{key: string, label: string, default: boolean}>} columns
+ */
+export function attachColumnToggle(containerEl, tableEl, storageKey, columns) {
+  if (!containerEl || !tableEl) return;
+  const toggle = containerEl.querySelector('.col-toggle');
+  if (!toggle) return;
+
+  const btn = toggle.querySelector('.col-toggle-btn');
+  const checkboxes = toggle.querySelectorAll('input[type="checkbox"]');
+
+  // Load saved state
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(storageKey)); } catch {}
+
+  // Build visibility map: key -> boolean
+  const visibility = {};
+  columns.forEach(c => {
+    visibility[c.key] = saved ? (saved[c.key] !== false) : c.default;
+  });
+
+  // Apply saved state to checkboxes
+  checkboxes.forEach(cb => {
+    cb.checked = visibility[cb.dataset.col] !== false;
+  });
+
+  function applyVisibility() {
+    columns.forEach((c, idx) => {
+      const show = visibility[c.key] !== false;
+      const colIdx = idx + 1; // CSS nth-child is 1-based
+      const ths = tableEl.querySelectorAll(`thead th:nth-child(${colIdx})`);
+      const tds = tableEl.querySelectorAll(`tbody td:nth-child(${colIdx})`);
+      ths.forEach(el => el.style.display = show ? '' : 'none');
+      tds.forEach(el => el.style.display = show ? '' : 'none');
+    });
+  }
+
+  applyVisibility();
+
+  // Bind checkbox changes
+  checkboxes.forEach(cb => {
+    cb.addEventListener('change', () => {
+      visibility[cb.dataset.col] = cb.checked;
+      applyVisibility();
+      localStorage.setItem(storageKey, JSON.stringify(visibility));
+    });
+  });
+
+  // Toggle dropdown
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggle.classList.toggle('open');
+  });
+
+  // Close dropdown on outside click
+  document.addEventListener('click', (e) => {
+    if (!toggle.contains(e.target)) {
+      toggle.classList.remove('open');
+    }
+  });
+}
+
 // In-memory sort state persisted across data refreshes (not cleared by store.clear())
 const sortState = new Map();
 

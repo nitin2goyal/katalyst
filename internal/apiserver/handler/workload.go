@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cost"
 )
+
+var xmxRegex = regexp.MustCompile(`-Xmx(\d+[gGmMkK]?)`)
 
 // resolveOwner resolves the workload owner chain. For pods owned by
 // ReplicaSets created by Deployments, returns "Deployment" + deployment name
@@ -43,15 +46,16 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 	pods := h.state.GetAllPods()
 	// Group by owner
 	type wlInfo struct {
-		Namespace string
-		Kind      string
-		Name      string
-		Replicas  int
-		TotalCPU  int64
-		TotalMem  int64
+		Namespace   string
+		Kind        string
+		Name        string
+		Replicas    int
+		TotalCPU    int64
+		TotalMem    int64
 		TotalCPULim int64
 		TotalMemLim int64
-		Image     string
+		Image       string
+		Pod         *corev1.Pod // first pod (for Xmx extraction)
 	}
 	workloads := make(map[string]*wlInfo)
 	for _, p := range pods {
@@ -75,6 +79,7 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 				Kind:      ownerKind,
 				Name:      ownerName,
 				Image:     img,
+				Pod:       p.Pod,
 			}
 			workloads[key] = wl
 		}
@@ -94,19 +99,29 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 			cpuLim = wl.TotalCPULim / int64(wl.Replicas)
 			memLim = wl.TotalMemLim / int64(wl.Replicas)
 		}
-		result = append(result, map[string]interface{}{
-			"namespace":  wl.Namespace,
-			"kind":       wl.Kind,
-			"name":       wl.Name,
-			"replicas":   wl.Replicas,
-			"cpuRequest": cpuReq,
-			"cpuLimit":   cpuLim,
-			"memRequest": memReq,
-			"memLimit":   memLim,
-			"totalCPU":   wl.TotalCPU,
-			"totalMem":   wl.TotalMem,
-			"image":      wl.Image,
-		})
+		entry := map[string]interface{}{
+			"namespace":   wl.Namespace,
+			"kind":        wl.Kind,
+			"name":        wl.Name,
+			"replicas":    wl.Replicas,
+			"cpuRequest":  cpuReq,
+			"cpuLimit":    cpuLim,
+			"memRequest":  memReq,
+			"memLimit":    memLim,
+			"totalCPU":    wl.TotalCPU,
+			"totalMem":    wl.TotalMem,
+			"totalCPULim": wl.TotalCPULim,
+			"totalMemLim": wl.TotalMemLim,
+			"image":       wl.Image,
+			"xmx":         extractXmx(wl.Pod),
+		}
+		if as, ok := h.state.GetAutoscaler(wl.Namespace, wl.Kind, wl.Name); ok {
+			entry["minReplicas"] = as.MinReplicas
+			entry["maxReplicas"] = as.MaxReplicas
+			entry["autoscaler"] = as.Kind
+			entry["autoscalerName"] = as.Name
+		}
+		result = append(result, entry)
 	}
 	writePaginatedJSON(w, r, result)
 }
@@ -407,6 +422,31 @@ func (h *WorkloadHandler) GetEfficiency(w http.ResponseWriter, r *http.Request) 
 		},
 		"workloads": result,
 	})
+}
+
+// extractXmx extracts the -Xmx JVM heap size from a pod's containers.
+// It checks common JVM environment variables and command/args.
+func extractXmx(pod *corev1.Pod) string {
+	if pod == nil {
+		return ""
+	}
+	for _, c := range pod.Spec.Containers {
+		// Scan ALL env var values — apps use many different var names
+		// (JAVA_OPTS, JVM_OPTS, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS,
+		// CATALINA_OPTS, JDK_JAVA_OPTIONS, app-specific names, etc.)
+		for _, env := range c.Env {
+			if m := xmxRegex.FindStringSubmatch(env.Value); len(m) > 1 {
+				return m[1]
+			}
+		}
+		// Check command + args
+		for _, arg := range append(c.Command, c.Args...) {
+			if m := xmxRegex.FindStringSubmatch(arg); len(m) > 1 {
+				return m[1]
+			}
+		}
+	}
+	return ""
 }
 
 // formatCPU formats millicores to K8s-style string (e.g., 100 -> "100m").

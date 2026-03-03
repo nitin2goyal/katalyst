@@ -105,6 +105,12 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"diskSizeGB":     diskSizeGB,
 	}
 
+	// Build a lookup map for pod disk usage from cluster state.
+	podStateMap := make(map[string]*state.PodState)
+	for _, ps := range h.state.GetAllPods() {
+		podStateMap[ps.Namespace+"/"+ps.Name] = ps
+	}
+
 	// Build pods array for the detail table
 	pods := make([]map[string]interface{}, 0, len(node.Pods))
 	appCount, sysCount := 0, 0
@@ -117,11 +123,16 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		} else {
 			appCount++
 		}
+		var diskUsage int64
+		if ps, ok := podStateMap[pod.Namespace+"/"+pod.Name]; ok {
+			diskUsage = ps.DiskUsage
+		}
 		pods = append(pods, map[string]interface{}{
 			"name":       pod.Name,
 			"namespace":  pod.Namespace,
 			"cpuRequest": fmt.Sprintf("%dm", cpuMilli),
 			"memRequest": formatMemory(memBytes),
+			"diskUsage":  diskUsage,
 			"status":     status,
 			"isSystem":   isSys,
 		})
