@@ -28,6 +28,9 @@ const (
 	// CPU pods get conservative requests so they don't starve GPU workloads during data loading.
 	CPUHeadroomReservePct = 30
 
+	// GPUReclaimAnnotation marks a GPU node as having been reclaimed (non-GPU pods evicted).
+	GPUReclaimAnnotation = "koptimizer.io/gpu-reclaimed"
+
 	// Scavenging constants (GPU active, spare CPU available for low-priority pods)
 
 	// GPUScavengerLabel is the node label for nodeAffinity matching by scavenger pods.

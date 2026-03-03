@@ -140,6 +140,17 @@ export async function renderSettings() {
       </div>
 
       <div class="card">
+        <h2>GPU Node Reclaimer</h2>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Automatically evict non-GPU pods from GPU nodes when GPU workloads scale down, freeing expensive GPU hardware. Includes a 5-minute grace period and PDB-safe evictions.</p>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="btn ${controllers.gpuReclaim ? 'btn-green' : 'btn-gray'} btn-sm" id="gpu-reclaim-toggle">
+            ${controllers.gpuReclaim ? 'ON' : 'OFF'}
+          </button>
+          <span style="color:var(--text-muted);font-size:12px">${controllers.gpuReclaim ? 'Reclaimer is actively monitoring GPU nodes' : 'Reclaimer is disabled'}</span>
+        </div>
+      </div>
+
+      <div class="card">
         <h2>Controllers</h2>
         <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Enable or disable individual optimization controllers. Changes take effect immediately.</p>
         <div id="controllers-section"></div>
@@ -332,6 +343,18 @@ export async function renderSettings() {
         renderSettings();
       } catch (e) {
         toast('Failed to toggle pod purger: ' + e.message, 'error');
+      }
+    });
+
+    // GPU reclaim toggle
+    $('#gpu-reclaim-toggle').addEventListener('click', async () => {
+      const newState = !controllers.gpuReclaim;
+      try {
+        await apiPut('/config/controllers/gpuReclaim', { enabled: newState });
+        toast(`GPU Node Reclaimer ${newState ? 'enabled' : 'disabled'}`, 'success');
+        renderSettings();
+      } catch (e) {
+        toast('Failed to toggle GPU reclaimer: ' + e.message, 'error');
       }
     });
 

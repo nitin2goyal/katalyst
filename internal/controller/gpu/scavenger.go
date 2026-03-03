@@ -224,6 +224,17 @@ func (s *Scavenger) enableScavenging(ctx context.Context, node *corev1.Node, hea
 		}
 		fresh.Annotations[GPUScavengerAnnotation] = "true"
 		fresh.Annotations[GPUScavengerHeadroom] = headroomMillis
+
+		// Remove GPU NoSchedule taint so ANY pod can schedule (auto-overflow)
+		var newTaints []corev1.Taint
+		for _, t := range fresh.Spec.Taints {
+			if t.Key == GPUFallbackTaint && t.Effect == corev1.TaintEffectNoSchedule {
+				continue
+			}
+			newTaints = append(newTaints, t)
+		}
+		fresh.Spec.Taints = newTaints
+
 		return s.client.Update(ctx, fresh)
 	})
 	if err != nil {
@@ -246,6 +257,21 @@ func (s *Scavenger) disableScavenging(ctx context.Context, node *corev1.Node, lo
 		delete(fresh.Labels, GPUScavengerLabel)
 		delete(fresh.Annotations, GPUScavengerAnnotation)
 		delete(fresh.Annotations, GPUScavengerHeadroom)
+
+		// Restore GPU NoSchedule taint so no new non-GPU pods can schedule
+		hasTaint := false
+		for _, t := range fresh.Spec.Taints {
+			if t.Key == GPUFallbackTaint && t.Effect == corev1.TaintEffectNoSchedule {
+				hasTaint = true
+				break
+			}
+		}
+		if !hasTaint {
+			fresh.Spec.Taints = append(fresh.Spec.Taints, corev1.Taint{
+				Key: GPUFallbackTaint, Value: "present", Effect: corev1.TaintEffectNoSchedule,
+			})
+		}
+
 		return s.client.Update(ctx, fresh)
 	})
 	if err != nil {

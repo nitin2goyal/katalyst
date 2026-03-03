@@ -34,6 +34,7 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"evictor":        h.config.Evictor.Enabled,
 			"rebalancer":     h.config.Rebalancer.Enabled,
 			"gpu":            h.config.GPU.Enabled,
+			"gpuReclaim":     h.config.GPU.ReclaimEnabled,
 			"commitments":    h.config.Commitments.Enabled,
 			"aiGate":         h.config.AIGate.Enabled,
 			"podPurger":      h.config.PodPurger.Enabled,
@@ -117,6 +118,8 @@ func (h *ConfigHandler) SetController(w http.ResponseWriter, r *http.Request) {
 		h.config.Rebalancer.Enabled = req.Enabled
 	case "gpu":
 		h.config.GPU.Enabled = req.Enabled
+	case "gpuReclaim":
+		h.config.GPU.ReclaimEnabled = req.Enabled
 	case "commitments":
 		h.config.Commitments.Enabled = req.Enabled
 	case "aiGate":

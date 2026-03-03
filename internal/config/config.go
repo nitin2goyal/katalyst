@@ -125,6 +125,8 @@ type GPUConfig struct {
 	CPUFallbackEnabled           bool          `yaml:"cpuFallbackEnabled"`
 	CPUScavengingEnabled         bool          `yaml:"cpuScavengingEnabled"`
 	ScavengingCPUThresholdMillis int64         `yaml:"scavengingCPUThresholdMillis"`
+	ReclaimEnabled               bool          `yaml:"reclaimEnabled"`
+	ReclaimGracePeriod           time.Duration `yaml:"reclaimGracePeriod"`
 }
 
 type SpotConfig struct {
@@ -281,6 +283,8 @@ func DefaultConfig() *Config {
 			CPUFallbackEnabled:           true,
 			CPUScavengingEnabled:         true,
 			ScavengingCPUThresholdMillis: 2000,
+			ReclaimEnabled:               true,
+			ReclaimGracePeriod:           5 * time.Minute,
 		},
 		Spot: SpotConfig{
 			Enabled:                 true,

@@ -15,7 +15,7 @@ import (
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
-// Controller handles GPU optimization: detect idle GPUs, manage CPU fallback, and CPU scavenging.
+// Controller handles GPU optimization: detect idle GPUs, manage CPU fallback, CPU scavenging, and reclaim.
 type Controller struct {
 	client    client.Client
 	state     *state.ClusterState
@@ -25,6 +25,7 @@ type Controller struct {
 	detector  *Detector
 	fallback  *FallbackManager
 	scavenger *Scavenger
+	reclaimer *Reclaimer
 }
 
 func NewController(mgr ctrl.Manager, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
@@ -38,6 +39,7 @@ func NewController(mgr ctrl.Manager, st *state.ClusterState, guard *familylock.F
 		detector:  NewDetector(cfg),
 		fallback:  NewFallbackManager(c, cfg),
 		scavenger: NewScavenger(c, cfg),
+		reclaimer: NewReclaimer(c, cfg, st.NodeLock, st.AuditLog),
 	}
 }
 
@@ -81,6 +83,15 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 		recs = append(recs, scavRecs...)
 	}
 
+	// GPU node reclaim recommendations (evict non-GPU pods from GPU-idle nodes)
+	if c.config.GPU.ReclaimEnabled {
+		reclaimRecs, err := c.reclaimer.Analyze(ctx, snapshot)
+		if err != nil {
+			return nil, err
+		}
+		recs = append(recs, reclaimRecs...)
+	}
+
 	return recs, nil
 }
 
@@ -108,6 +119,8 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 	switch action {
 	case "enable-cpu-scavenging", "disable-cpu-scavenging", "update-cpu-scavenging":
 		return c.scavenger.Execute(ctx, rec)
+	case "reclaim-gpu-node":
+		return c.reclaimer.Execute(ctx, rec)
 	default:
 		return c.fallback.Execute(ctx, rec)
 	}
