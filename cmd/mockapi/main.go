@@ -45,8 +45,14 @@ func main() {
 		if r.Method == http.MethodPut {
 			var body map[string]string
 			json.NewDecoder(r.Body).Decode(&body)
-			if m, ok := body["mode"]; ok && (m == "recommend" || m == "enforce") {
-				currentMode = m
+			if m, ok := body["mode"]; ok {
+				if m == "recommend" || m == "active" {
+					currentMode = m
+				} else {
+					w.WriteHeader(http.StatusBadRequest)
+					writeJSON(w, map[string]string{"error": "invalid mode, must be 'recommend' or 'active'"})
+					return
+				}
 			}
 		}
 		writeJSON(w, map[string]string{"status": "ok", "mode": currentMode})
@@ -116,6 +122,19 @@ func main() {
 		} else if strings.Contains(path, "/approve") || strings.Contains(path, "/dismiss") {
 			writeJSON(w, map[string]string{"status": "ok"})
 		} else {
+			// Try to find a recommendation by ID
+			id := strings.TrimPrefix(path, "/api/v1/recommendations/")
+			if id != "" {
+				for _, rec := range recommendations().([]map[string]any) {
+					if rec["id"] == id {
+						writeJSON(w, rec)
+						return
+					}
+				}
+				w.WriteHeader(http.StatusNotFound)
+				writeJSON(w, map[string]string{"error": "recommendation not found"})
+				return
+			}
 			writeJSON(w, recommendations())
 		}
 	})
@@ -138,7 +157,13 @@ func main() {
 				writeJSON(w, workloadScaling(ns, kind, name))
 				return
 			}
-			writeJSON(w, workloadDetail(ns, kind, name))
+			detail := workloadDetail(ns, kind, name)
+			if detail == nil {
+				w.WriteHeader(http.StatusNotFound)
+				writeJSON(w, map[string]string{"error": "workload not found"})
+				return
+			}
+			writeJSON(w, detail)
 			return
 		}
 		writeJSON(w, workloads())
@@ -177,6 +202,9 @@ func main() {
 			writeJSON(w, mockChannels[idx])
 		case http.MethodDelete:
 			mockChannels = append(mockChannels[:idx], mockChannels[idx+1:]...)
+			if len(mockChannels) == 0 {
+				mockChannels = []map[string]any{}
+			}
 			writeJSON(w, map[string]string{"status": "deleted"})
 		default:
 			writeJSON(w, mockChannels[idx])
@@ -831,7 +859,7 @@ func recommendations() any {
 func recSummary() any {
 	return map[string]any{
 		"total": 7, "pending": 4, "approved": 2, "dismissed": 1,
-		"totalEstimatedSavings": 2046.44,
+		"totalEstimatedSavings": 1834.20,
 	}
 }
 
@@ -853,9 +881,9 @@ func recDebug() any {
 		},
 		"recommendations": map[string]any{
 			"total": 7,
-			"byType":       map[string]any{"rightsizing": 3, "spot": 1, "consolidation": 2, "commitment": 1},
-			"savingsByType": map[string]any{"rightsizing": 808.8, "spot": 580.0, "consolidation": 135.44, "commitment": 522.2},
-			"totalSavings":  2046.44,
+			"byType":       map[string]any{"rightsizing": 3, "spot": 1, "consolidation": 1, "commitment": 1, "scaling": 1},
+			"savingsByType": map[string]any{"rightsizing": 806.00, "spot": 580.0, "consolidation": 138.24, "commitment": 522.20, "scaling": 0},
+			"totalSavings":  1834.20,
 		},
 	}
 }
@@ -873,6 +901,9 @@ var workloadData = []map[string]any{
 	{"namespace": "kube-system", "kind": "Deployment", "name": "coredns", "replicas": 2, "totalCPU": "200m", "totalMem": "140Mi", "cpuRequest": "100m", "memRequest": "70Mi", "cpuLimit": "200m", "memLimit": "170Mi", "cpuUsed": "20m", "memUsed": "35Mi", "image": "registry.k8s.io/coredns/coredns:v1.11.1"},
 	{"namespace": "default", "kind": "Deployment", "name": "koptimizer", "replicas": 1, "totalCPU": "100m", "totalMem": "128Mi", "cpuRequest": "100m", "memRequest": "128Mi", "cpuLimit": "200m", "memLimit": "256Mi", "cpuUsed": "40m", "memUsed": "75Mi", "image": "ghcr.io/koptimizer/koptimizer:v0.9.0"},
 	{"namespace": "default", "kind": "Deployment", "name": "koptimizer-dashboard", "replicas": 1, "totalCPU": "50m", "totalMem": "64Mi", "cpuRequest": "50m", "memRequest": "64Mi", "cpuLimit": "100m", "memLimit": "128Mi", "cpuUsed": "10m", "memUsed": "25Mi", "image": "ghcr.io/koptimizer/dashboard:v0.9.0"},
+	{"namespace": "production", "kind": "ReplicaSet", "name": "web-frontend-6b8d4f5c9", "replicas": 3, "totalCPU": "300m", "totalMem": "384Mi", "cpuRequest": "100m", "memRequest": "128Mi", "cpuLimit": "200m", "memLimit": "256Mi", "cpuUsed": "80m", "memUsed": "95Mi", "image": "registry.example.com/web-frontend:v2.1.0"},
+	{"namespace": "production", "kind": "ReplicaSet", "name": "api-server-7c9e6f8d2", "replicas": 2, "totalCPU": "500m", "totalMem": "512Mi", "cpuRequest": "250m", "memRequest": "256Mi", "cpuLimit": "500m", "memLimit": "512Mi", "cpuUsed": "180m", "memUsed": "210Mi", "image": "registry.example.com/api-server:v3.4.1"},
+	{"namespace": "production", "kind": "ReplicaSet", "name": "worker-5d4c3b2a1", "replicas": 4, "totalCPU": "800m", "totalMem": "2Gi", "cpuRequest": "200m", "memRequest": "512Mi", "cpuLimit": "400m", "memLimit": "1Gi", "cpuUsed": "350m", "memUsed": "480Mi", "image": "registry.example.com/worker:v1.8.3"},
 }
 
 func workloads() any {
@@ -885,10 +916,7 @@ func workloadDetail(ns, kind, name string) any {
 			return map[string]any{"workload": w}
 		}
 	}
-	return map[string]any{"workload": map[string]any{
-		"namespace": ns, "kind": kind, "name": name,
-		"replicas": 1, "totalCPU": "100m", "totalMem": "128Mi",
-	}}
+	return nil
 }
 
 func workloadRightsizing(ns, kind, name string) any {
@@ -1184,6 +1212,10 @@ func auditEvents() any {
 // ── Notifications ──
 func notificationsData() any {
 	now := time.Now()
+	channels := mockChannels
+	if channels == nil {
+		channels = []map[string]any{}
+	}
 	return map[string]any{
 		"alerts": []map[string]any{
 			{"timestamp": now.Add(-5 * time.Minute).Format(time.RFC3339), "severity": "critical", "category": "resource", "message": "Node ip-10-0-4-102 memory utilization above 90% for 15 minutes", "target": "ip-10-0-4-102.ec2", "status": "active"},
@@ -1194,7 +1226,7 @@ func notificationsData() any {
 			{"timestamp": now.Add(-4 * time.Hour).Format(time.RFC3339), "severity": "warning", "category": "cost", "message": "Monthly cost trending 8% above forecast", "target": "cluster", "status": "resolved"},
 			{"timestamp": now.Add(-8 * time.Hour).Format(time.RFC3339), "severity": "info", "category": "scaling", "message": "Node group spot-workers scaled to 2 nodes", "target": "ng-spot-1", "status": "resolved"},
 		},
-		"channels": mockChannels,
+		"channels": channels,
 	}
 }
 

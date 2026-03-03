@@ -121,7 +121,7 @@ export async function renderSettings() {
             <span class="mode-btn-title">Recommend</span>
             <span class="mode-btn-desc">Suggest optimizations without applying</span>
           </button>
-          <button class="mode-btn ${mode === 'enforce' ? 'mode-btn-active' : ''}" data-mode="enforce">
+          <button class="mode-btn ${mode === 'active' ? 'mode-btn-active' : ''}" data-mode="active">
             <span class="mode-btn-title">Enforce</span>
             <span class="mode-btn-desc">Automatically apply optimizations</span>
           </button>
@@ -309,13 +309,14 @@ export async function renderSettings() {
       const newMode = btn.dataset.mode;
       try {
         await apiPut('/config/mode', { mode: newMode });
-        toast(`Mode changed to ${newMode.charAt(0).toUpperCase() + newMode.slice(1)}`, 'success');
+        const displayLabel = newMode === 'active' ? 'Enforce' : newMode.charAt(0).toUpperCase() + newMode.slice(1);
+        toast(`Mode changed to ${displayLabel}`, 'success');
         renderSettings();
         // Update mode badge in sidebar
         const badgeEl = document.getElementById('mode-badge');
         if (badgeEl) {
-          badgeEl.textContent = newMode.charAt(0).toUpperCase() + newMode.slice(1);
-          badgeEl.className = 'mode-badge ' + newMode;
+          badgeEl.textContent = displayLabel;
+          badgeEl.className = 'mode-badge ' + (newMode === 'active' ? 'enforce' : newMode);
         }
       } catch (e) {
         toast('Failed to change mode: ' + e.message, 'error');
