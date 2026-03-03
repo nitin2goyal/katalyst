@@ -89,9 +89,14 @@ func (h *NodeGroupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"desiredCount":   g.DesiredCount,
 		"cpuUtilPct":     g.CPUUtilization(),
 		"memUtilPct":     g.MemoryUtilization(),
+		"cpuAllocPct":    g.CPUAllocation(),
+		"memAllocPct":    g.MemoryAllocation(),
 		"totalCPU":       g.TotalCPU,
 		"totalMemory":    g.TotalMemory,
+		"totalPods":      g.TotalPods,
 		"monthlyCostUSD": g.MonthlyCostUSD,
+		"diskType":       g.DiskType,
+		"diskSizeGB":     g.DiskSizeGB,
 	})
 }
 
@@ -106,6 +111,7 @@ func (h *NodeGroupHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	for _, n := range g.Nodes {
 		nodes = append(nodes, map[string]interface{}{
 			"name":          n.Node.Name,
+			"instanceType":  n.InstanceType,
 			"cpuUtilPct":    n.CPUUtilization(),
 			"memUtilPct":    n.MemoryUtilization(),
 			"hourlyCostUSD": n.HourlyCostUSD,

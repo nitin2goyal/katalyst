@@ -21,6 +21,7 @@ export async function renderWorkloadDetail(params) {
     // Normalize API field names (List API uses totalCPU/totalMem; Get API uses totalCPURequestMilli/totalMemRequestBytes)
     const cpuMillis = wl.totalCPURequestMilli ?? wl.totalCPU ?? 0;
     const memBytes = wl.totalMemRequestBytes ?? wl.totalMem ?? 0;
+    const isInactive = (wl.replicas === 0 || wl.replicas === null) && cpuMillis === 0 && memBytes === 0;
 
     container().innerHTML = `
       ${breadcrumbs([
@@ -28,10 +29,13 @@ export async function renderWorkloadDetail(params) {
         { label: `${ns}/${name}` }
       ])}
       <div class="page-header"><h1>${name}</h1><p>${kind} in ${ns}</p></div>
+      ${isInactive ? `<div class="card" style="background:var(--bg);border-left:4px solid var(--text-muted);padding:16px 20px;margin-bottom:20px">
+        <strong>Inactive workload</strong> — This ${kind} has 0 replicas and no resource allocation. It may be scaled down, completed, or superseded by a newer revision.
+      </div>` : ''}
       <div class="kpi-grid">
-        <div class="kpi-card"><div class="label">Replicas</div><div class="value blue">${wl.replicas ?? '?'}</div></div>
-        <div class="kpi-card"><div class="label">Total CPU</div><div class="value">${fmtCPU(cpuMillis)}</div></div>
-        <div class="kpi-card"><div class="label">Total Memory</div><div class="value">${fmtMem(memBytes)}</div></div>
+        <div class="kpi-card"><div class="label">Replicas</div><div class="value ${isInactive ? '' : 'blue'}">${wl.replicas ?? '?'}</div></div>
+        <div class="kpi-card"><div class="label">Total CPU</div><div class="value">${isInactive ? '—' : fmtCPU(cpuMillis)}</div></div>
+        <div class="kpi-card"><div class="label">Total Memory</div><div class="value">${isInactive ? '—' : fmtMem(memBytes)}</div></div>
         <div class="kpi-card"><div class="label">Namespace</div><div class="value">${ns}</div></div>
       </div>
       <div class="card" id="wl-tabs-card">

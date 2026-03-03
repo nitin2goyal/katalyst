@@ -32,8 +32,8 @@ export async function renderWorkloads(targetEl) {
       ${metricsAvail && podsWithMetrics < totalPods ? `<div class="info-banner">Metrics available for ${podsWithMetrics}/${totalPods} pods. Pods without metrics show 0% efficiency.</div>` : ''}
       <div class="kpi-grid">
         <div class="kpi-card"><div class="label">Total Workloads</div><div class="value blue">${wlList.length}</div></div>
-        <div class="kpi-card"><div class="label">Avg CPU Efficiency</div><div class="value ${avgCpuEff >= 70 ? 'green' : avgCpuEff >= 40 ? 'amber' : 'red'}">${fmtPct(avgCpuEff)}</div></div>
-        <div class="kpi-card"><div class="label">Avg Mem Efficiency</div><div class="value ${avgMemEff >= 70 ? 'green' : avgMemEff >= 40 ? 'amber' : 'red'}">${fmtPct(avgMemEff)}</div></div>
+        <div class="kpi-card"><div class="label">Avg CPU Efficiency</div><div class="value ${avgCpuEff > 100 ? 'red' : avgCpuEff >= 70 ? 'green' : avgCpuEff >= 40 ? 'amber' : 'red'}">${fmtPct(avgCpuEff)}</div>${avgCpuEff > 100 ? '<div class="sub">exceeds requests</div>' : ''}</div>
+        <div class="kpi-card"><div class="label">Avg Mem Efficiency</div><div class="value ${avgMemEff > 100 ? 'red' : avgMemEff >= 70 ? 'green' : avgMemEff >= 40 ? 'amber' : 'red'}">${fmtPct(avgMemEff)}</div>${avgMemEff > 100 ? '<div class="sub">exceeds requests — OOM risk</div>' : ''}</div>
         <div class="kpi-card"><div class="label">Wasted Cost</div><div class="value red">${fmt$(totalWasted)}</div><div class="sub">resources requested but unused</div></div>
       </div>
       <div class="card">
@@ -54,7 +54,7 @@ export async function renderWorkloads(targetEl) {
     const effBadge = (pct, hasMetrics) => {
       if (pct == null) return '<span style="color:var(--text-muted)">-</span>';
       if (hasMetrics === false) return '<span style="color:var(--text-muted)" title="No metrics data">N/A</span>';
-      const cls = pct >= 70 ? 'green' : pct >= 40 ? 'amber' : 'red';
+      const cls = pct > 100 ? 'red' : pct >= 70 ? 'green' : pct >= 40 ? 'amber' : 'red';
       return badge(fmtPct(pct), cls);
     };
 
@@ -96,8 +96,8 @@ export async function renderWorkloads(targetEl) {
       exportCSV(['Namespace', 'Kind', 'Name', 'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim', 'Total CPU', 'Total Mem', 'Image', 'CPU Eff %', 'Mem Eff %', 'Wasted Cost'],
         wlList.map(w => {
           const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
-          return [w.namespace, w.kind, w.name, w.replicas, w.cpuRequest, w.cpuLimit, w.memRequest, w.memLimit, w.totalCPU, w.totalMem, w.image || '',
-            eff?.cpuEfficiencyPct ?? '', eff?.memEfficiencyPct ?? '', eff?.wastedCostUSD ?? ''];
+          return [w.namespace, w.kind, w.name, w.replicas, fmtCPU(w.cpuRequest), fmtCPU(w.cpuLimit), fmtMem(w.memRequest), fmtMem(w.memLimit), fmtCPU(w.totalCPU), fmtMem(w.totalMem), w.image || '',
+            eff?.cpuEfficiencyPct != null ? fmtPct(eff.cpuEfficiencyPct) : '', eff?.memEfficiencyPct != null ? fmtPct(eff.memEfficiencyPct) : '', eff?.wastedCostUSD != null ? fmt$(eff.wastedCostUSD) : ''];
         }),
         'koptimizer-workloads.csv');
     };

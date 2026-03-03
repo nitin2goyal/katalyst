@@ -18,7 +18,7 @@ export async function renderSavings(targetEl) {
       list = computed.opportunities;
     }
     // Filter out spot recommendations (spot feature removed)
-    list = list.filter(s => s.type !== 'spot');
+    list = list.filter(s => { const t = (s.type || '').toLowerCase(); return t !== 'spot' && !t.includes('spot'); });
     const cs = costSummary || {};
     
     // Calculate category totals

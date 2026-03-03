@@ -74,7 +74,7 @@ async function renderCostDashboard(targetEl) {
       savingsList = computed.opportunities;
     }
     // Filter out spot recommendations (spot feature removed)
-    savingsList = savingsList.filter(s => s.type !== 'spot');
+    savingsList = savingsList.filter(s => { const t = (s.type || '').toLowerCase(); return t !== 'spot' && !t.includes('spot'); });
     const totalIdentified = savingsList.reduce((s, r) => s + (r.estimatedSavings || r.savings || 0), 0);
 
     // Parse namespace cost — API may return {data:[{namespace,monthlyCostUSD}]} or flat {ns:cost}
@@ -144,26 +144,25 @@ async function renderCostDashboard(targetEl) {
     if (trendPoints.length) {
       makeAreaChart('cost-trend-chart', {
         categories: trendPoints.map(p => p.date || p.timestamp || ''),
-        series: [{ name: 'Daily cost', data: trendPoints.map(p => p.cost || p.value || 0) }],
+        series: [{ name: 'Daily cost', data: trendPoints.map(p => p.totalMonthlyCostUSD || p.cost || p.value || 0) }],
         colors: ['#6366f1'],
       });
     }
 
-    // Month-over-Month comparison - grouped bar
+    // Month-over-Month comparison - grouped bar by top namespaces
     if (comparison) {
-      const cur = comparison.current || {};
-      const prev = comparison.previous || {};
-      const cats = ['computeCost', 'storageCost', 'networkCost', 'otherCost'];
-      const catLabels = ['Compute', 'Storage', 'Network', 'Other'];
-      makeBarChart('mom-chart', {
-        categories: catLabels,
-        series: [
-          { name: comparison.previousPeriod || 'Last month', data: cats.map(c => prev[c] || 0) },
-          { name: comparison.currentPeriod || 'This month', data: cats.map(c => cur[c] || 0) },
-        ],
-        colors: ['#475569', '#6366f1'],
-      });
       const byNsComp = comparison.byNamespace || [];
+      const topMom = byNsComp.filter(n => n.currentCost > 0 || n.previousCost > 0).slice(0, 8);
+      if (topMom.length) {
+        makeBarChart('mom-chart', {
+          categories: topMom.map(n => n.namespace),
+          series: [
+            { name: comparison.previousPeriod || 'Last month', data: topMom.map(n => n.previousCost || 0) },
+            { name: comparison.currentPeriod || 'This month', data: topMom.map(n => n.currentCost || 0) },
+          ],
+          colors: ['#475569', '#6366f1'],
+        });
+      }
       const momBody = $('#mom-body');
       if (momBody) {
         momBody.innerHTML = byNsComp.map(n => {

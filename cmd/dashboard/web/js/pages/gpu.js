@@ -13,6 +13,19 @@ export async function renderGPU(targetEl) {
     const utilData = util || {};
     const recList = toArray(recs, 'recommendations');
 
+    const hasGPU = nodeList.length > 0 || (utilData.totalGPUs || 0) > 0;
+
+    if (!hasGPU) {
+      container().innerHTML = `
+        ${!targetEl ? '<div class="page-header"><h1>GPU Management</h1><p>GPU node utilization and optimization</p></div>' : ''}
+        <div class="card" style="text-align:center;padding:48px 24px">
+          <div style="font-size:48px;margin-bottom:16px;opacity:0.3">GPU</div>
+          <h3 style="margin-bottom:8px">No GPU Nodes Detected</h3>
+          <p style="color:var(--text-muted);max-width:480px;margin:0 auto;line-height:1.6">This cluster does not have any GPU-enabled nodes. GPU monitoring will automatically activate when GPU nodes (e.g., NVIDIA T4, A100, L4) are added to the cluster.</p>
+        </div>`;
+      return;
+    }
+
     container().innerHTML = `
       ${!targetEl ? '<div class="page-header"><h1>GPU Management</h1><p>GPU node utilization and optimization</p></div>' : ''}
       <div class="kpi-grid">

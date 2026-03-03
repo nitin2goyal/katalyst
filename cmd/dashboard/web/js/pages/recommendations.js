@@ -24,14 +24,14 @@ export async function renderRecsTab(targetEl) {
       _isComputed = true;
     }
     // Filter out spot recommendations (spot feature removed)
-    recList = recList.filter(r => (r.type || r.Type) !== 'spot');
+    recList = recList.filter(r => { const t = (r.type || r.Type || '').toLowerCase(); return t !== 'spot' && !t.includes('spot'); });
     const pending = recList.filter(r => (r.status || r.Status) === 'pending').length;
     const approved = recList.filter(r => (r.status || r.Status) === 'approved').length;
     const totalSavings = recList.reduce((s, r) => s + (r.estimatedSavings || 0), 0);
 
     // --- Debug: compute cluster stats for validation ---
-    const nodeList = Array.isArray(clusterNodes) ? clusterNodes : (clusterNodes?.nodes || []);
-    const wlList = Array.isArray(clusterWorkloads) ? clusterWorkloads : (clusterWorkloads?.workloads || []);
+    const nodeList = Array.isArray(clusterNodes) ? clusterNodes : (clusterNodes?.data || clusterNodes?.nodes || []);
+    const wlList = Array.isArray(clusterWorkloads) ? clusterWorkloads : (clusterWorkloads?.data || clusterWorkloads?.workloads || []);
     const totalNodeCost = nodeList.reduce((s, n) => s + (n.hourlyCostUSD || 0) * 730.5, 0);
     const nodesWithUsage = nodeList.filter(n => (n.cpuUsed || 0) > 0 || (n.memUsed || 0) > 0).length;
     const avgNodeCPU = nodeList.length ? nodeList.reduce((s, n) => s + ((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100), 0) / nodeList.length : 0;

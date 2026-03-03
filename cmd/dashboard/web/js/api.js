@@ -40,7 +40,7 @@ export async function api(path) {
 
   const promise = fetchWithRetry(url).then(async res => {
     const data = await res.json();
-    store.set('api:' + url, data, 300000); // 5 min cache
+    store.set('api:' + url, data, 60000); // 60s cache (matches backend refresh)
     inflight.delete(url);
     return data;
   }).catch(err => {

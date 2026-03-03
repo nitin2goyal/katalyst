@@ -57,7 +57,7 @@ export async function renderNodeDetail(params) {
       <div class="card">
         <h2>Pods on this Node</h2>
         <div class="table-wrap"><table id="node-pods-table">
-          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>CPU Request</th><th>Memory Request</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>CPU Request</th><th>CPU % of Node</th><th>Memory Request</th><th>Mem % of Node</th><th>Status</th></tr></thead>
           <tbody id="node-pods-body"></tbody>
         </table></div>
       </div>`;
@@ -127,14 +127,45 @@ export async function renderNodeDetail(params) {
       };
       return reasons[s.toLowerCase()] || s;
     };
+    // Parse CPU/memory request to millicores/bytes for % calculation
+    const parseCPUm = (v) => {
+      if (typeof v === 'number') return v;
+      const s = String(v || '').trim();
+      if (s.endsWith('m')) return parseFloat(s);
+      const n = parseFloat(s);
+      return isNaN(n) ? 0 : n * 1000; // assume cores if no unit
+    };
+    const parseMemB = (v) => {
+      if (typeof v === 'number') return v;
+      const s = String(v || '').trim();
+      const m = s.match(/^([\d.]+)\s*(Ti|Gi|Mi|Ki|B)?$/i);
+      if (!m) return 0;
+      const n = parseFloat(m[1]);
+      const unit = (m[2] || '').toLowerCase();
+      if (unit === 'ti') return n * 1099511627776;
+      if (unit === 'gi') return n * 1073741824;
+      if (unit === 'mi') return n * 1048576;
+      if (unit === 'ki') return n * 1024;
+      return n;
+    };
+    const cpuCapMilli2 = parseFloat(node.cpuCapacity) || 1;
+    const memCapBytes2 = parseFloat(node.memCapacity) || 1;
+
     // Sort: app pods first, system pods second
     const sortedPods = [...pods].sort((a, b) => (a.isSystem ? 1 : 0) - (b.isSystem ? 1 : 0));
-    $('#node-pods-body').innerHTML = sortedPods.length ? sortedPods.map(p => `<tr>
+    $('#node-pods-body').innerHTML = sortedPods.length ? sortedPods.map(p => {
+      const cpuReqM = parseCPUm(p.cpuRequest);
+      const memReqB = parseMemB(p.memRequest);
+      const cpuPct = cpuCapMilli2 > 0 ? (cpuReqM / cpuCapMilli2 * 100) : 0;
+      const memPctVal = memCapBytes2 > 0 ? (memReqB / memCapBytes2 * 100) : 0;
+      return `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
       <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
-      <td>${fmtCPU(p.cpuRequest)}</td><td>${fmtMem(p.memRequest)}</td>
+      <td>${fmtCPU(p.cpuRequest)}</td><td>${utilBar(cpuPct)}</td>
+      <td>${fmtMem(p.memRequest)}</td><td>${utilBar(memPctVal)}</td>
       <td title="${podStatusReason(p.status)}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
-    </tr>`).join('') : '<tr><td colspan="6" style="color:var(--text-muted)">No pods found</td></tr>';
+    </tr>`;
+    }).join('') : '<tr><td colspan="8" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
 
   } catch (e) {

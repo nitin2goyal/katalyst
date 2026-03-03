@@ -23,9 +23,9 @@ export async function computeRecommendations() {
     api('/nodegroups').catch(() => []),
   ]);
 
-  const nodeList = Array.isArray(nodes) ? nodes : (nodes?.nodes || []);
-  const wlList = Array.isArray(workloads) ? workloads : (workloads?.workloads || []);
-  const ngList = Array.isArray(nodeGroups) ? nodeGroups : (nodeGroups?.nodeGroups || []);
+  const nodeList = Array.isArray(nodes) ? nodes : (nodes?.data || nodes?.nodes || []);
+  const wlList = Array.isArray(workloads) ? workloads : (workloads?.data || workloads?.workloads || []);
+  const ngList = Array.isArray(nodeGroups) ? nodeGroups : (nodeGroups?.data || nodeGroups?.nodeGroups || []);
 
   const recs = [];
   const now = new Date().toISOString();

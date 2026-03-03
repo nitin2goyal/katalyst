@@ -16,7 +16,17 @@ export async function renderCommitments(targetEl) {
     const expIds = new Set(expList.map(c => c.id));
 
     const types = [...new Set(cList.map(c => c.type).filter(Boolean))];
-    const utilLevels = ['High (>80%)', 'Medium (50-80%)', 'Low (<50%)'];
+
+    if (!cList.length) {
+      container().innerHTML = `
+        ${!targetEl ? '<div class="page-header"><h1>Commitments</h1><p>Reserved instances and savings plans</p></div>' : ''}
+        <div class="card" style="text-align:center;padding:48px 24px">
+          <div style="font-size:48px;margin-bottom:16px;opacity:0.3">CUD</div>
+          <h3 style="margin-bottom:8px">No Commitments Found</h3>
+          <p style="color:var(--text-muted);max-width:480px;margin:0 auto;line-height:1.6">No Committed Use Discounts (CUDs) or reservations detected. GCP CUDs are managed via the GCP Console. Once active, they will appear here for utilization tracking and expiry monitoring.</p>
+        </div>`;
+      return;
+    }
 
     container().innerHTML = `
       ${!targetEl ? '<div class="page-header"><h1>Commitments</h1><p>Reserved instances and savings plans</p></div>' : ''}
