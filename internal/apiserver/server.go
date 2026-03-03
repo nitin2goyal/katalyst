@@ -16,8 +16,8 @@ import (
 )
 
 // NewServer creates a new HTTP server for the REST API.
-func NewServer(cfg *config.Config, clusterState *state.ClusterState, provider cloudprovider.CloudProvider, guard *familylock.FamilyLockGuard, k8sClient client.Client, costStore *store.CostStore, metricsStore *intmetrics.Store) *http.Server {
-	router := NewRouter(cfg, clusterState, provider, guard, k8sClient, costStore, metricsStore)
+func NewServer(cfg *config.Config, clusterState *state.ClusterState, provider cloudprovider.CloudProvider, guard *familylock.FamilyLockGuard, k8sClient client.Client, costStore *store.CostStore, metricsStore *intmetrics.Store, settingsStore *store.SettingsStore) *http.Server {
+	router := NewRouter(cfg, clusterState, provider, guard, k8sClient, costStore, metricsStore, settingsStore)
 
 	return &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.APIServer.Address, cfg.APIServer.Port),

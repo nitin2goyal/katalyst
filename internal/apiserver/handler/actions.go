@@ -123,6 +123,9 @@ func (h *ActionsHandler) DeletePods(w http.ResponseWriter, r *http.Request) {
 			})
 		} else {
 			deleted++
+			// Remove from in-memory state so the next ListBadPods call
+			// reflects the deletion without waiting for a full Refresh cycle.
+			h.state.RemovePod(ref.Namespace, ref.Name)
 		}
 	}
 

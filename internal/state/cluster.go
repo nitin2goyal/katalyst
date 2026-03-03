@@ -563,6 +563,13 @@ func (s *ClusterState) GetPod(namespace, name string) (*PodState, bool) {
 	return p, ok
 }
 
+// RemovePod removes a pod from the in-memory state (e.g. after deletion).
+func (s *ClusterState) RemovePod(namespace, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.pods, namespace+"/"+name)
+}
+
 // GetAllPods returns all pods.
 func (s *ClusterState) GetAllPods() []*PodState {
 	s.mu.RLock()

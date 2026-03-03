@@ -57,39 +57,45 @@ export async function renderNodeDetail(params) {
       <div class="card">
         <h2>Pods on this Node</h2>
         <div class="table-wrap"><table id="node-pods-table">
-          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>CPU Request</th><th>CPU % of Node</th><th>Memory Request</th><th>Mem % of Node</th><th>Disk Usage</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>CPU Req</th><th>CPU Used</th><th>CPU %</th><th>Mem Req</th><th>Mem Used</th><th>Mem %</th><th>Disk</th><th>Status</th></tr></thead>
           <tbody id="node-pods-body"></tbody>
         </table></div>
       </div>`;
 
-    // Resource charts — values are in millicores (CPU) and bytes (Memory)
+    // Resource charts — 3 segments: Utilized / Allocated (unused) / Free
     const cpuUsedMilli = parseFloat(node.cpuUsed) || 0;
+    const cpuReqMilli = parseFloat(node.cpuRequested) || 0;
     const cpuCapMilli = parseFloat(node.cpuCapacity) || 1;
-    const cpuUsedCores = cpuUsedMilli / 1000;
-    const cpuCapCores = cpuCapMilli / 1000;
+    const cpuUtilCores = cpuUsedMilli / 1000;
+    const cpuAllocCores = Math.max(0, cpuReqMilli - cpuUsedMilli) / 1000;
+    const cpuFreeCores = Math.max(0, cpuCapMilli - cpuReqMilli) / 1000;
     makeBarChart('node-cpu-chart', {
       categories: ['CPU (cores)'],
       series: [
-        { name: 'Used', data: [parseFloat(cpuUsedCores.toFixed(1))] },
-        { name: 'Available', data: [parseFloat((cpuCapCores - cpuUsedCores).toFixed(1))] },
+        { name: 'Utilized', data: [parseFloat(cpuUtilCores.toFixed(1))] },
+        { name: 'Allocated (unused)', data: [parseFloat(cpuAllocCores.toFixed(1))] },
+        { name: 'Free', data: [parseFloat(cpuFreeCores.toFixed(1))] },
       ],
-      colors: ['#4361ee', '#e2e8f0'],
+      colors: ['#4361ee', '#93a8f4', '#e2e8f0'],
       horizontal: true,
       stacked: true,
       noCurrency: true,
     });
 
     const memUsedBytes = parseFloat(node.memUsed) || 0;
+    const memReqBytes = parseFloat(node.memRequested) || 0;
     const memCapBytes = parseFloat(node.memCapacity) || 1;
-    const memUsedGB = memUsedBytes / 1073741824;
-    const memCapGB = memCapBytes / 1073741824;
+    const memUtilGB = memUsedBytes / 1073741824;
+    const memAllocGB = Math.max(0, memReqBytes - memUsedBytes) / 1073741824;
+    const memFreeGB = Math.max(0, memCapBytes - memReqBytes) / 1073741824;
     makeBarChart('node-mem-chart', {
       categories: ['Memory (GB)'],
       series: [
-        { name: 'Used', data: [parseFloat(memUsedGB.toFixed(1))] },
-        { name: 'Available', data: [parseFloat((memCapGB - memUsedGB).toFixed(1))] },
+        { name: 'Utilized', data: [parseFloat(memUtilGB.toFixed(1))] },
+        { name: 'Allocated (unused)', data: [parseFloat(memAllocGB.toFixed(1))] },
+        { name: 'Free', data: [parseFloat(memFreeGB.toFixed(1))] },
       ],
-      colors: ['#8b5cf6', '#e2e8f0'],
+      colors: ['#8b5cf6', '#bba4f4', '#e2e8f0'],
       horizontal: true,
       stacked: true,
       noCurrency: true,
@@ -151,22 +157,40 @@ export async function renderNodeDetail(params) {
     const cpuCapMilli2 = parseFloat(node.cpuCapacity) || 1;
     const memCapBytes2 = parseFloat(node.memCapacity) || 1;
 
+    // Format millicores for pod usage display
+    const fmtCPUm = (v) => {
+      const m = typeof v === 'number' ? v : parseCPUm(v);
+      return m >= 1000 ? (m / 1000).toFixed(1) + ' cores' : m + 'm';
+    };
+    const fmtMemB = (v) => {
+      const b = typeof v === 'number' ? v : parseMemB(v);
+      if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' Gi';
+      return Math.round(b / 1048576) + ' Mi';
+    };
+
     // Sort: app pods first, system pods second
     const sortedPods = [...pods].sort((a, b) => (a.isSystem ? 1 : 0) - (b.isSystem ? 1 : 0));
     $('#node-pods-body').innerHTML = sortedPods.length ? sortedPods.map(p => {
       const cpuReqM = parseCPUm(p.cpuRequest);
       const memReqB = parseMemB(p.memRequest);
-      const cpuPct = cpuCapMilli2 > 0 ? (cpuReqM / cpuCapMilli2 * 100) : 0;
-      const memPctVal = memCapBytes2 > 0 ? (memReqB / memCapBytes2 * 100) : 0;
+      const cpuUsedM = p.cpuUsed != null ? parseCPUm(p.cpuUsed) : null;
+      const memUsedB = p.memUsed != null ? parseMemB(p.memUsed) : null;
+      // CPU % based on actual usage if available, else request
+      const cpuPct = cpuCapMilli2 > 0 ? ((cpuUsedM != null ? cpuUsedM : cpuReqM) / cpuCapMilli2 * 100) : 0;
+      const memPctVal = memCapBytes2 > 0 ? ((memUsedB != null ? memUsedB : memReqB) / memCapBytes2 * 100) : 0;
       return `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
       <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
-      <td>${fmtCPU(p.cpuRequest)}</td><td>${utilBar(cpuPct)}</td>
-      <td>${fmtMem(p.memRequest)}</td><td>${utilBar(memPctVal)}</td>
+      <td>${fmtCPU(p.cpuRequest)}</td>
+      <td>${cpuUsedM != null ? fmtCPUm(cpuUsedM) : '<span style="color:var(--text-muted)">-</span>'}</td>
+      <td>${utilBar(cpuPct)}</td>
+      <td>${fmtMem(p.memRequest)}</td>
+      <td>${memUsedB != null ? fmtMemB(memUsedB) : '<span style="color:var(--text-muted)">-</span>'}</td>
+      <td>${utilBar(memPctVal)}</td>
       <td>${p.diskUsage ? fmtMem(p.diskUsage) : '-'}</td>
       <td title="${podStatusReason(p.status)}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
     </tr>`;
-    }).join('') : '<tr><td colspan="9" style="color:var(--text-muted)">No pods found</td></tr>';
+    }).join('') : '<tr><td colspan="11" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
 
   } catch (e) {

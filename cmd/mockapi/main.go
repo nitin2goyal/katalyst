@@ -14,6 +14,18 @@ import (
 )
 
 var currentMode = "recommend"
+var controllerStates = map[string]bool{
+	"costMonitor": true, "nodeAutoscaler": true, "nodegroupMgr": true,
+	"rightsizer": true, "workloadScaler": true, "evictor": true,
+	"rebalancer": true, "gpu": true, "commitments": true, "aiGate": false,
+	"podPurger": false,
+}
+
+var mockChannels = []map[string]any{
+	{"type": "slack", "name": "Slack #k8s-alerts", "target": "#k8s-alerts", "enabled": true},
+	{"type": "webhook", "name": "PagerDuty Critical", "target": "https://events.pagerduty.com/...", "enabled": true},
+	{"type": "webhook", "name": "Custom Webhook", "target": "https://hooks.example.com/kopt", "enabled": false},
+}
 
 func main() {
 	port := flag.Int("port", 8080, "Mock API port")
@@ -38,6 +50,27 @@ func main() {
 			}
 		}
 		writeJSON(w, map[string]string{"status": "ok", "mode": currentMode})
+	})
+	mux.HandleFunc("/api/v1/config/controllers/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/api/v1/config/controllers/")
+		if r.Method == http.MethodPut && name != "" {
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			if enabled, ok := body["enabled"].(bool); ok {
+				controllerStates[name] = enabled
+			}
+		}
+		writeJSON(w, map[string]interface{}{"controller": name, "enabled": controllerStates[name]})
+	})
+	mux.HandleFunc("/api/v1/config/pod-purger", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			if enabled, ok := body["enabled"].(bool); ok {
+				controllerStates["podPurger"] = enabled
+			}
+		}
+		writeJSON(w, map[string]interface{}{"enabled": controllerStates["podPurger"]})
 	})
 	mux.HandleFunc("/api/v1/nodegroups/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/nodegroups/")
@@ -126,6 +159,52 @@ func main() {
 	})
 	mux.HandleFunc("/api/v1/commitments", jsonHandler(allCommitments))
 	mux.HandleFunc("/api/v1/audit", jsonHandler(auditEvents))
+	mux.HandleFunc("/api/v1/notifications/channels/", func(w http.ResponseWriter, r *http.Request) {
+		idxStr := strings.TrimPrefix(r.URL.Path, "/api/v1/notifications/channels/")
+		idx, err := strconv.Atoi(idxStr)
+		if err != nil || idx < 0 || idx >= len(mockChannels) {
+			w.WriteHeader(http.StatusNotFound)
+			writeJSON(w, map[string]string{"error": "channel not found"})
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			if enabled, ok := body["enabled"].(bool); ok {
+				mockChannels[idx]["enabled"] = enabled
+			}
+			writeJSON(w, mockChannels[idx])
+		case http.MethodDelete:
+			mockChannels = append(mockChannels[:idx], mockChannels[idx+1:]...)
+			writeJSON(w, map[string]string{"status": "deleted"})
+		default:
+			writeJSON(w, mockChannels[idx])
+		}
+	})
+	mux.HandleFunc("/api/v1/notifications/channels", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			ch := map[string]any{
+				"type":    body["type"],
+				"name":    body["name"],
+				"target":  body["url"],
+				"enabled": true,
+			}
+			mockChannels = append(mockChannels, ch)
+			w.WriteHeader(http.StatusCreated)
+			writeJSON(w, map[string]any{
+				"id":      len(mockChannels) - 1,
+				"type":    ch["type"],
+				"name":    ch["name"],
+				"url":     ch["target"],
+				"enabled": true,
+			})
+			return
+		}
+		writeJSON(w, notificationsData())
+	})
 	mux.HandleFunc("/api/v1/notifications", jsonHandler(notificationsData))
 	mux.HandleFunc("/api/v1/events", jsonHandler(eventsData))
 	mux.HandleFunc("/api/v1/clusters", jsonHandler(clustersData))
@@ -385,16 +464,17 @@ func clampMockScore(s float64) float64 {
 }
 
 func configHandler() any {
+	// Copy current state so mutations don't affect the response map
+	ctrls := make(map[string]bool, len(controllerStates))
+	for k, v := range controllerStates {
+		ctrls[k] = v
+	}
 	return map[string]any{
-		"mode":          currentMode,
-		"cloudProvider":  "aws",
-		"region":        "us-east-1",
-		"clusterName":   "demo-cluster",
-		"controllers": map[string]bool{
-			"costMonitor": true, "nodeAutoscaler": true, "nodegroupMgr": true,
-			"rightsizer": true, "workloadScaler": true, "evictor": true,
-			"rebalancer": true, "gpu": true, "commitments": true, "aiGate": false,
-		},
+		"mode":         currentMode,
+		"cloudProvider": "aws",
+		"region":       "us-east-1",
+		"clusterName":  "demo-cluster",
+		"controllers":  ctrls,
 	}
 }
 
@@ -596,28 +676,28 @@ func nodeByName(name string) any {
 func podsByNode(nodeName string) []map[string]any {
 	podData := map[string][]map[string]any{
 		"ip-10-0-1-101.ec2": {
-			{"name": "web-frontend-6d4f7b8c9-x7k2m", "namespace": "production", "cpuRequest": "100m", "memRequest": "128Mi", "status": "Running"},
-			{"name": "api-server-5c8d9e7f6-p3n1q", "namespace": "production", "cpuRequest": "250m", "memRequest": "256Mi", "status": "Running"},
-			{"name": "kube-proxy-abc12", "namespace": "kube-system", "cpuRequest": "100m", "memRequest": "128Mi", "status": "Running"},
-			{"name": "coredns-7d8f9c6b5-m2k4j", "namespace": "kube-system", "cpuRequest": "100m", "memRequest": "70Mi", "status": "Running"},
-			{"name": "cache-8e5f4d3c2-r9s7t", "namespace": "production", "cpuRequest": "100m", "memRequest": "256Mi", "status": "Running"},
+			{"name": "web-frontend-6d4f7b8c9-x7k2m", "namespace": "production", "cpuRequest": "100m", "memRequest": "128Mi", "cpuUsed": 82, "memUsed": 98566144, "status": "Running"},
+			{"name": "api-server-5c8d9e7f6-p3n1q", "namespace": "production", "cpuRequest": "250m", "memRequest": "256Mi", "cpuUsed": 185, "memUsed": 218103808, "status": "Running"},
+			{"name": "kube-proxy-abc12", "namespace": "kube-system", "cpuRequest": "100m", "memRequest": "128Mi", "cpuUsed": 12, "memUsed": 41943040, "status": "Running"},
+			{"name": "coredns-7d8f9c6b5-m2k4j", "namespace": "kube-system", "cpuRequest": "100m", "memRequest": "70Mi", "cpuUsed": 18, "memUsed": 36700160, "status": "Running"},
+			{"name": "cache-8e5f4d3c2-r9s7t", "namespace": "production", "cpuRequest": "100m", "memRequest": "256Mi", "cpuUsed": 58, "memUsed": 209715200, "status": "Running"},
 		},
 		"ip-10-0-1-102.ec2": {
-			{"name": "web-frontend-6d4f7b8c9-a2b3c", "namespace": "production", "cpuRequest": "100m", "memRequest": "128Mi", "status": "Running"},
-			{"name": "api-server-5c8d9e7f6-d4e5f", "namespace": "production", "cpuRequest": "250m", "memRequest": "256Mi", "status": "Running"},
-			{"name": "worker-9f6e5d4c3-g6h7i", "namespace": "production", "cpuRequest": "200m", "memRequest": "512Mi", "status": "Running"},
-			{"name": "worker-9f6e5d4c3-j8k9l", "namespace": "production", "cpuRequest": "200m", "memRequest": "512Mi", "status": "Running"},
-			{"name": "kube-proxy-def34", "namespace": "kube-system", "cpuRequest": "100m", "memRequest": "128Mi", "status": "Running"},
-			{"name": "grafana-4b3a2c1d0-n1o2p", "namespace": "monitoring", "cpuRequest": "100m", "memRequest": "128Mi", "status": "Running"},
+			{"name": "web-frontend-6d4f7b8c9-a2b3c", "namespace": "production", "cpuRequest": "100m", "memRequest": "128Mi", "cpuUsed": 76, "memUsed": 92274688, "status": "Running"},
+			{"name": "api-server-5c8d9e7f6-d4e5f", "namespace": "production", "cpuRequest": "250m", "memRequest": "256Mi", "cpuUsed": 192, "memUsed": 230686720, "status": "Running"},
+			{"name": "worker-9f6e5d4c3-g6h7i", "namespace": "production", "cpuRequest": "200m", "memRequest": "512Mi", "cpuUsed": 165, "memUsed": 461373440, "status": "Running"},
+			{"name": "worker-9f6e5d4c3-j8k9l", "namespace": "production", "cpuRequest": "200m", "memRequest": "512Mi", "cpuUsed": 178, "memUsed": 494927872, "status": "Running"},
+			{"name": "kube-proxy-def34", "namespace": "kube-system", "cpuRequest": "100m", "memRequest": "128Mi", "cpuUsed": 10, "memUsed": 39845888, "status": "Running"},
+			{"name": "grafana-4b3a2c1d0-n1o2p", "namespace": "monitoring", "cpuRequest": "100m", "memRequest": "128Mi", "cpuUsed": 52, "memUsed": 94371840, "status": "Running"},
 		},
 	}
 	if pods, ok := podData[nodeName]; ok {
 		return pods
 	}
 	return []map[string]any{
-		{"name": "kube-proxy-" + nodeName[:8], "namespace": "kube-system", "cpuRequest": "100m", "memRequest": "128Mi", "status": "Running"},
-		{"name": "app-pod-1", "namespace": "production", "cpuRequest": "200m", "memRequest": "256Mi", "status": "Running"},
-		{"name": "app-pod-2", "namespace": "production", "cpuRequest": "150m", "memRequest": "192Mi", "status": "Running"},
+		{"name": "kube-proxy-" + nodeName[:8], "namespace": "kube-system", "cpuRequest": "100m", "memRequest": "128Mi", "cpuUsed": 14, "memUsed": 41943040, "status": "Running"},
+		{"name": "app-pod-1", "namespace": "production", "cpuRequest": "200m", "memRequest": "256Mi", "cpuUsed": 135, "memUsed": 188743680, "status": "Running"},
+		{"name": "app-pod-2", "namespace": "production", "cpuRequest": "150m", "memRequest": "192Mi", "cpuUsed": 98, "memUsed": 146800640, "status": "Running"},
 	}
 }
 
@@ -1114,11 +1194,7 @@ func notificationsData() any {
 			{"timestamp": now.Add(-4 * time.Hour).Format(time.RFC3339), "severity": "warning", "category": "cost", "message": "Monthly cost trending 8% above forecast", "target": "cluster", "status": "resolved"},
 			{"timestamp": now.Add(-8 * time.Hour).Format(time.RFC3339), "severity": "info", "category": "scaling", "message": "Node group spot-workers scaled to 2 nodes", "target": "ng-spot-1", "status": "resolved"},
 		},
-		"channels": []map[string]any{
-			{"type": "slack", "name": "Slack #k8s-alerts", "target": "#k8s-alerts", "enabled": true},
-			{"type": "webhook", "name": "PagerDuty Critical", "target": "https://events.pagerduty.com/...", "enabled": true},
-			{"type": "webhook", "name": "Custom Webhook", "target": "https://hooks.example.com/kopt", "enabled": false},
-		},
+		"channels": mockChannels,
 	}
 }
 

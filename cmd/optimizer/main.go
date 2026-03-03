@@ -81,22 +81,8 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
-	if err := cfg.ValidateDetailed(); err != nil {
-		setupLog.Error(err, "Invalid configuration",
-			"cloudProvider", cfg.CloudProvider,
-			"region", cfg.Region,
-			"configFile", configFile,
-		)
-		os.Exit(1)
-	}
-
-	setupLog.Info("Starting KOptimizer",
-		"mode", cfg.Mode,
-		"cloudProvider", cfg.CloudProvider,
-		"region", cfg.Region,
-	)
-
-	// Open SQLite database (nil-safe: if it fails, everything works in-memory)
+	// Open SQLite database (nil-safe: if it fails, everything works in-memory).
+	// Must happen before ValidateDetailed so persisted settings can override config.
 	var appDB *store.DB
 	if cfg.Database.Path != "" {
 		var dbErr error
@@ -118,6 +104,67 @@ func main() {
 		sqlDBRef = appDB.RawDB()
 		dbWriter = store.NewWriter(sqlDBRef, 4096)
 	}
+
+	// Create settings store and load persisted overrides into config.
+	// This runs before ValidateDetailed so runtime settings from the
+	// previous pod lifetime take precedence over the config file.
+	settingsStore := store.NewSettingsStore(sqlDBRef)
+	if mode := settingsStore.LoadMode(); mode != "" {
+		setupLog.Info("Restoring persisted mode", "mode", mode)
+		cfg.Mode = mode
+	}
+	if enabled, found := settingsStore.LoadPodPurgerEnabled(); found {
+		setupLog.Info("Restoring persisted pod purger state", "enabled", enabled)
+		cfg.PodPurger.Enabled = enabled
+	}
+	if channels := settingsStore.LoadChannels(); channels != nil {
+		setupLog.Info("Restoring persisted notification channels", "count", len(channels))
+		cfg.Alerts.Channels = channels
+	}
+	if ctrlStates := settingsStore.LoadControllerStates(); ctrlStates != nil {
+		for name, enabled := range ctrlStates {
+			switch name {
+			case "costMonitor":
+				cfg.CostMonitor.Enabled = enabled
+			case "nodeAutoscaler":
+				cfg.NodeAutoscaler.Enabled = enabled
+			case "nodegroupMgr":
+				cfg.NodeGroupMgr.Enabled = enabled
+			case "rightsizer":
+				cfg.Rightsizer.Enabled = enabled
+			case "workloadScaler":
+				cfg.WorkloadScaler.Enabled = enabled
+			case "evictor":
+				cfg.Evictor.Enabled = enabled
+			case "rebalancer":
+				cfg.Rebalancer.Enabled = enabled
+			case "gpu":
+				cfg.GPU.Enabled = enabled
+			case "commitments":
+				cfg.Commitments.Enabled = enabled
+			case "aiGate":
+				cfg.AIGate.Enabled = enabled
+			case "podPurger":
+				cfg.PodPurger.Enabled = enabled
+			}
+		}
+		setupLog.Info("Restoring persisted controller states", "count", len(ctrlStates))
+	}
+
+	if err := cfg.ValidateDetailed(); err != nil {
+		setupLog.Error(err, "Invalid configuration",
+			"cloudProvider", cfg.CloudProvider,
+			"region", cfg.Region,
+			"configFile", configFile,
+		)
+		os.Exit(1)
+	}
+
+	setupLog.Info("Starting KOptimizer",
+		"mode", cfg.Mode,
+		"cloudProvider", cfg.CloudProvider,
+		"region", cfg.Region,
+	)
 
 	// Start the async writer background goroutine
 	ctx, cancel := context.WithCancel(context.Background())
@@ -346,7 +393,7 @@ func main() {
 	// Start REST API server
 	var apiSrv *http.Server
 	if cfg.APIServer.Enabled {
-		apiSrv = apiserver.NewServer(cfg, clusterState, provider, guard, mgr.GetClient(), costStore, metricsStore)
+		apiSrv = apiserver.NewServer(cfg, clusterState, provider, guard, mgr.GetClient(), costStore, metricsStore, settingsStore)
 		go func() {
 			addr := fmt.Sprintf("%s:%d", cfg.APIServer.Address, cfg.APIServer.Port)
 			setupLog.Info("Starting API server", "address", addr)

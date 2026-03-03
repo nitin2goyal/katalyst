@@ -10,17 +10,19 @@ import (
 
 	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/internal/state"
+	"github.com/koptimizer/koptimizer/internal/store"
 )
 
 // NotificationHandler handles notification/alert queries.
 type NotificationHandler struct {
 	auditLog *state.AuditLog
 	cfg      *config.Config
+	settings *store.SettingsStore
 }
 
 // NewNotificationHandler creates a new NotificationHandler.
-func NewNotificationHandler(auditLog *state.AuditLog, cfg *config.Config) *NotificationHandler {
-	return &NotificationHandler{auditLog: auditLog, cfg: cfg}
+func NewNotificationHandler(auditLog *state.AuditLog, cfg *config.Config, settings *store.SettingsStore) *NotificationHandler {
+	return &NotificationHandler{auditLog: auditLog, cfg: cfg, settings: settings}
 }
 
 // severityCategory maps known action prefixes to their severity and category.
@@ -175,6 +177,7 @@ func (h *NotificationHandler) AddChannel(w http.ResponseWriter, r *http.Request)
 		Enabled: true,
 	}
 	h.cfg.Alerts.Channels = append(h.cfg.Alerts.Channels, ch)
+	h.settings.SaveChannels(h.cfg.Alerts.Channels)
 	idx := len(h.cfg.Alerts.Channels) - 1
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -196,6 +199,7 @@ func (h *NotificationHandler) DeleteChannel(w http.ResponseWriter, r *http.Reque
 	}
 
 	h.cfg.Alerts.Channels = append(h.cfg.Alerts.Channels[:idx], h.cfg.Alerts.Channels[idx+1:]...)
+	h.settings.SaveChannels(h.cfg.Alerts.Channels)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -218,6 +222,7 @@ func (h *NotificationHandler) ToggleChannel(w http.ResponseWriter, r *http.Reque
 	}
 
 	h.cfg.Alerts.Channels[idx].Enabled = req.Enabled
+	h.settings.SaveChannels(h.cfg.Alerts.Channels)
 
 	ch := h.cfg.Alerts.Channels[idx]
 	writeJSON(w, http.StatusOK, map[string]interface{}{

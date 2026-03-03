@@ -123,19 +123,21 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		} else {
 			appCount++
 		}
-		var diskUsage int64
-		if ps, ok := podStateMap[pod.Namespace+"/"+pod.Name]; ok {
-			diskUsage = ps.DiskUsage
-		}
-		pods = append(pods, map[string]interface{}{
+		p := map[string]interface{}{
 			"name":       pod.Name,
 			"namespace":  pod.Namespace,
 			"cpuRequest": fmt.Sprintf("%dm", cpuMilli),
 			"memRequest": formatMemory(memBytes),
-			"diskUsage":  diskUsage,
 			"status":     status,
 			"isSystem":   isSys,
-		})
+		}
+		// Include actual utilization and disk usage from metrics-server
+		if ps, ok := podStateMap[pod.Namespace+"/"+pod.Name]; ok {
+			p["cpuUsed"] = ps.CPUUsage    // millicores
+			p["memUsed"] = ps.MemoryUsage // bytes
+			p["diskUsage"] = ps.DiskUsage
+		}
+		pods = append(pods, p)
 	}
 	resp["pods"] = pods
 	resp["appPodCount"] = appCount

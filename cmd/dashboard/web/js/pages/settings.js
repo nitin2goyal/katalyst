@@ -141,7 +141,8 @@ export async function renderSettings() {
 
       <div class="card">
         <h2>Controllers</h2>
-        <div class="controllers-grid" id="controllers-grid"></div>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Enable or disable individual optimization controllers. Changes take effect immediately.</p>
+        <div id="controllers-section"></div>
       </div>
 
       <div class="card">
@@ -205,16 +206,72 @@ export async function renderSettings() {
 
     `;
 
-    // Controllers grid
-    const cg = $('#controllers-grid');
-    const ctrlNames = Object.keys(controllers);
-    cg.innerHTML = ctrlNames.map(name => {
-      const enabled = controllers[name];
-      return `<div class="controller-item">
-        <div class="controller-name">${name}</div>
-        <div>${enabled ? badge('Enabled', 'green') : badge('Disabled', 'gray')}</div>
+    // Controllers — categorized by risk level with toggles
+    const controllerMeta = {
+      costMonitor:    { label: 'Cost Monitor',      desc: 'Tracks cluster cost data and trends',                        category: 'monitoring' },
+      nodegroupMgr:   { label: 'Node Group Manager', desc: 'Adjusts node group min counts based on utilization',         category: 'non-intrusive' },
+      gpu:            { label: 'GPU Optimizer',      desc: 'Optimizes GPU node scheduling and utilization',              category: 'non-intrusive' },
+      commitments:    { label: 'Commitments',        desc: 'Monitors reserved instance and CUD coverage',               category: 'monitoring' },
+      nodeAutoscaler: { label: 'Node Autoscaler',    desc: 'Scales nodes up/down based on utilization thresholds',       category: 'mildly-intrusive' },
+      evictor:        { label: 'Evictor',            desc: 'Drains underutilized nodes to consolidate workloads',        category: 'mildly-intrusive' },
+      rebalancer:     { label: 'Rebalancer',         desc: 'Rebalances pods across nodes for better distribution',       category: 'mildly-intrusive' },
+      rightsizer:     { label: 'Rightsizer',          desc: 'Adjusts workload CPU/memory requests to match actual usage', category: 'intrusive' },
+      workloadScaler: { label: 'Workload Scaler',    desc: 'Scales workload replicas and configures HPAs',               category: 'intrusive' },
+      aiGate:         { label: 'AI Safety Gate',      desc: 'AI review for high-impact changes (cost >$500 or >3 nodes)', category: 'safety' },
+    };
+
+    const categories = [
+      { key: 'monitoring',        label: 'Monitoring',                      color: 'blue',  desc: 'Read-only data collection — no cluster changes' },
+      { key: 'non-intrusive',     label: 'Non-Intrusive',                   color: 'green', desc: 'Adjusts infrastructure settings, does not move or restart pods' },
+      { key: 'mildly-intrusive',  label: 'Mildly Intrusive',                color: 'amber', desc: 'May move pods between nodes but does not modify workload specs' },
+      { key: 'intrusive',         label: 'Intrusive',                       color: 'red',   desc: 'Modifies workload specs (requests/limits/replicas) — triggers restarts' },
+      { key: 'safety',            label: 'Safety',                          color: 'purple', desc: 'Safety controls for high-impact actions' },
+    ];
+
+    const cs = $('#controllers-section');
+    cs.innerHTML = categories.map(cat => {
+      const items = Object.entries(controllerMeta).filter(([, m]) => m.category === cat.key);
+      if (!items.length) return '';
+      return `<div style="margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          ${badge(cat.label, cat.color)}
+          <span style="color:var(--text-muted);font-size:12px">${cat.desc}</span>
+        </div>
+        <div class="controllers-grid">${items.map(([name, meta]) => {
+          const enabled = controllers[name] ?? false;
+          return `<div class="controller-item" style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div class="controller-name">${meta.label}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${meta.desc}</div>
+            </div>
+            <button class="btn ${enabled ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle" data-ctrl="${name}" style="min-width:50px">
+              ${enabled ? 'ON' : 'OFF'}
+            </button>
+          </div>`;
+        }).join('')}</div>
       </div>`;
     }).join('');
+
+    // Controller toggle handlers
+    cs.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.ctrl-toggle');
+      if (!btn) return;
+      const name = btn.dataset.ctrl;
+      const newState = !(controllers[name] ?? false);
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        await apiPut(`/config/controllers/${name}`, { enabled: newState });
+        controllers[name] = newState;
+        btn.className = `btn ${newState ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle`;
+        btn.textContent = newState ? 'ON' : 'OFF';
+        toast(`${controllerMeta[name]?.label || name} ${newState ? 'enabled' : 'disabled'}`, 'success');
+      } catch (err) {
+        btn.textContent = controllers[name] ? 'ON' : 'OFF';
+        toast('Failed to toggle controller: ' + err.message, 'error');
+      }
+      btn.disabled = false;
+    });
 
     // Node template cards
     if (templates.length) {

@@ -17,7 +17,7 @@ import (
 )
 
 // NewRouter creates the API router with all endpoints.
-func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cloudprovider.CloudProvider, guard *familylock.FamilyLockGuard, k8sClient client.Client, costStore *store.CostStore, metricsStore *intmetrics.Store) http.Handler {
+func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cloudprovider.CloudProvider, guard *familylock.FamilyLockGuard, k8sClient client.Client, costStore *store.CostStore, metricsStore *intmetrics.Store, settingsStore *store.SettingsStore) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -34,10 +34,10 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	gpuHandler := handler.NewGPUHandler(clusterState)
 	storageHandler := handler.NewStorageHandler(k8sClient, cfg)
 	networkHandler := handler.NewNetworkHandler(clusterState, cfg)
-	configHandler := handler.NewConfigHandler(cfg)
+	configHandler := handler.NewConfigHandler(cfg, settingsStore)
 	auditHandler := handler.NewAuditHandler(clusterState.AuditLog)
 	idleHandler := handler.NewIdleResourceHandler(clusterState, k8sClient, cfg)
-	notifHandler := handler.NewNotificationHandler(clusterState.AuditLog, cfg)
+	notifHandler := handler.NewNotificationHandler(clusterState.AuditLog, cfg, settingsStore)
 	metricsHandler := handler.NewMetricsHandler(clusterState, provider, k8sClient, cfg)
 	policyHandler := handler.NewPolicyHandler(clusterState, cfg)
 	actionsHandler := handler.NewActionsHandler(clusterState, k8sClient)
@@ -106,6 +106,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		r.Get("/config", configHandler.Get)
 		r.Put("/config/mode", configHandler.SetMode)
 		r.Put("/config/pod-purger", configHandler.SetPodPurger)
+		r.Put("/config/controllers/{name}", configHandler.SetController)
 
 		// Audit
 		r.Get("/audit", auditHandler.List)
