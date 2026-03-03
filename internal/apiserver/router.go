@@ -32,7 +32,6 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	workloadHandler := handler.NewWorkloadHandler(clusterState)
 	commitmentHandler := handler.NewCommitmentHandler(provider)
 	gpuHandler := handler.NewGPUHandler(clusterState)
-	spotHandler := handler.NewSpotHandler(clusterState, provider)
 	storageHandler := handler.NewStorageHandler(k8sClient, cfg)
 	networkHandler := handler.NewNetworkHandler(clusterState, cfg)
 	configHandler := handler.NewConfigHandler(cfg)
@@ -95,10 +94,6 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		r.Get("/gpu/nodes", gpuHandler.GetNodes)
 		r.Get("/gpu/utilization", gpuHandler.GetUtilization)
 		r.Get("/gpu/recommendations", gpuHandler.GetRecommendations)
-
-		// Spot instances
-		r.Get("/spot/summary", spotHandler.GetSummary)
-		r.Get("/spot/nodes", spotHandler.GetNodes)
 
 		// Storage
 		r.Get("/storage/summary", storageHandler.GetSummary)

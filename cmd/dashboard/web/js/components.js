@@ -276,8 +276,8 @@ export function attachPagination(tableEl, opts = {}) {
 
   function render() {
     const allRows = Array.from(tbody.querySelectorAll('tr'));
-    // Rows that pass filters (not marked as filtered out)
-    const matchedRows = allRows.filter(r => r.dataset.filtered !== 'hide');
+    // Rows that pass filters (not marked as filtered out); skip empty-state placeholder rows
+    const matchedRows = allRows.filter(r => r.dataset.filtered !== 'hide' && !r.querySelector('td[colspan]'));
     const totalPages = Math.max(1, Math.ceil(matchedRows.length / pageSize));
     if (currentPage > totalPages) currentPage = totalPages;
 

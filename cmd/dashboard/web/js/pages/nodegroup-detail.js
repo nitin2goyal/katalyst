@@ -35,13 +35,13 @@ export async function renderNodeGroupDetail(params) {
           <div class="sc-item"><span class="sc-label">Desired</span><span class="sc-val">${ng.desiredCount ?? ng.currentCount ?? '?'}</span></div>
           <div class="sc-item"><span class="sc-label">Min</span><span class="sc-val">${ng.minCount ?? '?'}</span></div>
           <div class="sc-item"><span class="sc-label">Max</span><span class="sc-val">${ng.maxCount ?? '?'}</span></div>
-          <div class="sc-item"><span class="sc-label">Total Pods</span><span class="sc-val">${ng.totalPods ?? '?'}</span></div>
+          <div class="sc-item"><span class="sc-label">Total Pods</span><span class="sc-val">${ng.totalPods ?? 0}</span></div>
         </div>
       </div>
       <div class="card">
         <h2>Nodes in this Group</h2>
         <div class="table-wrap"><table id="ng-nodes-table">
-          <thead><tr><th>Name</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>Pods</th><th>Spot</th><th>Cost/hr</th></tr></thead>
+          <thead><tr><th>Name</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>Pods</th><th>Cost/hr</th></tr></thead>
           <tbody id="ng-nodes-body"></tbody>
         </table></div>
       </div>`;
@@ -50,9 +50,8 @@ export async function renderNodeGroupDetail(params) {
       <td>${n.name || ''}</td><td>${n.instanceType || ''}</td>
       <td>${utilBar(n.cpuUtilPct)}</td><td>${utilBar(n.memUtilPct)}</td>
       <td>${n.podCount ?? ''}</td>
-      <td>${n.isSpot ? badge('Spot', 'blue') : badge('On-Demand', 'gray')}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
-    </tr>`).join('') : '<tr><td colspan="7" style="color:var(--text-muted)">No nodes in this group</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="6" style="color:var(--text-muted)">No nodes in this group</td></tr>';
 
     makeSortable($('#ng-nodes-table'));
   } catch (e) {

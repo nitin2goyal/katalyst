@@ -229,7 +229,7 @@ export async function renderSettings() {
         return `<div class="template-card">
           <div class="template-header">
             <span class="template-name">${t.name}</span>
-            ${badge(t.capacityType || 'on-demand', t.capacityType === 'spot' ? 'amber' : 'blue')}
+            ${badge(t.capacityType || 'on-demand', 'blue')}
           </div>
           <div class="template-desc">${t.description || ''}</div>
           <div class="template-details">

@@ -544,13 +544,6 @@ func (h *CostHandler) GetImpact(w http.ResponseWriter, r *http.Request) {
 				saving = nodeCost
 			}
 			category = "Consolidation"
-		case containsAction(e.Action, "spot-convert"):
-			// nodeMap values are monthly costs at spot pricing (OD * 0.35).
-			// On-demand equivalent = spotCost / 0.35; savings = OD - spot.
-			if nodeCost, ok := nodeMap[e.Target]; ok {
-				saving = nodeCost/0.35 - nodeCost
-			}
-			category = "Spot Migration"
 		default:
 			// Skip actions we can't reliably estimate
 			continue

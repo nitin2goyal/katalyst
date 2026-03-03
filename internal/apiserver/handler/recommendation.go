@@ -157,7 +157,6 @@ func (h *RecommendationHandler) Debug(w http.ResponseWriter, r *http.Request) {
 	totalNodeMemUsed := int64(0)
 	totalNodeHourly := 0.0
 	emptyNodes := 0
-	spotNodes := 0
 
 	for _, n := range nodes {
 		totalNodeCPUCap += n.CPUCapacity
@@ -170,9 +169,6 @@ func (h *RecommendationHandler) Debug(w http.ResponseWriter, r *http.Request) {
 		}
 		if n.IsEmpty() {
 			emptyNodes++
-		}
-		if n.IsSpot {
-			spotNodes++
 		}
 	}
 
@@ -213,7 +209,6 @@ func (h *RecommendationHandler) Debug(w http.ResponseWriter, r *http.Request) {
 			"total":         len(nodes),
 			"withUsageData": nodesWithUsage,
 			"empty":         emptyNodes,
-			"spot":          spotNodes,
 			"totalCPUCap":   totalNodeCPUCap,
 			"totalCPUUsed":  totalNodeCPUUsed,
 			"cpuUtilPct":    cpuUtilPct,

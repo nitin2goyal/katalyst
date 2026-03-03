@@ -33,7 +33,6 @@ var actionClassification = []struct {
 	{"cost-anomaly", "critical", "cost"},
 	{"oom", "critical", "reliability"},
 	{"error", "critical", "system"},
-	{"spot-convert", "info", "cost"},
 	{"scale-down", "info", "autoscaling"},
 	{"scale-up", "info", "autoscaling"},
 	{"drain", "warning", "node-management"},

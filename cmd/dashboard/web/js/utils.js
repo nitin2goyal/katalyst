@@ -11,6 +11,12 @@ export function toArray(data, ...keys) {
   }
   // Handle paginated response envelope {data: [...], total, page, ...}
   if (Array.isArray(data.data)) return data.data;
+  // Handle nested envelope {data: {key: [...]}, total, page, ...}
+  if (data.data != null && typeof data.data === 'object') {
+    for (const k of keys) {
+      if (Array.isArray(data.data[k])) return data.data[k];
+    }
+  }
   return [];
 }
 

@@ -17,6 +17,8 @@ export async function renderSavings(targetEl) {
       const computed = await computeRecommendations();
       list = computed.opportunities;
     }
+    // Filter out spot recommendations (spot feature removed)
+    list = list.filter(s => s.type !== 'spot');
     const cs = costSummary || {};
     
     // Calculate category totals
@@ -46,10 +48,6 @@ export async function renderSavings(targetEl) {
           <h2>Scenario Simulator</h2>
           <div class="scenario-sim">
             <div class="sim-control">
-              <label>Spot Instance Adoption</label>
-              <div class="sim-row"><input type="range" id="sim-spot" min="0" max="100" value="30" class="sim-slider"><span id="sim-spot-val" class="sim-val">30%</span></div>
-            </div>
-            <div class="sim-control">
               <label>Rightsizing Aggressiveness</label>
               <div class="sim-row"><input type="range" id="sim-rs" min="0" max="100" value="50" class="sim-slider"><span id="sim-rs-val" class="sim-val">50%</span></div>
             </div>
@@ -78,7 +76,7 @@ export async function renderSavings(targetEl) {
 
     // Category chart
     const catLabels = Object.keys(categories);
-    const catColors = { rightsizing: '#4361ee', spot: '#10b981', commitment: '#f59e0b', consolidation: '#8b5cf6', other: '#94a3b8' };
+    const catColors = { rightsizing: '#4361ee', commitment: '#f59e0b', consolidation: '#8b5cf6', other: '#94a3b8' };
     if (catLabels.length) {
       makeChart('savings-cat-chart', {
         type: 'bar',
@@ -105,7 +103,6 @@ export async function renderSavings(targetEl) {
       // Parse namespace/kind/name pattern for workload drilldown
       const parts = name.split('/');
       if (parts.length === 3) return `<a href="#/workloads/${parts[0]}/${parts[1]}/${parts[2]}" class="btn btn-gray btn-sm">View</a>`;
-      if (s.type === 'spot') return `<a href="#/infrastructure/spot" class="btn btn-gray btn-sm">View</a>`;
       return `<a href="#/resources/recommendations" class="btn btn-gray btn-sm">View</a>`;
     };
     $('#savings-detail-body').innerHTML = list.length ? list.map(s => {
@@ -127,26 +124,21 @@ export async function renderSavings(targetEl) {
     if (fb) attachFilterHandlers(fb, $('#savings-detail-table'), sPag);
 
     // Scenario simulator interactivity
-    const spotSlider = $('#sim-spot');
     const rsSlider = $('#sim-rs');
     const commitSlider = $('#sim-commit');
     function updateSim() {
-      const spotPct = parseInt(spotSlider.value) / 100;
       const rsPct = parseInt(rsSlider.value) / 100;
       const commitPct = parseInt(commitSlider.value) / 100;
-      $('#sim-spot-val').textContent = spotSlider.value + '%';
       $('#sim-rs-val').textContent = rsSlider.value + '%';
       $('#sim-commit-val').textContent = commitSlider.value + '%';
-      const spotSave = (categories['spot'] || 0) * spotPct / 0.3;
       const rsSave = (categories['rightsizing'] || 0) * rsPct / 0.5;
       const commitSave = (categories['commitment'] || 0) * commitPct / 0.4;
       const otherSave = (categories['consolidation'] || 0) + (categories['other'] || 0);
-      const simTotal = spotSave + rsSave + commitSave + otherSave;
+      const simTotal = rsSave + commitSave + otherSave;
       const simPct = projected > 0 ? (simTotal / projected * 100) : 0;
       $('#sim-total').textContent = fmt$(simTotal);
       $('#sim-pct').textContent = fmtPct(simPct) + ' reduction';
     }
-    spotSlider?.addEventListener('input', updateSim);
     rsSlider?.addEventListener('input', updateSim);
     commitSlider?.addEventListener('input', updateSim);
 

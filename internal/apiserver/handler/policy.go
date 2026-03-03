@@ -86,15 +86,6 @@ func (h *PolicyHandler) Get(w http.ResponseWriter, r *http.Request) {
 			Enabled:     true,
 		})
 	}
-	if h.cfg.Spot.Enabled {
-		policies = append(policies, policy{
-			Name:        "Spot Tolerance",
-			Description: "Allow non-critical workloads on spot instances",
-			Type:        "toleration",
-			Target:      "*/*",
-			Enabled:     true,
-		})
-	}
 	if h.cfg.Evictor.Enabled {
 		policies = append(policies, policy{
 			Name:        "Node Consolidation",

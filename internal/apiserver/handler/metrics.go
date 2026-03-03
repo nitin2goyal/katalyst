@@ -41,7 +41,6 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Cluster-level metrics
 	var totalCPU, totalMem, usedCPU, usedMem, reqCPU, reqMem int64
 	totalHourlyCost := 0.0
-	spotNodes := 0
 	gpuNodes := 0
 	var totalGPUUtil float64
 	gpuNodeCount := 0
@@ -54,9 +53,6 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		reqCPU += n.CPURequested
 		reqMem += n.MemoryRequested
 		totalHourlyCost += n.HourlyCostUSD
-		if n.IsSpot {
-			spotNodes++
-		}
 		if n.IsGPUNode {
 			gpuNodes++
 			if n.GPUCapacity > 0 {
@@ -69,7 +65,6 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeProm(&b, "koptimizer_cluster_nodes_total", "gauge", "Total number of nodes in the cluster", float64(len(nodes)))
 	writeProm(&b, "koptimizer_cluster_pods_total", "gauge", "Total number of running pods", float64(len(pods)))
 	writeProm(&b, "koptimizer_cluster_nodegroups_total", "gauge", "Total number of node groups", float64(len(nodeGroups)))
-	writeProm(&b, "koptimizer_cluster_spot_nodes_total", "gauge", "Total number of spot nodes", float64(spotNodes))
 	writeProm(&b, "koptimizer_cluster_gpu_nodes_total", "gauge", "Total number of GPU nodes", float64(gpuNodes))
 
 	// Cost metrics
@@ -185,11 +180,6 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		gpuUtil = totalGPUUtil / float64(gpuNodeCount)
 	}
 	writeProm(&b, "koptimizer_gpu_utilization_pct", "gauge", "GPU utilization percentage", gpuUtil)
-
-	// Spot ratio
-	if len(nodes) > 0 {
-		writeProm(&b, "koptimizer_spot_ratio", "gauge", "Ratio of spot nodes to total nodes", float64(spotNodes)/float64(len(nodes)))
-	}
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

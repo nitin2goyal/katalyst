@@ -45,9 +45,6 @@ const (
 	minNodeDataPoints = 360  // 6h at 60s intervals
 	minPodDataPoints  = 1440 // 24h at 60s intervals
 
-	// Default estimated spot discount (varies 40-90% by instance family).
-	// Used when no cloud-provider-specific estimator is available.
-	defaultSpotDiscount = 0.60
 )
 
 var systemNamespaces = map[string]bool{
@@ -91,7 +88,6 @@ func computeFromData(nodes []*state.NodeState, pods []*state.PodState, nodeGroup
 
 	recs = appendEmptyNodeRecs(recs, nodes, now)
 	recs = appendUnderutilizedNodeRecs(recs, nodes, now, metricsStore)
-	recs = appendSpotAdoptionRecs(recs, nodes, now)
 	recs = appendPodRightsizingRecs(recs, nodes, pods, now, metricsStore)
 	recs = appendNodeGroupRightsizingRecs(recs, nodeGroups, now, metricsStore)
 
@@ -191,58 +187,7 @@ func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.N
 	return recs
 }
 
-// --- Algorithm 3: Spot adoption ---
-
-func appendSpotAdoptionRecs(recs []ComputedRecommendation, nodes []*state.NodeState, now string) []ComputedRecommendation {
-	type spotGroup struct {
-		totalHourly float64
-		count       int
-		groupName   string
-	}
-	groups := make(map[string]*spotGroup)
-	for _, n := range nodes {
-		if n.IsGPUNode || n.IsSpot {
-			continue
-		}
-		gid := n.NodeGroupID
-		groupName := n.NodeGroupName
-		if gid == "" {
-			gid = "ungrouped-" + n.InstanceType
-			groupName = n.InstanceType + " (ungrouped)"
-		}
-		if groupName == "" {
-			groupName = gid
-		}
-		sg, ok := groups[gid]
-		if !ok {
-			sg = &spotGroup{groupName: groupName}
-			groups[gid] = sg
-		}
-		sg.totalHourly += n.HourlyCostUSD
-		sg.count++
-	}
-	for gid, sg := range groups {
-		savings := sg.totalHourly * defaultSpotDiscount * cost.HoursPerMonth
-		if savings < minSavingsThreshold {
-			continue
-		}
-		discountPct := int(defaultSpotDiscount * 100)
-		recs = append(recs, ComputedRecommendation{
-			ID:               computedID("spot", gid),
-			Type:             "spot",
-			Target:           sg.groupName,
-			Description:      fmt.Sprintf("Convert %d on-demand nodes (%s) to spot instances to save $%.0f/mo (est. %d%% discount).", sg.count, sg.groupName, savings, discountPct),
-			EstimatedSavings: roundCents(savings),
-			Status:           "pending",
-			Priority:         "medium",
-			CreatedAt:        now,
-			Confidence:       0.70,
-		})
-	}
-	return recs
-}
-
-// --- Algorithm 4: Pod rightsizing ---
+// --- Algorithm 3: Pod rightsizing ---
 // Uses P95 over 24h when historical data is available.
 
 func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.NodeState, pods []*state.PodState, now string, metricsStore *intmetrics.Store) []ComputedRecommendation {
@@ -543,7 +488,7 @@ func ComputeTotalPotentialSavings(recs []ComputedRecommendation) float64 {
 	// individual nodes that are covered by a nodegroup recommendation.
 	nodegroupTargets := make(map[string]bool)
 	for _, r := range recs {
-		if r.Type == "consolidation" || r.Type == "spot" {
+		if r.Type == "consolidation" {
 			// Nodegroup targets don't contain "/" (individual nodes/workloads do)
 			if !strings.Contains(r.Target, "/") && !strings.HasPrefix(r.Target, "gke-") && !strings.HasPrefix(r.Target, "eks-") && !strings.HasPrefix(r.Target, "aks-") {
 				nodegroupTargets[r.Target] = true

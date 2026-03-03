@@ -23,6 +23,8 @@ export async function renderRecsTab(targetEl) {
       recList = computed.recommendations;
       _isComputed = true;
     }
+    // Filter out spot recommendations (spot feature removed)
+    recList = recList.filter(r => (r.type || r.Type) !== 'spot');
     const pending = recList.filter(r => (r.status || r.Status) === 'pending').length;
     const approved = recList.filter(r => (r.status || r.Status) === 'approved').length;
     const totalSavings = recList.reduce((s, r) => s + (r.estimatedSavings || 0), 0);
@@ -35,7 +37,6 @@ export async function renderRecsTab(targetEl) {
     const avgNodeCPU = nodeList.length ? nodeList.reduce((s, n) => s + ((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100), 0) / nodeList.length : 0;
     const avgNodeMem = nodeList.length ? nodeList.reduce((s, n) => s + ((n.memUsed || 0) / (n.memCapacity || 1) * 100), 0) / nodeList.length : 0;
     const emptyNodes = nodeList.filter(n => (n.podCount || 0) === 0).length;
-    const spotNodes = nodeList.filter(n => n.isSpot).length;
     const gpuNodes = nodeList.filter(n => n.isGPU).length;
     const recsByType = {};
     recList.forEach(r => { const t = r.type || r.Type || '?'; recsByType[t] = (recsByType[t] || 0) + 1; });
@@ -60,7 +61,7 @@ export async function renderRecsTab(targetEl) {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
             <div><strong>Data Source:</strong> ${debugSrc}</div>
             <div><strong>Summary API:</strong> ${summary ? JSON.stringify(summary) : 'null/empty'}</div>
-            <div><strong>Nodes:</strong> ${nodeList.length} total, ${emptyNodes} empty, ${spotNodes} spot, ${gpuNodes} GPU</div>
+            <div><strong>Nodes:</strong> ${nodeList.length} total, ${emptyNodes} empty, ${gpuNodes} GPU</div>
             <div><strong>Node Metrics:</strong> ${nodesWithUsage}/${nodeList.length} have usage data</div>
             <div><strong>Avg Node Util:</strong> CPU ${avgNodeCPU.toFixed(1)}%, Mem ${avgNodeMem.toFixed(1)}%</div>
             <div><strong>Total Cluster Cost:</strong> ${fmt$(totalNodeCost)}/mo (from node hourly costs)</div>

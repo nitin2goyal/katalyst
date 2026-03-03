@@ -178,7 +178,7 @@ func (h *ClusterHandler) GetScore(w http.ResponseWriter, r *http.Request) {
 
 	// Aggregate cluster-wide metrics from real node state.
 	var totalCPU, totalMem, usedCPU, usedMem, reqCPU, reqMem int64
-	var spotCount, underutilCount int
+	var underutilCount int
 
 	for _, n := range nodes {
 		totalCPU += n.CPUCapacity
@@ -187,9 +187,6 @@ func (h *ClusterHandler) GetScore(w http.ResponseWriter, r *http.Request) {
 		usedMem += n.MemoryUsed
 		reqCPU += n.CPURequested
 		reqMem += n.MemoryRequested
-		if n.IsSpot {
-			spotCount++
-		}
 		if n.IsUnderutilized(50.0) {
 			underutilCount++
 		}
@@ -199,7 +196,6 @@ func (h *ClusterHandler) GetScore(w http.ResponseWriter, r *http.Request) {
 	memUtil := safePct(usedMem, totalMem)
 	cpuAlloc := safePct(reqCPU, totalCPU)
 	memAlloc := safePct(reqMem, totalMem)
-	spotPct := safePctInt(spotCount, totalNodes)
 
 	// Count over-provisioned pods (using <50% of their requests).
 	var overProvCPU, overProvMem, rightsizable int
@@ -227,16 +223,11 @@ func (h *ClusterHandler) GetScore(w http.ResponseWriter, r *http.Request) {
 			provFindings = append(provFindings,
 				fmt.Sprintf("%d of %d nodes have CPU utilization below 50%%", underutilCount, totalNodes))
 		}
-		if spotPct < 30 {
-			provScore -= (30 - spotPct) / 30 * 1.5
-			provFindings = append(provFindings,
-				fmt.Sprintf("Spot instances cover %.0f%% of nodes (target: 30%%+)", spotPct))
-		}
 	}
 	provScore = clampScore(provScore)
 	provDetails := "Node groups are well-sized with good utilization"
 	if underutilCount > 0 {
-		provDetails = fmt.Sprintf("%d nodes underutilized, spot coverage at %.0f%%", underutilCount, spotPct)
+		provDetails = fmt.Sprintf("%d nodes underutilized", underutilCount)
 	}
 
 	// ── 2. Workload Optimization Score (0-10) ──
@@ -273,11 +264,6 @@ func (h *ClusterHandler) GetScore(w http.ResponseWriter, r *http.Request) {
 	avgUtil := (cpuUtil + memUtil) / 2
 	if avgUtil < 70 {
 		ceScore -= (70 - avgUtil) / 70 * 3
-	}
-	if spotPct < 20 {
-		ceScore -= (20 - spotPct) / 20 * 2
-		ceFindings = append(ceFindings,
-			fmt.Sprintf("Only %.0f%% spot nodes — increasing spot coverage reduces costs", spotPct))
 	}
 	ceScore = clampScore(ceScore)
 	ceDetails := fmt.Sprintf("Average resource utilization at %.1f%%", avgUtil)
@@ -384,7 +370,7 @@ func (h *ClusterHandler) GetDiagnostics(w http.ResponseWriter, r *http.Request) 
 		stat["memRequestBytes"] = stat["memRequestBytes"].(int64) + p.MemoryRequest
 	}
 
-	// Top 5 nodes by pod count for spot check
+	// Top 5 nodes by pod count
 	type nodeDebug struct {
 		Name         string `json:"name"`
 		PodCount     int    `json:"podCount"`

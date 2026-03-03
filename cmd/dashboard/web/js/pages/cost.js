@@ -73,6 +73,8 @@ async function renderCostDashboard(targetEl) {
       const computed = await computeRecommendations();
       savingsList = computed.opportunities;
     }
+    // Filter out spot recommendations (spot feature removed)
+    savingsList = savingsList.filter(s => s.type !== 'spot');
     const totalIdentified = savingsList.reduce((s, r) => s + (r.estimatedSavings || r.savings || 0), 0);
 
     // Parse namespace cost — API may return {data:[{namespace,monthlyCostUSD}]} or flat {ns:cost}
@@ -192,7 +194,6 @@ async function renderCostDashboard(targetEl) {
         const parts = name.split('/');
         const action = parts.length === 3
           ? `<a href="#/workloads/${parts[0]}/${parts[1]}/${parts[2]}" class="btn btn-gray btn-sm">View</a>`
-          : s.type === 'spot' ? `<a href="#/infrastructure/spot" class="btn btn-gray btn-sm">View</a>`
           : `<a href="#/resources/recommendations" class="btn btn-gray btn-sm">View</a>`;
         return `<tr class="savings-row">
           <td>${badge(s.type || 'optimization', 'green')}</td>

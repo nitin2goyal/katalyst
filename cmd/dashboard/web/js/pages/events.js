@@ -30,7 +30,11 @@ export async function renderEvents(targetEl) {
   const container = () => targetEl || $('#page-container');
   container().innerHTML = skeleton(5);
   try {
-    const data = await api('/events').catch(() => api('/audit').catch(() => []));
+    const [data, cfg] = await Promise.all([
+      api('/events').catch(() => api('/audit').catch(() => [])),
+      api('/config').catch(() => ({})),
+    ]);
+    const mode = ((cfg && cfg.mode) || 'recommend').toUpperCase();
     const events = toArray(data, 'events');
     const today = new Date().toDateString();
     const todayEvents = events.filter(e => new Date(e.timestamp).toDateString() === today);
@@ -50,7 +54,7 @@ export async function renderEvents(targetEl) {
         <div class="kpi-card"><div class="label">Total Events</div><div class="value blue">${events.length}</div></div>
         <div class="kpi-card"><div class="label">Today</div><div class="value">${todayEvents.length}</div></div>
         <div class="kpi-card"><div class="label">Actionable</div><div class="value amber">${actionableEvents.length}</div></div>
-        <div class="kpi-card"><div class="label">Mode</div><div class="value">RECOMMEND</div><div class="sub">dry-run only</div></div>
+        <div class="kpi-card"><div class="label">Mode</div><div class="value">${mode}</div><div class="sub">${mode === 'RECOMMEND' ? 'dry-run only' : 'active'}</div></div>
       </div>
       <div class="card">
         ${cardHeader('Activity Stream')}

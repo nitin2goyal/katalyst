@@ -66,29 +66,7 @@ export async function computeRecommendations() {
     });
   }
 
-  // 3. Spot adoption — on-demand non-GPU nodes grouped by node group
-  const spotGroups = {};
-  for (const n of nodeList) {
-    if (n.isGPU || n.isSpot) continue;
-    const gid = n.nodeGroup || n.nodeGroupId || 'ungrouped-' + (n.instanceType || 'unknown');
-    if (!spotGroups[gid]) spotGroups[gid] = { name: n.nodeGroup || gid, count: 0, hourly: 0 };
-    spotGroups[gid].count++;
-    spotGroups[gid].hourly += (n.hourlyCostUSD || 0);
-  }
-  for (const [gid, sg] of Object.entries(spotGroups)) {
-    const savings = sg.hourly * 0.65 * HOURS_PER_MONTH;
-    if (savings < MIN_SAVINGS) continue;
-    recs.push({
-      id: hashId('spot', gid),
-      type: 'spot',
-      target: sg.name,
-      description: `Convert ${sg.count} on-demand nodes (${sg.name}) to spot instances to save $${Math.round(savings)}/mo (est. 65% discount).`,
-      estimatedSavings: round2(savings),
-      status: 'pending', priority: 'medium', createdAt: now, confidence: 75,
-    });
-  }
-
-  // 4. Node group rightsizing — groups with both CPU & mem util < 25%
+  // 3. Node group rightsizing — groups with both CPU & mem util < 25%
   for (const ng of ngList) {
     const count = ng.currentCount || 0;
     if (count < 2) continue;
@@ -118,7 +96,7 @@ export async function computeRecommendations() {
   // Sort by savings desc
   recs.sort((a, b) => b.estimatedSavings - a.estimatedSavings);
 
-  // Dedup by target (take max) to avoid counting consolidation + spot for same group
+  // Dedup by target (take max) to avoid double-counting for same group
   const bestByTarget = {};
   for (const r of recs) {
     if (!bestByTarget[r.target] || r.estimatedSavings > bestByTarget[r.target]) {

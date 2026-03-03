@@ -243,45 +243,6 @@ func TestUnderutilizedNodeRecs(t *testing.T) {
 	}
 }
 
-func TestSpotAdoptionRecs(t *testing.T) {
-	n1 := makeNode("od-1", 4000, 8e9, 2000, 4e9, 0.10,
-		withNodeGroup("ng-1", "web-pool"),
-		withPods(makeWorkloadPod("default", "p1", "1000m")))
-	n2 := makeNode("od-2", 4000, 8e9, 2000, 4e9, 0.10,
-		withNodeGroup("ng-1", "web-pool"),
-		withPods(makeWorkloadPod("default", "p2", "1000m")))
-	// Already spot → skip
-	spotNode := makeNode("spot-1", 4000, 8e9, 2000, 4e9, 0.05,
-		withSpot, withNodeGroup("ng-2", "spot-pool"),
-		withPods(makeWorkloadPod("default", "p3", "1000m")))
-	// GPU → skip
-	gpuNode := makeNode("gpu-2", 8000, 16e9, 4000, 8e9, 0.50,
-		withGPU, withNodeGroup("ng-3", "gpu-pool"),
-		withPods(makeWorkloadPod("default", "p4", "2000m")))
-
-	recs := computeFromData(
-		[]*state.NodeState{n1, n2, spotNode, gpuNode},
-		nil, nil, nil,
-	)
-
-	spotRecs := 0
-	for _, r := range recs {
-		if r.Type == "spot" {
-			spotRecs++
-			if r.Target != "web-pool" {
-				t.Errorf("spot rec target: got %s, want web-pool", r.Target)
-			}
-			// 2 nodes * $0.10/h * 0.60 * 730.5 = $87.66
-			if r.EstimatedSavings < 83 || r.EstimatedSavings > 92 {
-				t.Errorf("spot savings: got %.2f, want ~88", r.EstimatedSavings)
-			}
-		}
-	}
-	if spotRecs != 1 {
-		t.Errorf("expected 1 spot rec, got %d", spotRecs)
-	}
-}
-
 func TestPodRightsizingRecs(t *testing.T) {
 	node := makeNode("n1", 16000, 64e9, 1000, 2e9, 1.00,
 		withPods(makeWorkloadPod("app", "web-1", "4000m")))
@@ -410,7 +371,7 @@ func TestDeterministicIDs(t *testing.T) {
 func TestComputeSavingsOpportunities(t *testing.T) {
 	recs := []ComputedRecommendation{
 		{Type: "consolidation", Target: "node-1", Description: "desc-1", EstimatedSavings: 100},
-		{Type: "spot", Target: "ng-1", Description: "desc-2", EstimatedSavings: 200},
+		{Type: "rightsizing", Target: "wl-1", Description: "desc-2", EstimatedSavings: 200},
 	}
 	opps := ComputeSavingsOpportunities(recs)
 	if len(opps) != 2 {
@@ -424,7 +385,7 @@ func TestComputeSavingsOpportunities(t *testing.T) {
 func TestComputeTotalPotentialSavings(t *testing.T) {
 	recs := []ComputedRecommendation{
 		{Type: "consolidation", Target: "node-1", EstimatedSavings: 100.50},
-		{Type: "spot", Target: "ng-1", EstimatedSavings: 200.25},
+		{Type: "consolidation", Target: "ng-1", EstimatedSavings: 200.25},
 		{Type: "rightsizing", Target: "wl-1", EstimatedSavings: 50.00},
 	}
 	total := ComputeTotalPotentialSavings(recs)
@@ -438,7 +399,7 @@ func TestComputeTotalPotentialSavings_Dedup(t *testing.T) {
 	recs := []ComputedRecommendation{
 		{Type: "consolidation", Target: "node-1", EstimatedSavings: 100.00},
 		{Type: "consolidation", Target: "node-1", EstimatedSavings: 150.00},
-		{Type: "spot", Target: "ng-1", EstimatedSavings: 200.00},
+		{Type: "rightsizing", Target: "wl-1", EstimatedSavings: 200.00},
 	}
 	total := ComputeTotalPotentialSavings(recs)
 	if total != 350.00 {
@@ -450,7 +411,7 @@ func TestComputeTotalPotentialSavings_MultipleTargets(t *testing.T) {
 	recs := []ComputedRecommendation{
 		{Type: "consolidation", Target: "node-1", EstimatedSavings: 5000},
 		{Type: "rightsizing", Target: "wl-1", EstimatedSavings: 8000},
-		{Type: "spot", Target: "ng-1", EstimatedSavings: 3000},
+		{Type: "consolidation", Target: "ng-1", EstimatedSavings: 3000},
 	}
 	total := ComputeTotalPotentialSavings(recs)
 	if total != 16000 {
@@ -458,11 +419,11 @@ func TestComputeTotalPotentialSavings_MultipleTargets(t *testing.T) {
 	}
 }
 
-func TestComputeTotalPotentialSavings_SpotAndConsolidationDedup(t *testing.T) {
-	// Same target with consolidation AND spot should only count once (max)
+func TestComputeTotalPotentialSavings_SameTargetDedup(t *testing.T) {
+	// Same target with two recommendations should only count once (max)
 	recs := []ComputedRecommendation{
 		{Type: "consolidation", Target: "my-nodegroup", EstimatedSavings: 4000},
-		{Type: "spot", Target: "my-nodegroup", EstimatedSavings: 3000},
+		{Type: "consolidation", Target: "my-nodegroup", EstimatedSavings: 3000},
 	}
 	total := ComputeTotalPotentialSavings(recs)
 	if total != 4000 {

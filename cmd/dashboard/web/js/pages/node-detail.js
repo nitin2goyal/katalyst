@@ -29,7 +29,6 @@ export async function renderNodeDetail(params) {
         <div class="kpi-card"><div class="label">Pod Count</div><div class="value blue">${node.appPodCount != null ? node.appPodCount + ' <span style="font-size:0.6em;color:var(--text-muted)">+ ' + (node.systemPodCount || 0) + ' sys</span>' : (node.podCount ?? pods.length)}</div></div>
         <div class="kpi-card"><div class="label">Boot Disk</div><div class="value" style="font-size:0.9rem">${node.diskType ? (node.diskType.replace(/^pd-/, 'PD ').replace(/^hyperdisk-/, 'Hyperdisk ').replace(/\b\w/g, c => c.toUpperCase())) + (node.diskSizeGB ? ' ' + node.diskSizeGB + 'G' : '') : '-'}</div></div>
         <div class="kpi-card"><div class="label">Hourly Cost</div><div class="value">${fmt$(node.hourlyCostUSD)}</div></div>
-        <div class="kpi-card"><div class="label">Spot</div><div class="value">${node.isSpot ? badge('Spot', 'blue') : badge('On-Demand', 'gray')}</div></div>
       </div>
       ${disks.length ? `<div class="card">
         <h2>Attached disks <span style="font-weight:400;font-size:12px;color:var(--text-muted)">${disks.length} disk${disks.length > 1 ? 's' : ''} &middot; ${totalDiskGiB} GiB total</span></h2>

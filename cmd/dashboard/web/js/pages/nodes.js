@@ -21,9 +21,8 @@ export async function renderNodes(targetEl) {
     const emptyList = toArray(empty, 'nodeGroups');
     const emptyNames = new Set(emptyList.map(e => e.name || e.id));
 
-    // Collect unique node groups and spot/on-demand for filters
+    // Collect unique node groups for filters
     const nodeGroups = [...new Set(nodeList.map(n => n.nodeGroup).filter(Boolean))];
-    const spotTypes = ['Spot', 'On-Demand'];
 
     // Compute cluster totals from node list
     const totalCPU = nodeList.reduce((s, n) => s + (n.cpuCapacity || 0), 0);
@@ -53,11 +52,10 @@ export async function renderNodes(targetEl) {
           placeholder: 'Search nodes...',
           filters: [
             { key: '1', label: 'Node Group', options: nodeGroups },
-            { key: '10', label: 'Type', options: spotTypes },
           ]
         })}
         <div class="table-wrap"><table id="node-table">
-          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>Disk</th><th>Disk Util</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Spot</th><th>Cost/hr</th></tr></thead>
+          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>Disk</th><th>Disk Util</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Cost/hr</th></tr></thead>
           <tbody id="node-body"></tbody>
         </table></div>
       </div>`;
@@ -90,9 +88,8 @@ export async function renderNodes(targetEl) {
       <td><strong class="${utilClass(n.cpuAllocPct || 0)}">${fmtPct(n.cpuAllocPct)}</strong></td>
       <td><strong class="${utilClass(n.memAllocPct || 0)}">${fmtPct(n.memAllocPct)}</strong></td>
       <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span style="color:var(--text-muted)">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
-      <td>${n.isSpot ? badge('Spot', 'blue') : badge('On-Demand', 'gray')}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
-    </tr>`).join('') : '<tr><td colspan="12" style="color:var(--text-muted)">No nodes</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="11" style="color:var(--text-muted)">No nodes</td></tr>';
 
     makeSortable($('#ng-table'));
     makeSortable($('#node-table'));
@@ -109,8 +106,8 @@ export async function renderNodes(targetEl) {
         'koptimizer-nodegroups.csv');
     };
     window.__exportNodesCSV = () => {
-      exportCSV(['Name', 'Node Group', 'Instance Type', 'Disk Type', 'Disk Size (GB)', 'Disk Util %', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'App Pods', 'System Pods', 'Total Pods', 'Spot', 'Cost/hr'],
-        nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, n.diskType || '', n.diskSizeGB || '', (n.diskUtilPct||0).toFixed(1), (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), (n.cpuAllocPct||0).toFixed(1), (n.memAllocPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.isSpot ? 'Yes' : 'No', n.hourlyCostUSD]),
+      exportCSV(['Name', 'Node Group', 'Instance Type', 'Disk Type', 'Disk Size (GB)', 'Disk Util %', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'App Pods', 'System Pods', 'Total Pods', 'Cost/hr'],
+        nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, n.diskType || '', n.diskSizeGB || '', (n.diskUtilPct||0).toFixed(1), (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), (n.cpuAllocPct||0).toFixed(1), (n.memAllocPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.hourlyCostUSD]),
         'koptimizer-nodes.csv');
     };
 
