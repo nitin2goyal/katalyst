@@ -89,6 +89,7 @@ export async function renderSettings() {
     ]);
     const mode = config.mode || 'recommend';
     const controllers = config.controllers || {};
+    const dryRun = config.dryRun || {};
 
     // Policies data
     const templates = policiesData?.nodeTemplates || [];
@@ -223,9 +224,9 @@ export async function renderSettings() {
       nodegroupMgr:   { label: 'Node Group Manager', desc: 'Adjusts node group min counts based on utilization',         category: 'non-intrusive' },
       gpu:            { label: 'GPU Optimizer',      desc: 'Optimizes GPU node scheduling and utilization',              category: 'non-intrusive' },
       commitments:    { label: 'Commitments',        desc: 'Monitors reserved instance and CUD coverage',               category: 'monitoring' },
-      nodeAutoscaler: { label: 'Node Autoscaler',    desc: 'Scales nodes up/down based on utilization thresholds',       category: 'mildly-intrusive' },
-      evictor:        { label: 'Evictor',            desc: 'Drains underutilized nodes to consolidate workloads',        category: 'mildly-intrusive' },
-      rebalancer:     { label: 'Rebalancer',         desc: 'Rebalances pods across nodes for better distribution',       category: 'mildly-intrusive' },
+      nodeAutoscaler: { label: 'Node Autoscaler',    desc: 'Scales nodes up/down based on utilization thresholds',       category: 'mildly-intrusive', hasDryRun: true },
+      evictor:        { label: 'Evictor',            desc: 'Drains underutilized nodes to consolidate workloads',        category: 'mildly-intrusive', hasDryRun: true },
+      rebalancer:     { label: 'Rebalancer',         desc: 'Rebalances pods across nodes for better distribution',       category: 'mildly-intrusive', hasDryRun: true },
       rightsizer:     { label: 'Rightsizer',          desc: 'Adjusts workload CPU/memory requests to match actual usage', category: 'intrusive' },
       workloadScaler: { label: 'Workload Scaler',    desc: 'Scales workload replicas and configures HPAs',               category: 'intrusive' },
       aiGate:         { label: 'AI Safety Gate',      desc: 'AI review for high-impact changes (cost >$500 or >3 nodes)', category: 'safety' },
@@ -250,14 +251,24 @@ export async function renderSettings() {
         </div>
         <div class="controllers-grid">${items.map(([name, meta]) => {
           const enabled = controllers[name] ?? false;
+          const isDryRun = meta.hasDryRun && (dryRun[name] ?? true);
           return `<div class="controller-item" style="display:flex;justify-content:space-between;align-items:center">
             <div>
-              <div class="controller-name">${meta.label}</div>
+              <div class="controller-name" style="display:flex;align-items:center;gap:6px">
+                ${meta.label}
+                ${enabled && isDryRun ? badge('Dry Run', 'amber') : ''}
+              </div>
               <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${meta.desc}</div>
+              ${enabled && isDryRun ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">Logging only — actions are not being executed</div>' : ''}
             </div>
-            <button class="btn ${enabled ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle" data-ctrl="${name}" style="min-width:50px">
-              ${enabled ? 'ON' : 'OFF'}
-            </button>
+            <div style="display:flex;gap:6px;align-items:center">
+              ${meta.hasDryRun && enabled ? `<button class="btn ${isDryRun ? 'btn-amber' : 'btn-blue'} btn-sm dryrun-toggle" data-ctrl="${name}" style="min-width:70px;font-size:11px" title="${isDryRun ? 'Currently in dry-run mode — click to execute actions for real' : 'Currently executing actions — click to switch to dry-run'}">
+                ${isDryRun ? 'DRY RUN' : 'LIVE'}
+              </button>` : ''}
+              <button class="btn ${enabled ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle" data-ctrl="${name}" style="min-width:50px">
+                ${enabled ? 'ON' : 'OFF'}
+              </button>
+            </div>
           </div>`;
         }).join('')}</div>
       </div>`;
@@ -266,22 +277,41 @@ export async function renderSettings() {
     // Controller toggle handlers
     cs.addEventListener('click', async (e) => {
       const btn = e.target.closest('.ctrl-toggle');
-      if (!btn) return;
-      const name = btn.dataset.ctrl;
-      const newState = !(controllers[name] ?? false);
-      btn.disabled = true;
-      btn.textContent = '...';
-      try {
-        await apiPut(`/config/controllers/${name}`, { enabled: newState });
-        controllers[name] = newState;
-        btn.className = `btn ${newState ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle`;
-        btn.textContent = newState ? 'ON' : 'OFF';
-        toast(`${controllerMeta[name]?.label || name} ${newState ? 'enabled' : 'disabled'}`, 'success');
-      } catch (err) {
-        btn.textContent = controllers[name] ? 'ON' : 'OFF';
-        toast('Failed to toggle controller: ' + err.message, 'error');
+      if (btn) {
+        const name = btn.dataset.ctrl;
+        const newState = !(controllers[name] ?? false);
+        btn.disabled = true;
+        btn.textContent = '...';
+        try {
+          await apiPut(`/config/controllers/${name}`, { enabled: newState });
+          controllers[name] = newState;
+          toast(`${controllerMeta[name]?.label || name} ${newState ? 'enabled' : 'disabled'}`, 'success');
+          renderSettings(); // re-render to show/hide dry-run button
+        } catch (err) {
+          btn.textContent = controllers[name] ? 'ON' : 'OFF';
+          toast('Failed to toggle controller: ' + err.message, 'error');
+          btn.disabled = false;
+        }
+        return;
       }
-      btn.disabled = false;
+
+      const dryBtn = e.target.closest('.dryrun-toggle');
+      if (dryBtn) {
+        const name = dryBtn.dataset.ctrl;
+        const newDryRun = !(dryRun[name] ?? true);
+        dryBtn.disabled = true;
+        dryBtn.textContent = '...';
+        try {
+          await apiPut(`/config/controllers/${name}/dry-run`, { dryRun: newDryRun });
+          dryRun[name] = newDryRun;
+          toast(`${controllerMeta[name]?.label || name} ${newDryRun ? 'set to dry-run' : 'set to LIVE — actions will be executed'}`, newDryRun ? 'info' : 'success');
+          renderSettings();
+        } catch (err) {
+          dryBtn.textContent = (dryRun[name] ?? true) ? 'DRY RUN' : 'LIVE';
+          toast('Failed to toggle dry-run: ' + err.message, 'error');
+          dryBtn.disabled = false;
+        }
+      }
     });
 
     // Node template cards

@@ -139,6 +139,45 @@ func (s *SettingsStore) SaveChannels(channels []config.NotificationChannel) {
 
 const keyControllerPrefix = "controller_enabled:"
 
+// ── Controller DryRun States ─────────────────────────────────────────
+
+const keyDryRunPrefix = "controller_dryrun:"
+
+// SaveControllerDryRun persists a controller's dry-run state.
+func (s *SettingsStore) SaveControllerDryRun(name string, dryRun bool) {
+	v := "false"
+	if dryRun {
+		v = "true"
+	}
+	s.set(keyDryRunPrefix+name, v)
+}
+
+// LoadControllerDryRunStates returns all persisted controller dry-run states.
+func (s *SettingsStore) LoadControllerDryRunStates() map[string]bool {
+	if s.db == nil {
+		return nil
+	}
+	rows, err := s.db.Query(`SELECT key, value FROM settings WHERE key LIKE ?`, keyDryRunPrefix+"%")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	states := map[string]bool{}
+	for rows.Next() {
+		var key, val string
+		if err := rows.Scan(&key, &val); err != nil {
+			continue
+		}
+		name := key[len(keyDryRunPrefix):]
+		states[name] = val == "true"
+	}
+	if len(states) == 0 {
+		return nil
+	}
+	return states
+}
+
 // SaveControllerEnabled persists a single controller's enabled state.
 func (s *SettingsStore) SaveControllerEnabled(name string, enabled bool) {
 	v := "false"

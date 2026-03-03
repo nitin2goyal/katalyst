@@ -107,6 +107,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		r.Put("/config/mode", configHandler.SetMode)
 		r.Put("/config/pod-purger", configHandler.SetPodPurger)
 		r.Put("/config/controllers/{name}", configHandler.SetController)
+		r.Put("/config/controllers/{name}/dry-run", configHandler.SetControllerDryRun)
 
 		// Audit
 		r.Get("/audit", auditHandler.List)

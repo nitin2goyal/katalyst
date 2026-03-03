@@ -20,7 +20,8 @@ export function navigate(hash) {
 }
 
 export function currentRoute() {
-  return location.hash.replace('#', '') || '/overview';
+  const hash = location.hash.replace('#', '') || '/overview';
+  return hash.split('?')[0];
 }
 
 export function getParams() {

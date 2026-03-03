@@ -39,6 +39,11 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"aiGate":         h.config.AIGate.Enabled,
 			"podPurger":      h.config.PodPurger.Enabled,
 		},
+		"dryRun": map[string]bool{
+			"nodeAutoscaler": h.config.NodeAutoscaler.DryRun,
+			"evictor":        h.config.Evictor.DryRun,
+			"rebalancer":     h.config.Rebalancer.DryRun,
+		},
 	})
 }
 
@@ -133,4 +138,36 @@ func (h *ConfigHandler) SetController(w http.ResponseWriter, r *http.Request) {
 
 	h.settings.SaveControllerEnabled(name, req.Enabled)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "enabled": req.Enabled})
+}
+
+func (h *ConfigHandler) SetControllerDryRun(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	var req struct {
+		DryRun bool `json:"dryRun"`
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	switch name {
+	case "nodeAutoscaler":
+		h.config.NodeAutoscaler.DryRun = req.DryRun
+	case "evictor":
+		h.config.Evictor.DryRun = req.DryRun
+	case "rebalancer":
+		h.config.Rebalancer.DryRun = req.DryRun
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "controller does not support dryRun: " + name})
+		return
+	}
+
+	h.settings.SaveControllerDryRun(name, req.DryRun)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "dryRun": req.DryRun})
 }

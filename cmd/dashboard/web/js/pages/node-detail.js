@@ -154,9 +154,6 @@ export async function renderNodeDetail(params) {
       if (unit === 'ki') return n * 1024;
       return n;
     };
-    const cpuCapMilli2 = parseFloat(node.cpuCapacity) || 1;
-    const memCapBytes2 = parseFloat(node.memCapacity) || 1;
-
     // Format millicores for pod usage display
     const fmtCPUm = (v) => {
       const m = typeof v === 'number' ? v : parseCPUm(v);
@@ -175,18 +172,18 @@ export async function renderNodeDetail(params) {
       const memReqB = parseMemB(p.memRequest);
       const cpuUsedM = p.cpuUsed != null ? parseCPUm(p.cpuUsed) : null;
       const memUsedB = p.memUsed != null ? parseMemB(p.memUsed) : null;
-      // CPU % based on actual usage if available, else request
-      const cpuPct = cpuCapMilli2 > 0 ? ((cpuUsedM != null ? cpuUsedM : cpuReqM) / cpuCapMilli2 * 100) : 0;
-      const memPctVal = memCapBytes2 > 0 ? ((memUsedB != null ? memUsedB : memReqB) / memCapBytes2 * 100) : 0;
+      // Utilization % relative to pod's own request
+      const cpuPct = cpuUsedM != null && cpuReqM > 0 ? (cpuUsedM / cpuReqM * 100) : null;
+      const memPctVal = memUsedB != null && memReqB > 0 ? (memUsedB / memReqB * 100) : null;
       return `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
       <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
       <td>${fmtCPU(p.cpuRequest)}</td>
       <td>${cpuUsedM != null ? fmtCPUm(cpuUsedM) : '<span style="color:var(--text-muted)">-</span>'}</td>
-      <td>${utilBar(cpuPct)}</td>
+      <td>${cpuPct != null ? utilBar(cpuPct) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${fmtMem(p.memRequest)}</td>
       <td>${memUsedB != null ? fmtMemB(memUsedB) : '<span style="color:var(--text-muted)">-</span>'}</td>
-      <td>${utilBar(memPctVal)}</td>
+      <td>${memPctVal != null ? utilBar(memPctVal) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${p.diskUsage ? fmtMem(p.diskUsage) : '-'}</td>
       <td title="${podStatusReason(p.status)}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
     </tr>`;

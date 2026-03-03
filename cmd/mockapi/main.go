@@ -20,6 +20,9 @@ var controllerStates = map[string]bool{
 	"rebalancer": true, "gpu": true, "commitments": true, "aiGate": false,
 	"podPurger": false,
 }
+var dryRunStates = map[string]bool{
+	"nodeAutoscaler": true, "evictor": true, "rebalancer": true,
+}
 
 var mockChannels = []map[string]any{
 	{"type": "slack", "name": "Slack #k8s-alerts", "target": "#k8s-alerts", "enabled": true},
@@ -58,7 +61,22 @@ func main() {
 		writeJSON(w, map[string]string{"status": "ok", "mode": currentMode})
 	})
 	mux.HandleFunc("/api/v1/config/controllers/", func(w http.ResponseWriter, r *http.Request) {
-		name := strings.TrimPrefix(r.URL.Path, "/api/v1/config/controllers/")
+		path := strings.TrimPrefix(r.URL.Path, "/api/v1/config/controllers/")
+		// Handle dry-run sub-path: controllers/{name}/dry-run
+		if strings.HasSuffix(path, "/dry-run") {
+			name := strings.TrimSuffix(path, "/dry-run")
+			if r.Method == http.MethodPut && name != "" {
+				var body map[string]interface{}
+				json.NewDecoder(r.Body).Decode(&body)
+				if dr, ok := body["dryRun"].(bool); ok {
+					dryRunStates[name] = dr
+				}
+			}
+			writeJSON(w, map[string]interface{}{"controller": name, "dryRun": dryRunStates[name]})
+			return
+		}
+		// Handle enabled toggle: controllers/{name}
+		name := path
 		if r.Method == http.MethodPut && name != "" {
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
@@ -492,10 +510,13 @@ func clampMockScore(s float64) float64 {
 }
 
 func configHandler() any {
-	// Copy current state so mutations don't affect the response map
 	ctrls := make(map[string]bool, len(controllerStates))
 	for k, v := range controllerStates {
 		ctrls[k] = v
+	}
+	dr := make(map[string]bool, len(dryRunStates))
+	for k, v := range dryRunStates {
+		dr[k] = v
 	}
 	return map[string]any{
 		"mode":         currentMode,
@@ -503,6 +524,7 @@ func configHandler() any {
 		"region":       "us-east-1",
 		"clusterName":  "demo-cluster",
 		"controllers":  ctrls,
+		"dryRun":       dr,
 	}
 }
 

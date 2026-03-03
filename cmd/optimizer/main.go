@@ -150,6 +150,19 @@ func main() {
 		}
 		setupLog.Info("Restoring persisted controller states", "count", len(ctrlStates))
 	}
+	if dryRunStates := settingsStore.LoadControllerDryRunStates(); dryRunStates != nil {
+		for name, dryRun := range dryRunStates {
+			switch name {
+			case "nodeAutoscaler":
+				cfg.NodeAutoscaler.DryRun = dryRun
+			case "evictor":
+				cfg.Evictor.DryRun = dryRun
+			case "rebalancer":
+				cfg.Rebalancer.DryRun = dryRun
+			}
+		}
+		setupLog.Info("Restoring persisted controller dry-run states", "count", len(dryRunStates))
+	}
 
 	if err := cfg.ValidateDetailed(); err != nil {
 		setupLog.Error(err, "Invalid configuration",
