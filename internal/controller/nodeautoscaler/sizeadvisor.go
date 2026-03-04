@@ -61,8 +61,8 @@ func (s *SizeAdvisor) Analyze(ctx context.Context, snapshot *optimizer.ClusterSn
 			continue
 		}
 
-		// If consistently high utilization (>85%), suggest sizing up
-		if avgCPUUtil > 85 || avgMemUtil > 85 {
+		// If consistently high utilization (>98%), suggest sizing up
+		if avgCPUUtil > 98 || avgMemUtil > 98 {
 			nextSize := findNextLargerSize(ng.InstanceType, familySizes)
 			if nextSize != "" {
 				recs = append(recs, optimizer.Recommendation{

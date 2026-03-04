@@ -16,8 +16,8 @@ func TestDefaultConfig_ReturnsExpectedDefaults(t *testing.T) {
 	if cfg.ReconcileInterval != 60*time.Second {
 		t.Errorf("ReconcileInterval = %v, want %v", cfg.ReconcileInterval, 60*time.Second)
 	}
-	if cfg.NodeAutoscaler.ScaleUpThreshold != 80.0 {
-		t.Errorf("ScaleUpThreshold = %v, want %v", cfg.NodeAutoscaler.ScaleUpThreshold, 80.0)
+	if cfg.NodeAutoscaler.ScaleUpThreshold != 98.0 {
+		t.Errorf("ScaleUpThreshold = %v, want %v", cfg.NodeAutoscaler.ScaleUpThreshold, 98.0)
 	}
 	if cfg.NodeAutoscaler.ScaleDownThreshold != 30.0 {
 		t.Errorf("ScaleDownThreshold = %v, want %v", cfg.NodeAutoscaler.ScaleDownThreshold, 30.0)
@@ -115,8 +115,8 @@ region: eastus
 	}
 
 	// Default fields should still be present
-	if cfg.NodeAutoscaler.ScaleUpThreshold != 80.0 {
-		t.Errorf("ScaleUpThreshold = %v, want default %v", cfg.NodeAutoscaler.ScaleUpThreshold, 80.0)
+	if cfg.NodeAutoscaler.ScaleUpThreshold != 98.0 {
+		t.Errorf("ScaleUpThreshold = %v, want default %v", cfg.NodeAutoscaler.ScaleUpThreshold, 98.0)
 	}
 	if cfg.NodeAutoscaler.ScaleDownThreshold != 30.0 {
 		t.Errorf("ScaleDownThreshold = %v, want default %v", cfg.NodeAutoscaler.ScaleDownThreshold, 30.0)

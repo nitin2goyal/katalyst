@@ -76,9 +76,9 @@ func (b *BinPacker) Pack(snapshot *optimizer.ClusterSnapshot) *PackResult {
 	nodeCPU := snapshot.Nodes[0].CPUCapacity
 	nodeMem := snapshot.Nodes[0].MemoryCapacity
 
-	// Reserve 10% for system overhead
-	nodeCPU = nodeCPU * 90 / 100
-	nodeMem = nodeMem * 90 / 100
+	// Reserve 2% for kubelet/OS overhead not captured in Allocatable
+	nodeCPU = nodeCPU * 98 / 100
+	nodeMem = nodeMem * 98 / 100
 
 	// First-fit decreasing bin packing
 	type bin struct {

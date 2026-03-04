@@ -35,8 +35,8 @@ func defaultTestConfig() *config.Config {
 	return &config.Config{
 		CloudProvider: "gcp",
 		Rightsizer: config.RightsizingConfig{
-			CPUTargetUtilPct:    70.0,
-			MemoryTargetUtilPct: 75.0,
+			CPUTargetUtilPct:    95.0,
+			MemoryTargetUtilPct: 95.0,
 			MinCPURequest:       "10m",
 			MinMemoryRequest:    "32Mi",
 			MinKeepRatio:        0.7,

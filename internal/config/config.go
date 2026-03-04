@@ -231,7 +231,7 @@ func DefaultConfig() *Config {
 			DryRun:               true, // safe default
 			NodeTemplatesEnabled: true,
 			ScanInterval:       30 * time.Second,
-			ScaleUpThreshold:   80.0,
+			ScaleUpThreshold:   98.0,
 			ScaleDownThreshold: 30.0,
 			ScaleDownDelay:     10 * time.Minute,
 			MaxScaleUpNodes:    5,
@@ -243,8 +243,8 @@ func DefaultConfig() *Config {
 		Rightsizer: RightsizingConfig{
 			Enabled:             true,
 			LookbackWindow:      7 * 24 * time.Hour,
-			CPUTargetUtilPct:    70.0,
-			MemoryTargetUtilPct: 75.0,
+			CPUTargetUtilPct:    95.0,
+			MemoryTargetUtilPct: 95.0,
 			MinCPURequest:       "10m",
 			MinMemoryRequest:    "32Mi",
 			MinKeepRatio:        0.7,
@@ -265,7 +265,7 @@ func DefaultConfig() *Config {
 		Evictor: EvictorConfig{
 			Enabled:                true,
 			DryRun:                 true, // safe default: recommend-only until explicitly enabled
-			UtilizationThreshold:   40.0,
+			UtilizationThreshold:   15.0,
 			ConsolidationInterval:  5 * time.Minute,
 			MaxConcurrentEvictions: 3,
 			DrainTimeout:           5 * time.Minute,
@@ -356,8 +356,8 @@ func DefaultConfig() *Config {
 
 	// Rebalancer BusyRedistribution defaults
 	cfg.Rebalancer.BusyRedistribution.Enabled = true
-	cfg.Rebalancer.BusyRedistribution.OverloadedThresholdPct = 90.0
-	cfg.Rebalancer.BusyRedistribution.TargetUtilizationPct = 70.0
+	cfg.Rebalancer.BusyRedistribution.OverloadedThresholdPct = 99.0
+	cfg.Rebalancer.BusyRedistribution.TargetUtilizationPct = 95.0
 
 	cfg.applyEnvOverrides()
 	return cfg

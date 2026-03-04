@@ -288,7 +288,7 @@ func defaultTestConfig() *config.Config {
 		Mode: "active",
 		Evictor: config.EvictorConfig{
 			MaxConcurrentEvictions: 5,
-			UtilizationThreshold:  40.0,
+			UtilizationThreshold:  15.0,
 		},
 		AIGate: config.AIGateConfig{
 			MaxEvictNodes: 3,
