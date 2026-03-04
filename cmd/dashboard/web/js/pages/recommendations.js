@@ -138,7 +138,7 @@ function renderRecTable(recList) {
     ` : '';
     return `<tr class="clickable-row" data-rec-id="${escapeHtml(r.id || r.ID || '')}">
       <td>${badge(r.type || r.Type || r.category || '', 'blue')}</td>
-      <td><strong>${r.target || r.resource || ''}</strong></td>
+      <td><strong>${escapeHtml(r.target || r.resource || '')}</strong></td>
       <td class="rec-desc"><span class="rec-desc-text">${escapeHtml(desc)}</span><span class="rec-tooltip">${escapeHtml(desc)}</span></td>
       <td class="value green">${fmt$(r.estimatedSavings)}</td>
       <td>${confBadge(r.confidence)}</td>

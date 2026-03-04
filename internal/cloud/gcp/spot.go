@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"strings"
 
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
@@ -88,7 +89,7 @@ func fetchGCPPreemptibleRates(ctx context.Context, region string, client *http.C
 		url := fmt.Sprintf("%s/services/%s/skus?currencyCode=USD&pageSize=5000",
 			billingCatalogBaseURL, computeEngineServiceID)
 		if pageToken != "" {
-			url += "&pageToken=" + pageToken
+			url += "&pageToken=" + neturl.QueryEscape(pageToken)
 		}
 
 		body, err := doGCPGet(ctx, client, url)

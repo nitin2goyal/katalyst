@@ -157,7 +157,7 @@ document.querySelector('.sidebar-header')?.addEventListener('click', () => {
   if (!sidebar) return;
   const collapsed = sidebar.classList.toggle('collapsed');
   document.body.classList.toggle('sidebar-collapsed', collapsed);
-  localStorage.setItem('kopt-sidebar-collapsed', collapsed);
+  localStorage.setItem('kopt-sidebar-collapsed', String(collapsed));
 });
 
 // Init

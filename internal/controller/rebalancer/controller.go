@@ -139,8 +139,9 @@ func (c *Controller) run(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("rebalancer")
 
 	// Scheduled rebalancing
+	var cronScheduler *cron.Cron
 	if c.config.Rebalancer.Schedule != "" {
-		cronScheduler := cron.New()
+		cronScheduler = cron.New()
 		cronScheduler.AddFunc(c.config.Rebalancer.Schedule, func() {
 			logger.Info("Running scheduled rebalance")
 			snapshot := c.state.Snapshot()
@@ -156,8 +157,14 @@ func (c *Controller) run(ctx context.Context) {
 			}
 		})
 		cronScheduler.Start()
-		defer cronScheduler.Stop()
 	}
+	defer func() {
+		if cronScheduler != nil {
+			stopCtx := cronScheduler.Stop()
+			// Wait for any in-flight cron jobs to finish
+			<-stopCtx.Done()
+		}
+	}()
 
 	// Continuous busy redistribution
 	if c.config.Rebalancer.BusyRedistribution.Enabled {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 
@@ -15,6 +16,7 @@ import (
 
 // NotificationHandler handles notification/alert queries.
 type NotificationHandler struct {
+	mu       sync.Mutex
 	auditLog *state.AuditLog
 	cfg      *config.Config
 	settings *store.SettingsStore
@@ -122,7 +124,8 @@ func (h *NotificationHandler) Get(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Append dynamically-added channels
+	// Append dynamically-added channels (lock to prevent race with add/delete/toggle)
+	h.mu.Lock()
 	for i, ch := range h.cfg.Alerts.Channels {
 		channels = append(channels, channel{
 			ID:      i,
@@ -133,6 +136,7 @@ func (h *NotificationHandler) Get(w http.ResponseWriter, r *http.Request) {
 			Static:  false,
 		})
 	}
+	h.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"alerts":   alerts,
@@ -176,9 +180,12 @@ func (h *NotificationHandler) AddChannel(w http.ResponseWriter, r *http.Request)
 		URL:     req.URL,
 		Enabled: true,
 	}
+
+	h.mu.Lock()
 	h.cfg.Alerts.Channels = append(h.cfg.Alerts.Channels, ch)
 	h.settings.SaveChannels(h.cfg.Alerts.Channels)
 	idx := len(h.cfg.Alerts.Channels) - 1
+	h.mu.Unlock()
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"id":      idx,
@@ -193,13 +200,20 @@ func (h *NotificationHandler) AddChannel(w http.ResponseWriter, r *http.Request)
 // DELETE /notifications/channels/{idx}
 func (h *NotificationHandler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
 	idx, err := strconv.Atoi(chi.URLParam(r, "idx"))
-	if err != nil || idx < 0 || idx >= len(h.cfg.Alerts.Channels) {
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
 		return
 	}
 
+	h.mu.Lock()
+	if idx < 0 || idx >= len(h.cfg.Alerts.Channels) {
+		h.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+		return
+	}
 	h.cfg.Alerts.Channels = append(h.cfg.Alerts.Channels[:idx], h.cfg.Alerts.Channels[idx+1:]...)
 	h.settings.SaveChannels(h.cfg.Alerts.Channels)
+	h.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -208,7 +222,7 @@ func (h *NotificationHandler) DeleteChannel(w http.ResponseWriter, r *http.Reque
 // PUT /notifications/channels/{idx}
 func (h *NotificationHandler) ToggleChannel(w http.ResponseWriter, r *http.Request) {
 	idx, err := strconv.Atoi(chi.URLParam(r, "idx"))
-	if err != nil || idx < 0 || idx >= len(h.cfg.Alerts.Channels) {
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
 		return
 	}
@@ -221,10 +235,17 @@ func (h *NotificationHandler) ToggleChannel(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	h.mu.Lock()
+	if idx < 0 || idx >= len(h.cfg.Alerts.Channels) {
+		h.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+		return
+	}
 	h.cfg.Alerts.Channels[idx].Enabled = req.Enabled
 	h.settings.SaveChannels(h.cfg.Alerts.Channels)
-
 	ch := h.cfg.Alerts.Channels[idx]
+	h.mu.Unlock()
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id":      idx,
 		"type":    ch.Type,

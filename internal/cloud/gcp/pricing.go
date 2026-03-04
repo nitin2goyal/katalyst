@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"sync"
 	"time"
@@ -323,7 +324,7 @@ func fetchGCPPricingFromAPI(ctx context.Context, region string, client *http.Cli
 		url := fmt.Sprintf("%s/services/%s/skus?currencyCode=USD&pageSize=5000",
 			billingCatalogBaseURL, computeEngineServiceID)
 		if pageToken != "" {
-			url += "&pageToken=" + pageToken
+			url += "&pageToken=" + neturl.QueryEscape(pageToken)
 		}
 
 		body, err := doGCPGet(ctx, client, url)
@@ -636,7 +637,7 @@ func fetchMachineTypesFromAPI(ctx context.Context, project, zone, region string,
 		}
 		url := fmt.Sprintf("%s/projects/%s/zones/%s/machineTypes", computeBaseURL, project, zone)
 		if pageToken != "" {
-			url += "?pageToken=" + pageToken
+			url += "?pageToken=" + neturl.QueryEscape(pageToken)
 		}
 
 		body, err := doGCPGet(ctx, client, url)

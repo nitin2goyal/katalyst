@@ -3,6 +3,7 @@ package gpu
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -29,6 +30,7 @@ type Reclaimer struct {
 	config    *config.Config
 	nodeLock  *state.NodeLock
 	auditLog  *state.AuditLog
+	mu        sync.Mutex
 	idleSince map[string]time.Time // nodeName → when it became GPU-idle with non-GPU pods
 }
 
@@ -46,6 +48,9 @@ func NewReclaimer(c client.Client, cfg *config.Config, nodeLock *state.NodeLock,
 // Analyze detects GPU nodes that have zero GPU pods but still have non-GPU pods running.
 // After a grace period, it generates recommendations to evict those non-GPU pods.
 func (r *Reclaimer) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnapshot) ([]optimizer.Recommendation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	var recs []optimizer.Recommendation
 	gracePeriod := r.config.GPU.ReclaimGracePeriod
 	if gracePeriod <= 0 {
@@ -271,7 +276,9 @@ func (r *Reclaimer) Execute(ctx context.Context, rec optimizer.Recommendation) e
 	}
 
 	// Reset idle tracking
+	r.mu.Lock()
 	delete(r.idleSince, nodeName)
+	r.mu.Unlock()
 
 	logger.Info("Reclaimed GPU node",
 		"node", nodeName,

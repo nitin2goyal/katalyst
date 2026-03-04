@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -47,9 +48,13 @@ func (h *HorizontalScaler) Analyze(ctx context.Context, snapshot *optimizer.Clus
 			// Surge detection: if replicas are at max, this is a surge scenario.
 			// Make it auto-executable so the system can increase HPA max replicas.
 			surgeDetected := h.config.WorkloadScaler.SurgeDetection
-			newMax := hpa.Spec.MaxReplicas + int32(float64(hpa.Spec.MaxReplicas)*0.5)
-			if newMax == hpa.Spec.MaxReplicas {
-				newMax = hpa.Spec.MaxReplicas + 1
+			increase := int32(float64(hpa.Spec.MaxReplicas) * 0.5)
+			if increase < 1 {
+				increase = 1
+			}
+			newMax := hpa.Spec.MaxReplicas + increase
+			if newMax < hpa.Spec.MaxReplicas { // overflow: wrapped negative
+				newMax = math.MaxInt32
 			}
 			// Safety cap: never exceed configured maximum replicas limit.
 			if h.config.WorkloadScaler.MaxReplicasLimit > 0 && newMax > int32(h.config.WorkloadScaler.MaxReplicasLimit) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ func getGCPCUDs(ctx context.Context, project, region string, client *http.Client
 		url := fmt.Sprintf("%s/projects/%s/regions/%s/commitments?filter=status=ACTIVE",
 			computeBaseURL, project, region)
 		if pageToken != "" {
-			url += "&pageToken=" + pageToken
+			url += "&pageToken=" + neturl.QueryEscape(pageToken)
 		}
 
 		body, err := doGCPGet(ctx, client, url)

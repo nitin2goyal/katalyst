@@ -16,6 +16,8 @@ type Writer struct {
 	ch      chan func(*sql.DB)
 	wg      sync.WaitGroup
 	dropped atomic.Uint64
+	mu      sync.Mutex
+	closed  bool
 }
 
 // NewWriter creates an async writer with the given buffer size.
@@ -63,7 +65,15 @@ func (w *Writer) Run(ctx context.Context) {
 
 // Enqueue adds a write operation to the queue. If the channel is full, it
 // drops the write (backpressure) rather than blocking the caller.
+// Safe to call concurrently with Drain — writes after Drain are silently dropped.
 func (w *Writer) Enqueue(fn func(*sql.DB)) {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return
+	}
+	w.mu.Unlock()
+
 	select {
 	case w.ch <- fn:
 	default:
@@ -82,8 +92,16 @@ func (w *Writer) DroppedCount() uint64 {
 }
 
 // Drain waits for all queued writes to be processed. Call this before
-// closing the database.
+// closing the database. Safe to call concurrently with Enqueue.
 func (w *Writer) Drain() {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return
+	}
+	w.closed = true
+	w.mu.Unlock()
+
 	close(w.ch)
 	w.wg.Wait()
 }

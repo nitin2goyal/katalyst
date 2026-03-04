@@ -1,5 +1,5 @@
 // Reusable UI components
-import { $, $$, badge } from './utils.js';
+import { $, $$, badge, escapeHtml } from './utils.js';
 export { badge };
 
 export function skeleton(rows = 3) {
@@ -326,7 +326,18 @@ export function cardHeader(title, rightHtml = '') {
 }
 
 export function exportButton(onClick) {
-  return `<button class="btn btn-gray btn-sm" onclick="${onClick}">Export CSV</button>`;
+  const id = 'exp-' + Math.random().toString(36).slice(2, 8);
+  if (typeof onClick === 'function') {
+    // Safe path: attach handler via event listener after render
+    setTimeout(() => {
+      const btn = document.getElementById(id);
+      if (btn) btn.addEventListener('click', onClick);
+    }, 0);
+    return `<button class="btn btn-gray btn-sm" id="${id}">Export CSV</button>`;
+  }
+  // Legacy string path: escape for safe attribute interpolation
+  const escaped = escapeHtml(onClick);
+  return `<button class="btn btn-gray btn-sm" onclick="${escaped}">Export CSV</button>`;
 }
 
 // ── Pagination ──

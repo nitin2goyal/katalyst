@@ -303,8 +303,13 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 			s.pricingWarned[region] = true
 		}
 	}
-	// Default pricingMap for backward compatibility
+	// Default pricingMap for backward compatibility.
+	// Guard against nil: defaultRegion may be empty or missing from the map
+	// (e.g. no nodes have region labels, or pricing fetch failed for all regions).
 	pricingMap := pricingByRegion[defaultRegion]
+	if pricingMap == nil {
+		pricingMap = make(map[string]float64)
+	}
 
 	// Get pod metrics BEFORE acquiring the lock to avoid blocking readers.
 	var podMetrics []pkgmetrics.PodMetrics
