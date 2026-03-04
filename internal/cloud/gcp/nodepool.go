@@ -239,14 +239,30 @@ func mapNodePoolToNodeGroup(ctx context.Context, np gkeNodePool, region string, 
 		taints = append(taints, taint)
 	}
 
+	// When GKE autoscaling is disabled, the API returns minNodeCount=0 and
+	// maxNodeCount=0 to mean "not applicable" (pool is fixed-size). Treat
+	// MaxCount=0 as uncapped so the optimizer's bounds validation doesn't
+	// reject every scaling operation.
+	minCount := np.Autoscaling.MinNodeCount
+	maxCount := np.Autoscaling.MaxNodeCount
+	if !np.Autoscaling.Enabled {
+		minCount = 0
+		if maxCount == 0 {
+			maxCount = currentCount * 3
+			if maxCount < 1000 {
+				maxCount = 1000
+			}
+		}
+	}
+
 	return &cloudprovider.NodeGroup{
 		ID:             np.Name,
 		Name:           np.Name,
 		InstanceType:   np.Config.MachineType,
 		InstanceFamily: family,
 		CurrentCount:   currentCount,
-		MinCount:       np.Autoscaling.MinNodeCount,
-		MaxCount:       np.Autoscaling.MaxNodeCount,
+		MinCount:       minCount,
+		MaxCount:       maxCount,
 		DesiredCount:   currentCount,
 		Zone:           zone,
 		Region:         region,

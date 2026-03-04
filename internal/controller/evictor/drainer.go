@@ -169,6 +169,23 @@ func (d *Drainer) uncordonNode(ctx context.Context, nodeName string) error {
 	return d.client.Update(ctx, node)
 }
 
+// UncordonAndCleanup uncordons a node and removes any partial-drain annotations.
+// Use this to recover nodes left cordoned by a failed drain when the caller
+// decides the node will not be removed (e.g. scale-down aborted).
+func (d *Drainer) UncordonAndCleanup(ctx context.Context, nodeName string) error {
+	node := &corev1.Node{}
+	if err := d.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		return err
+	}
+
+	node.Spec.Unschedulable = false
+	if node.Annotations != nil {
+		delete(node.Annotations, "koptimizer.io/partial-drain-at")
+		delete(node.Annotations, "koptimizer.io/partial-drain-reason")
+	}
+	return d.client.Update(ctx, node)
+}
+
 func (d *Drainer) evictPod(ctx context.Context, pod *corev1.Pod) error {
 	// Use the pod's termination grace period, defaulting to 30s if unset.
 	gracePeriod := pod.Spec.TerminationGracePeriodSeconds

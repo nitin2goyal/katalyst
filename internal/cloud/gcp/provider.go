@@ -169,10 +169,10 @@ func (p *Provider) ScaleNodeGroup(ctx context.Context, id string, desiredCount i
 	if err != nil {
 		return fmt.Errorf("cannot validate bounds for node pool %s: %w", id, err)
 	}
-	if desiredCount < ng.MinCount {
+	if ng.MinCount > 0 && desiredCount < ng.MinCount {
 		return fmt.Errorf("desired count %d is below min %d for node pool %s", desiredCount, ng.MinCount, id)
 	}
-	if desiredCount > ng.MaxCount {
+	if ng.MaxCount > 0 && desiredCount > ng.MaxCount {
 		return fmt.Errorf("desired count %d exceeds max %d for node pool %s", desiredCount, ng.MaxCount, id)
 	}
 	return scaleNodePool(ctx, p.project, p.region, p.clusterName, id, desiredCount, p.httpClient)

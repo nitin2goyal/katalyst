@@ -65,19 +65,36 @@ func (c *Controller) Name() string { return "node-autoscaler" }
 func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnapshot) ([]optimizer.Recommendation, error) {
 	var recs []optimizer.Recommendation
 
-	// Check for scale-up needs (unschedulable pods)
-	upRecs, err := c.upscaler.Analyze(ctx, snapshot)
-	if err != nil {
-		return nil, err
-	}
-	recs = append(recs, upRecs...)
-
-	// Check for scale-down opportunities (underutilized nodes)
+	// Check for scale-down opportunities first (underutilized nodes) — these
+	// take priority because removing underutilized nodes saves cost. Scale-up
+	// recs for node groups that already have a scale-down pending would cause
+	// conflicting operations (simultaneous add and remove on the same pool).
 	downRecs, err := c.downscaler.Analyze(ctx, snapshot)
 	if err != nil {
 		return nil, err
 	}
 	recs = append(recs, downRecs...)
+
+	// Build set of node groups with pending scale-down
+	scaleDownGroups := make(map[string]bool, len(downRecs))
+	for _, r := range downRecs {
+		if gid, ok := r.Details["nodeGroupID"]; ok {
+			scaleDownGroups[gid] = true
+		}
+	}
+
+	// Check for scale-up needs (unschedulable pods), but skip node groups
+	// that already have a scale-down recommendation to avoid conflicts.
+	upRecs, err := c.upscaler.Analyze(ctx, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range upRecs {
+		if gid, ok := r.Details["nodeGroupID"]; ok && scaleDownGroups[gid] {
+			continue // skip conflicting scale-up
+		}
+		recs = append(recs, r)
+	}
 
 	// Generate within-family size recommendations
 	sizeRecs, err := c.sizeAdvisor.Analyze(ctx, snapshot)
@@ -143,6 +160,8 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 	// For scale-down, drain underutilized nodes before reducing desired count
 	// to ensure pods are gracefully evicted rather than force-killed by the
 	// cloud provider.
+	var drainedNodes []string
+	var failedDrainNodes []string // nodes left cordoned after drain failure
 	if direction == "down" {
 		snapshot := c.state.Snapshot()
 		drained := 0
@@ -174,13 +193,15 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 				fmt.Sprintf("draining node before scaling %s to %d", nodeGroupID, desired))
 
 			if err := c.drainer.DrainNode(ctx, nodeName); err != nil {
-				logger.Error(err, "Failed to drain node before scale-down, keeping node cordoned for safety", "node", nodeName)
+				logger.Error(err, "Failed to drain node before scale-down", "node", nodeName)
 				c.state.NodeLock.Unlock(nodeName, "nodeautoscaler")
-				c.state.AuditLog.Record("drain-failed-kept-cordoned", nodeName, "nodeautoscaler",
-					fmt.Sprintf("drain failed, node left cordoned for manual review: %v", err))
+				c.state.AuditLog.Record("drain-failed", nodeName, "nodeautoscaler",
+					fmt.Sprintf("drain failed: %v", err))
+				failedDrainNodes = append(failedDrainNodes, nodeName)
 				continue
 			}
 			c.state.NodeLock.Unlock(nodeName, "nodeautoscaler")
+			drainedNodes = append(drainedNodes, nodeName)
 			drained++
 		}
 
@@ -192,6 +213,9 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 				"nodeGroup", nodeGroupID, "desiredCount", desired)
 			c.state.AuditLog.Record("scale-down-aborted", nodeGroupID, "nodeautoscaler",
 				"no nodes drained successfully, scale-down aborted for safety")
+			// Uncordon nodes left cordoned by failed drains — they won't be
+			// removed since scale-down was aborted, so don't leave them in limbo.
+			c.uncordonFailedDrainNodes(ctx, failedDrainNodes)
 			return nil
 		}
 
@@ -208,17 +232,56 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 			c.state.AuditLog.Record("scale-down-adjusted", nodeGroupID, "nodeautoscaler",
 				fmt.Sprintf("only %d/%d nodes drained, adjusting desired from %d to %d", drained, nodesToRemove, desired, adjustedDesired))
 			desired = adjustedDesired
+			// Uncordon nodes whose drains failed — they won't be removed by
+			// the adjusted scale-down, so don't leave them stuck cordoned.
+			c.uncordonFailedDrainNodes(ctx, failedDrainNodes)
 		}
 	}
 
 	err := c.provider.ScaleNodeGroup(ctx, nodeGroupID, desired)
 	if err != nil {
 		c.state.AuditLog.Record("scale-nodegroup-failed", nodeGroupID, "nodeautoscaler", err.Error())
+
+		// If scale-down failed after draining, uncordon the drained nodes so
+		// they remain usable. Without this, nodes stay cordoned indefinitely
+		// when the cloud API rejects the scale operation (e.g. 403 permission).
+		if direction == "down" && len(drainedNodes) > 0 {
+			logger.Info("Scale-down failed, uncordoning drained nodes to restore capacity",
+				"nodeGroup", nodeGroupID, "drainedNodes", len(drainedNodes))
+			for _, nodeName := range drainedNodes {
+				if uncordErr := c.drainer.UncordonAndCleanup(ctx, nodeName); uncordErr != nil {
+					logger.Error(uncordErr, "Failed to uncordon node after scale-down failure", "node", nodeName)
+				} else {
+					c.state.AuditLog.Record("uncordon-after-scale-failure", nodeName, "nodeautoscaler",
+						fmt.Sprintf("uncordoned after scale-down API failure for %s", nodeGroupID))
+				}
+			}
+		}
 	} else {
 		c.state.AuditLog.Record("scale-nodegroup-complete", nodeGroupID, "nodeautoscaler",
 			fmt.Sprintf("scaled to %d nodes", desired))
 	}
 	return err
+}
+
+// uncordonFailedDrainNodes uncordons nodes that were left cordoned after drain
+// failures. Without this, partially-drained nodes stay cordoned indefinitely
+// when scale-down is aborted or adjusted — stuck in limbo.
+func (c *Controller) uncordonFailedDrainNodes(ctx context.Context, nodes []string) {
+	if len(nodes) == 0 {
+		return
+	}
+	logger := log.FromContext(ctx).WithName("nodeautoscaler")
+	logger.Info("Uncordoning nodes left cordoned by drain failures",
+		"count", len(nodes), "nodes", nodes)
+	for _, nodeName := range nodes {
+		if err := c.drainer.UncordonAndCleanup(ctx, nodeName); err != nil {
+			logger.Error(err, "Failed to uncordon node after drain failure", "node", nodeName)
+		} else {
+			c.state.AuditLog.Record("uncordon-after-drain-failure", nodeName, "nodeautoscaler",
+				"uncordoned node that was left cordoned by failed drain during scale-down")
+		}
+	}
 }
 
 func (c *Controller) run(ctx context.Context) {
