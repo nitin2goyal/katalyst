@@ -8,13 +8,15 @@ let _isComputed = false;
 export async function renderRecsTab(targetEl) {
   targetEl.innerHTML = skeleton(5);
   try {
-    const [recs, summary, clusterNodes, clusterWorkloads, debugData] = await Promise.all([
+    const [recs, summary, clusterNodes, clusterWorkloads, debugData, configData] = await Promise.all([
       api('/recommendations'),
       api('/recommendations/summary').catch(() => null),
-      api('/nodes').catch(() => []),
-      api('/workloads').catch(() => []),
+      api('/nodes?pageSize=1000').catch(() => []),
+      api('/workloads?pageSize=1000').catch(() => []),
       api('/recommendations/debug').catch(() => null),
+      api('/config').catch(() => ({})),
     ]);
+    const autoApproveRightsizer = (configData.autoApprove || {}).rightsizer ?? false;
     let recList = toArray(recs, 'recommendations');
     _isComputed = false;
     // Fallback: compute from live node data when API returns empty
@@ -25,6 +27,17 @@ export async function renderRecsTab(targetEl) {
     }
     // Filter out spot recommendations (spot feature removed)
     recList = recList.filter(r => { const t = (r.type || r.Type || '').toLowerCase(); return t !== 'spot' && !t.includes('spot'); });
+    // When auto-approve is enabled, mark rightsizing recs as auto-approved
+    if (autoApproveRightsizer) {
+      recList.forEach(r => {
+        const t = (r.type || r.Type || '').toLowerCase();
+        const st = (r.status || r.Status || '').toLowerCase();
+        if (t === 'rightsizing' && st === 'pending') {
+          r.status = 'approved';
+          r._autoApproved = true;
+        }
+      });
+    }
     const pending = recList.filter(r => (r.status || r.Status) === 'pending').length;
     const approved = recList.filter(r => (r.status || r.Status) === 'approved').length;
     const totalSavings = recList.reduce((s, r) => s + (r.estimatedSavings || 0), 0);
@@ -55,6 +68,7 @@ export async function renderRecsTab(targetEl) {
         <div class="kpi-card"><div class="label">Est. Total Savings</div><div class="value green">${fmt$(totalSavings)}</div><div class="sub">if all pending approved</div></div>
       </div>
       ${_isComputed ? '<div class="info-banner">These recommendations are computed from live cluster data. Switch to OPTIMIZE mode to enable automatic execution.</div>' : ''}
+      ${autoApproveRightsizer ? '<div class="info-banner" style="border-color:var(--green)">Rightsizing auto-approve is ON. Downsizing recommendations are applied automatically (once per workload).</div>' : ''}
       <details class="debug-panel" style="margin-bottom:16px">
         <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);padding:8px 0">Data Validation (click to expand)</summary>
         <div class="card" style="font-size:12px;line-height:1.8;padding:16px;margin-top:8px">
@@ -127,12 +141,14 @@ function confBadge(conf) {
 function renderRecTable(recList) {
   $('#rec-body').innerHTML = recList.length ? recList.map(r => {
     const st = r.status || r.Status || 'unknown';
-    const statusBadge = st === 'pending' ? badge('Pending', 'amber')
+    const isAutoApproved = r._autoApproved;
+    const statusBadge = isAutoApproved ? badge('Auto-Approved', 'green')
+      : st === 'pending' ? badge('Pending', 'amber')
       : st === 'approved' ? badge('Approved', 'green')
       : st === 'dismissed' ? badge('Dismissed', 'gray')
       : badge(st, 'blue');
     const desc = r.description || r.summary || '';
-    const actions = st === 'pending' ? `
+    const actions = (st === 'pending' && !isAutoApproved) ? `
       <button class="btn btn-green btn-sm" onclick="event.stopPropagation();window.__approveRec('${r.id || r.ID}')">Approve</button>
       <button class="btn btn-gray btn-sm" onclick="event.stopPropagation();window.__dismissRec('${r.id || r.ID}')" style="margin-left:4px">Dismiss</button>
     ` : '';

@@ -228,7 +228,7 @@ export async function renderSettings() {
       nodeAutoscaler: { label: 'Node Autoscaler',    desc: 'Scales nodes up/down based on utilization thresholds',       category: 'mildly-intrusive', hasDryRun: true },
       evictor:        { label: 'Evictor',            desc: 'Drains underutilized nodes to consolidate workloads',        category: 'mildly-intrusive', hasDryRun: true },
       rebalancer:     { label: 'Rebalancer',         desc: 'Rebalances pods across nodes for better distribution',       category: 'mildly-intrusive', hasDryRun: true },
-      rightsizer:     { label: 'Rightsizer',         desc: 'Adjusts workload CPU/memory requests to match actual usage', category: 'intrusive' },
+      rightsizer:     { label: 'Rightsizer',         desc: 'Adjusts workload CPU/memory requests to match actual usage', category: 'intrusive', hasAutoApprove: true },
       workloadScaler: { label: 'Workload Scaler',    desc: 'Scales workload replicas and configures HPAs',               category: 'intrusive' },
       aiGate:         { label: 'AI Safety Gate',     desc: 'AI review for high-impact changes (cost >$500 or >3 nodes)', category: 'safety' },
     };
@@ -275,10 +275,19 @@ export async function renderSettings() {
           }
           // Simple ON/OFF toggle
           const enabled = controllers[name] ?? false;
+          const autoApproved = meta.hasAutoApprove && ((config.autoApprove || {})[name] ?? false);
           return `<div class="controller-item">
             <div style="min-width:0">
               <div class="controller-name">${meta.label}</div>
               <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${meta.desc}</div>
+              ${meta.hasAutoApprove ? `
+                <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+                  <button class="btn ${autoApproved ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle" data-ctrl="${name}" style="min-width:120px;font-size:11px">
+                    ${autoApproved ? 'AUTO-APPROVE ON' : 'AUTO-APPROVE OFF'}
+                  </button>
+                  <span style="color:var(--text-muted);font-size:11px">${autoApproved ? 'Downsizing applied once per workload' : 'Manual approval required for downsizing'}</span>
+                </div>
+              ` : ''}
             </div>
             <button class="btn ${enabled ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle" data-ctrl="${name}" style="min-width:50px">
               ${enabled ? 'ON' : 'OFF'}
@@ -290,6 +299,31 @@ export async function renderSettings() {
 
     // Controller toggle handlers — simple ON/OFF
     cs.addEventListener('click', async (e) => {
+      // Auto-approve toggle
+      const aaBtn = e.target.closest('.auto-approve-toggle');
+      if (aaBtn) {
+        const name = aaBtn.dataset.ctrl;
+        const currentState = (config.autoApprove || {})[name] ?? false;
+        const newState = !currentState;
+        aaBtn.disabled = true;
+        aaBtn.textContent = '...';
+        try {
+          await apiPut(`/config/controllers/${name}/auto-approve`, { autoApprove: newState });
+          if (!config.autoApprove) config.autoApprove = {};
+          config.autoApprove[name] = newState;
+          aaBtn.className = `btn ${newState ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle`;
+          aaBtn.textContent = newState ? 'AUTO-APPROVE ON' : 'AUTO-APPROVE OFF';
+          const descSpan = aaBtn.nextElementSibling;
+          if (descSpan) descSpan.textContent = newState ? 'Downsizing applied once per workload' : 'Manual approval required for downsizing';
+          toast(`${controllerMeta[name]?.label || name} auto-approve ${newState ? 'enabled' : 'disabled'}`, newState ? 'success' : 'info');
+        } catch (err) {
+          aaBtn.textContent = currentState ? 'AUTO-APPROVE ON' : 'AUTO-APPROVE OFF';
+          toast('Failed: ' + err.message, 'error');
+        }
+        aaBtn.disabled = false;
+        return;
+      }
+
       const btn = e.target.closest('.ctrl-toggle');
       if (btn) {
         const name = btn.dataset.ctrl;

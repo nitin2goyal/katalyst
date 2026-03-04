@@ -3,6 +3,7 @@ package rightsizer
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -31,6 +32,9 @@ type Controller struct {
 	actuator     *Actuator
 	oomTracker   *OOMTracker
 	notifier     *Notifier
+
+	mu        sync.Mutex
+	downsized map[string]bool // tracks workloads already downsized (once-only)
 }
 
 func NewController(mgr ctrl.Manager, st *state.ClusterState, gate *aigate.AIGate, cfg *config.Config, metricsStore *metrics.Store) *Controller {
@@ -46,6 +50,7 @@ func NewController(mgr ctrl.Manager, st *state.ClusterState, gate *aigate.AIGate
 		actuator:     NewActuator(c, cfg),
 		oomTracker:   NewOOMTracker(c, cfg),
 		notifier:     NewNotifier(cfg, st.AuditLog),
+		downsized:    make(map[string]bool),
 	}
 }
 
@@ -118,7 +123,38 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
-	// AI Gate validation — fail-closed
+	// Safety actions (OOM bumps, CPU upsizes) always execute immediately.
+	if !isDownsizeRec(rec) {
+		return c.executeWithGate(ctx, rec)
+	}
+
+	// Downsize recommendations require auto-approve to be enabled.
+	if !c.config.Rightsizer.AutoApprove {
+		return nil
+	}
+
+	// Once-only: skip if this workload was already downsized.
+	workloadKey := rec.TargetNamespace + "/" + rec.TargetKind + "/" + rec.TargetName
+	c.mu.Lock()
+	already := c.downsized[workloadKey]
+	c.mu.Unlock()
+	if already {
+		return nil
+	}
+
+	if err := c.executeWithGate(ctx, rec); err != nil {
+		return err
+	}
+
+	// Record successful downsize — won't be downsized again this lifecycle.
+	c.mu.Lock()
+	c.downsized[workloadKey] = true
+	c.mu.Unlock()
+	return nil
+}
+
+// executeWithGate runs AI Gate validation then applies the recommendation.
+func (c *Controller) executeWithGate(ctx context.Context, rec optimizer.Recommendation) error {
 	if c.gate.RequiresValidation(rec) {
 		valReq := aigate.ValidationRequest{
 			Action:         rec.Summary,
@@ -129,8 +165,13 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 			return nil // Falls back to recommendation mode
 		}
 	}
-
 	return c.actuator.Apply(ctx, rec)
+}
+
+// isDownsizeRec returns true for proportional CPU+memory downsize recommendations.
+// OOM bumps and CPU upsizes are safety actions and return false.
+func isDownsizeRec(rec optimizer.Recommendation) bool {
+	return rec.Details["resource"] == "cpu+memory"
 }
 
 func (c *Controller) isExcluded(namespace string) bool {

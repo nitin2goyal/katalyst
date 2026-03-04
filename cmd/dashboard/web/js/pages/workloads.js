@@ -36,7 +36,7 @@ export async function renderWorkloads(targetEl) {
   const container = () => targetEl || $('#page-container');
   container().innerHTML = skeleton(5);
   try {
-    const wls = await api('/workloads');
+    const wls = await api('/workloads?pageSize=1000');
     const wlList = toArray(wls, 'workloads');
 
     const namespaces = [...new Set(wlList.map(w => w.namespace).filter(Boolean))];

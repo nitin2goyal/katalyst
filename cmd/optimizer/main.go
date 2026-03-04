@@ -164,6 +164,15 @@ func main() {
 		}
 		setupLog.Info("Restoring persisted controller dry-run states", "count", len(dryRunStates))
 	}
+	if autoApproveStates := settingsStore.LoadAutoApproveStates(); autoApproveStates != nil {
+		for name, autoApprove := range autoApproveStates {
+			switch name {
+			case "rightsizer":
+				cfg.Rightsizer.AutoApprove = autoApprove
+			}
+		}
+		setupLog.Info("Restoring persisted auto-approve states", "count", len(autoApproveStates))
+	}
 
 	if err := cfg.ValidateDetailed(); err != nil {
 		setupLog.Error(err, "Invalid configuration",

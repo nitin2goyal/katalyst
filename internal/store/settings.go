@@ -187,6 +187,45 @@ func (s *SettingsStore) SaveControllerEnabled(name string, enabled bool) {
 	s.set(keyControllerPrefix+name, v)
 }
 
+// ── Controller Auto-Approve States ───────────────────────────────────
+
+const keyAutoApprovePrefix = "controller_autoapprove:"
+
+// SaveAutoApprove persists a controller's auto-approve state.
+func (s *SettingsStore) SaveAutoApprove(name string, autoApprove bool) {
+	v := "false"
+	if autoApprove {
+		v = "true"
+	}
+	s.set(keyAutoApprovePrefix+name, v)
+}
+
+// LoadAutoApproveStates returns all persisted controller auto-approve states.
+func (s *SettingsStore) LoadAutoApproveStates() map[string]bool {
+	if s.db == nil {
+		return nil
+	}
+	rows, err := s.db.Query(`SELECT key, value FROM settings WHERE key LIKE ?`, keyAutoApprovePrefix+"%")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	states := map[string]bool{}
+	for rows.Next() {
+		var key, val string
+		if err := rows.Scan(&key, &val); err != nil {
+			continue
+		}
+		name := key[len(keyAutoApprovePrefix):]
+		states[name] = val == "true"
+	}
+	if len(states) == 0 {
+		return nil
+	}
+	return states
+}
+
 // LoadControllerStates returns all persisted controller enabled states.
 // Only controllers that were explicitly saved are returned.
 func (s *SettingsStore) LoadControllerStates() map[string]bool {

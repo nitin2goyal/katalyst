@@ -18,8 +18,8 @@ export async function computeRecommendations() {
   if (_cache && Date.now() - _cacheTs < CACHE_TTL) return _cache;
 
   const [nodes, workloads, nodeGroups] = await Promise.all([
-    api('/nodes').catch(() => []),
-    api('/workloads').catch(() => []),
+    api('/nodes?pageSize=1000').catch(() => []),
+    api('/workloads?pageSize=1000').catch(() => []),
     api('/nodegroups').catch(() => []),
   ]);
 

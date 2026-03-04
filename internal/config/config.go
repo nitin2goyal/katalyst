@@ -70,6 +70,7 @@ type NodeGroupMgrConfig struct {
 
 type RightsizingConfig struct {
 	Enabled             bool          `yaml:"enabled"`
+	AutoApprove         bool          `yaml:"autoApprove"` // Auto-approve downsize recommendations (once per workload)
 	LookbackWindow      time.Duration `yaml:"lookbackWindow"`
 	CPUTargetUtilPct    float64       `yaml:"cpuTargetUtilPct"`
 	MemoryTargetUtilPct float64       `yaml:"memoryTargetUtilPct"`

@@ -23,6 +23,9 @@ var controllerStates = map[string]bool{
 var dryRunStates = map[string]bool{
 	"nodeAutoscaler": true, "evictor": true, "rebalancer": true,
 }
+var autoApproveStates = map[string]bool{
+	"rightsizer": false,
+}
 
 var mockChannels = []map[string]any{
 	{"type": "slack", "name": "Slack #k8s-alerts", "target": "#k8s-alerts", "enabled": true},
@@ -66,6 +69,23 @@ func main() {
 	})
 	mux.HandleFunc("/api/v1/config/controllers/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/config/controllers/")
+		// Handle auto-approve sub-path: controllers/{name}/auto-approve
+		if strings.HasSuffix(path, "/auto-approve") {
+			name := strings.TrimSuffix(path, "/auto-approve")
+			if r.Method == http.MethodPut && name != "" {
+				var body map[string]interface{}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					writeJSON(w, map[string]string{"error": "invalid JSON"})
+					return
+				}
+				if aa, ok := body["autoApprove"].(bool); ok {
+					autoApproveStates[name] = aa
+				}
+			}
+			writeJSON(w, map[string]interface{}{"controller": name, "autoApprove": autoApproveStates[name]})
+			return
+		}
 		// Handle dry-run sub-path: controllers/{name}/dry-run
 		if strings.HasSuffix(path, "/dry-run") {
 			name := strings.TrimSuffix(path, "/dry-run")
@@ -562,6 +582,10 @@ func configHandler() any {
 	for k, v := range dryRunStates {
 		dr[k] = v
 	}
+	aa := make(map[string]bool, len(autoApproveStates))
+	for k, v := range autoApproveStates {
+		aa[k] = v
+	}
 	return map[string]any{
 		"mode":         currentMode,
 		"cloudProvider": "aws",
@@ -569,6 +593,7 @@ func configHandler() any {
 		"clusterName":  "demo-cluster",
 		"controllers":  ctrls,
 		"dryRun":       dr,
+		"autoApprove":  aa,
 	}
 }
 

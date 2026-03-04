@@ -48,6 +48,9 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"evictor":        h.config.Evictor.DryRun,
 			"rebalancer":     h.config.Rebalancer.DryRun,
 		},
+		"autoApprove": map[string]bool{
+			"rightsizer": h.config.Rightsizer.AutoApprove,
+		},
 	})
 }
 
@@ -149,6 +152,37 @@ func (h *ConfigHandler) SetController(w http.ResponseWriter, r *http.Request) {
 
 	h.settings.SaveControllerEnabled(name, req.Enabled)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "enabled": req.Enabled})
+}
+
+func (h *ConfigHandler) SetAutoApprove(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	var req struct {
+		AutoApprove bool `json:"autoApprove"`
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	h.mu.Lock()
+	switch name {
+	case "rightsizer":
+		h.config.Rightsizer.AutoApprove = req.AutoApprove
+	default:
+		h.mu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "controller does not support autoApprove: " + name})
+		return
+	}
+	h.mu.Unlock()
+
+	h.settings.SaveAutoApprove(name, req.AutoApprove)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "autoApprove": req.AutoApprove})
 }
 
 func (h *ConfigHandler) SetControllerDryRun(w http.ResponseWriter, r *http.Request) {
