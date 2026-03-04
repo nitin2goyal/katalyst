@@ -15,7 +15,7 @@ export async function renderAudit(targetEl) {
   const container = () => targetEl || $('#page-container');
   container().innerHTML = skeleton(5);
   try {
-    const data = await api('/audit');
+    const data = await api('/audit?pageSize=1000');
     const events = toArray(data, 'events', 'audit');
     const actionTypes = [...new Set(events.map(e => e.action).filter(Boolean))];
 

@@ -9,7 +9,7 @@ export async function renderRecsTab(targetEl) {
   targetEl.innerHTML = skeleton(5);
   try {
     const [recs, summary, clusterNodes, clusterWorkloads, debugData, configData] = await Promise.all([
-      api('/recommendations'),
+      api('/recommendations?pageSize=1000'),
       api('/recommendations/summary').catch(() => null),
       api('/nodes?pageSize=1000').catch(() => []),
       api('/workloads?pageSize=1000').catch(() => []),

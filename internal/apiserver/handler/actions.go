@@ -50,7 +50,7 @@ type badPodEntry struct {
 func (h *ActionsHandler) ListBadPods(w http.ResponseWriter, r *http.Request) {
 	allPods := h.state.GetAllPods()
 
-	var pods []badPodEntry
+	pods := []badPodEntry{}
 	byNamespace := map[string]int{}
 	byStatus := map[string]int{}
 
@@ -96,6 +96,15 @@ type deleteError struct {
 	Error     string `json:"error"`
 }
 
+// protectedNamespaces are namespaces where pod deletion is never allowed.
+var protectedNamespaces = map[string]bool{
+	"kube-system":     true,
+	"kube-public":     true,
+	"kube-node-lease": true,
+}
+
+const maxDeleteBatch = 100
+
 func (h *ActionsHandler) DeletePods(w http.ResponseWriter, r *http.Request) {
 	var req deletePodsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -106,22 +115,61 @@ func (h *ActionsHandler) DeletePods(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no pods specified"})
 		return
 	}
+	if len(req.Pods) > maxDeleteBatch {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("too many pods: max %d per request", maxDeleteBatch)})
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	deleted := 0
-	var errors []deleteError
+	errors := []deleteError{}
 	for _, ref := range req.Pods {
+		if ref.Name == "" || ref.Namespace == "" {
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     "name and namespace are required",
+			})
+			continue
+		}
+		if protectedNamespaces[ref.Namespace] {
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     "cannot delete pods in protected namespace",
+			})
+			continue
+		}
+
+		// Fetch the pod first to verify it exists and is in a bad state.
 		pod := &corev1.Pod{}
-		pod.Name = ref.Name
-		pod.Namespace = ref.Namespace
+		key := client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}
+		if err := h.client.Get(ctx, key, pod); err != nil {
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     fmt.Sprintf("pod not found: %v", err),
+			})
+			continue
+		}
+		status := computePodStatus(pod)
+		if !badStatusSet[status] {
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     fmt.Sprintf("pod is not in a bad state (status: %s)", status),
+			})
+			continue
+		}
+
 		if err := h.client.Delete(ctx, pod); err != nil {
 			slog.Warn("failed to delete pod", "name", ref.Name, "namespace", ref.Namespace, "error", err)
 			errors = append(errors, deleteError{
 				Name:      ref.Name,
 				Namespace: ref.Namespace,
-				Error:     "failed to delete pod",
+				Error:     fmt.Sprintf("failed to delete pod: %v", err),
 			})
 		} else {
 			deleted++

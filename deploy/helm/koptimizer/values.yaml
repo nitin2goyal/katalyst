@@ -47,6 +47,7 @@ config:
 
   rightsizer:
     enabled: true
+    autoApprove: true
     lookbackWindow: "168h"  # 7 days
     cpuTargetUtilPct: 70
     memoryTargetUtilPct: 75

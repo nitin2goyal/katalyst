@@ -32,7 +32,7 @@ export async function renderEvents(targetEl) {
   container().innerHTML = skeleton(5);
   try {
     const [data, cfg] = await Promise.all([
-      api('/events').catch(() => api('/audit').catch(() => [])),
+      api('/events?pageSize=1000').catch(() => api('/audit').catch(() => [])),
       api('/config').catch(() => ({})),
     ]);
     const mode = ((cfg && cfg.mode) || 'recommend').toUpperCase();
