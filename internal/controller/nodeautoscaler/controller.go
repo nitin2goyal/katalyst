@@ -171,44 +171,79 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 	if direction == "down" {
 		snapshot := c.state.Snapshot()
 		drained := 0
-		attempted := 0
+		drainAttempts := 0
 		nodesToRemove := rec.EstimatedImpact.NodesAffected
-		maxAttempts := c.config.NodeAutoscaler.MaxScaleDownNodes
+		maxDrainAttempts := c.config.NodeAutoscaler.MaxScaleDownNodes
 
+		// Collect drain candidates from the target group, sorted by total
+		// memory requested (ascending). This ensures we drain the lightest
+		// nodes first — they have the fewest pods to relocate and are most
+		// likely to pass the pre-drain feasibility check. Without sorting,
+		// the loop processes nodes in arbitrary snapshot order and may waste
+		// all attempts on heavily-packed nodes that can't be drained.
+		type drainCandidate struct {
+			nodeInfo     optimizer.NodeInfo
+			memRequested int64
+		}
+		var candidates []drainCandidate
 		for _, n := range snapshot.Nodes {
-			if drained >= nodesToRemove {
-				break
-			}
-			// Stop after max attempts — don't keep cordoning nodes on failures.
-			// Without this, partial drain failures (node stays cordoned, error returned)
-			// let the loop iterate through every node in the group.
-			if attempted >= maxAttempts {
-				logger.Info("Max scale-down attempts reached, stopping",
-					"attempted", attempted, "drained", drained, "maxAttempts", maxAttempts)
-				break
-			}
 			if n.NodeGroup != nodeGroupID {
 				continue
 			}
-			// Pick underutilized nodes
-			cpuUtil := float64(0)
+			// Use request-based utilization (not usage) to match the
+			// scheduler's view. The pre-drain check evaluates placement
+			// using requests, so filtering by usage here would select
+			// nodes that look idle but are fully committed by requests.
+			cpuReqPct := float64(0)
 			if n.CPUCapacity > 0 {
-				cpuUtil = float64(n.CPUUsed) / float64(n.CPUCapacity) * 100
+				cpuReqPct = float64(n.CPURequested) / float64(n.CPUCapacity) * 100
 			}
-			if cpuUtil >= c.config.NodeAutoscaler.ScaleDownThreshold {
+			memReqPct := float64(0)
+			if n.MemoryCapacity > 0 {
+				memReqPct = float64(n.MemoryRequested) / float64(n.MemoryCapacity) * 100
+			}
+			// Skip nodes that are well-utilized by requests — draining
+			// them would require placing a large volume of pods elsewhere.
+			if cpuReqPct >= 80 && memReqPct >= 80 {
 				continue
 			}
+			candidates = append(candidates, drainCandidate{
+				nodeInfo:     n,
+				memRequested: n.MemoryRequested,
+			})
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			return candidates[i].memRequested < candidates[j].memRequested
+		})
 
+		logger.Info("Scale-down drain candidates",
+			"nodeGroup", nodeGroupID, "candidates", len(candidates),
+			"nodesToRemove", nodesToRemove)
+
+		for _, cand := range candidates {
+			if drained >= nodesToRemove {
+				break
+			}
+			// Stop after max drain attempts — don't keep cordoning nodes
+			// on failures. Pre-drain check failures are cheap and don't
+			// count; only actual drain attempts count.
+			if drainAttempts >= maxDrainAttempts {
+				logger.Info("Max drain attempts reached, stopping",
+					"drainAttempts", drainAttempts, "drained", drained, "max", maxDrainAttempts)
+				break
+			}
+
+			n := cand.nodeInfo
 			nodeName := n.Node.Name
 			if err := c.state.NodeLock.TryLock(nodeName, "nodeautoscaler"); err != nil {
 				logger.Info("Skipping node, locked by another controller", "node", nodeName, "error", err)
 				continue
 			}
 
-			attempted++
-
 			// Pre-drain feasibility: check PDBs and pod placement before cordoning.
 			// This avoids the cordon→fail→uncordon churn when a drain is doomed.
+			// Failures here are cheap (no side effects), so they don't count
+			// against maxDrainAttempts.
 			if err := c.preDrainFeasibilityCheck(ctx, snapshot, nodeName); err != nil {
 				logger.Info("Skipping node, pre-drain check failed",
 					"node", nodeName, "reason", err.Error())
@@ -217,6 +252,8 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 					fmt.Sprintf("pre-drain check: %v", err))
 				continue
 			}
+
+			drainAttempts++
 
 			c.state.AuditLog.Record("drain-before-scaledown", nodeName, "nodeautoscaler",
 				fmt.Sprintf("draining node before scaling %s to %d", nodeGroupID, desired))

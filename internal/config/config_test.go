@@ -19,8 +19,8 @@ func TestDefaultConfig_ReturnsExpectedDefaults(t *testing.T) {
 	if cfg.NodeAutoscaler.ScaleUpThreshold != 98.0 {
 		t.Errorf("ScaleUpThreshold = %v, want %v", cfg.NodeAutoscaler.ScaleUpThreshold, 98.0)
 	}
-	if cfg.NodeAutoscaler.ScaleDownThreshold != 30.0 {
-		t.Errorf("ScaleDownThreshold = %v, want %v", cfg.NodeAutoscaler.ScaleDownThreshold, 30.0)
+	if cfg.NodeAutoscaler.ScaleDownThreshold != 50.0 {
+		t.Errorf("ScaleDownThreshold = %v, want %v", cfg.NodeAutoscaler.ScaleDownThreshold, 50.0)
 	}
 	if cfg.Rightsizer.OOMBumpMultiplier != 2.5 {
 		t.Errorf("OOMBumpMultiplier = %v, want %v", cfg.Rightsizer.OOMBumpMultiplier, 2.5)
@@ -118,7 +118,7 @@ region: eastus
 	if cfg.NodeAutoscaler.ScaleUpThreshold != 98.0 {
 		t.Errorf("ScaleUpThreshold = %v, want default %v", cfg.NodeAutoscaler.ScaleUpThreshold, 98.0)
 	}
-	if cfg.NodeAutoscaler.ScaleDownThreshold != 30.0 {
+	if cfg.NodeAutoscaler.ScaleDownThreshold != 50.0 {
 		t.Errorf("ScaleDownThreshold = %v, want default %v", cfg.NodeAutoscaler.ScaleDownThreshold, 30.0)
 	}
 	if cfg.Rightsizer.OOMBumpMultiplier != 2.5 {

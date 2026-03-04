@@ -38,10 +38,14 @@ type gkeTaint struct {
 }
 
 // gkeAutoscaling represents node pool autoscaling config.
+// Regional clusters use totalMinNodeCount/totalMaxNodeCount (across all zones),
+// while zonal clusters use minNodeCount/maxNodeCount (per zone).
 type gkeAutoscaling struct {
-	Enabled      bool `json:"enabled"`
-	MinNodeCount int  `json:"minNodeCount"`
-	MaxNodeCount int  `json:"maxNodeCount"`
+	Enabled            bool `json:"enabled"`
+	MinNodeCount       int  `json:"minNodeCount"`
+	MaxNodeCount       int  `json:"maxNodeCount"`
+	TotalMinNodeCount  int  `json:"totalMinNodeCount"`
+	TotalMaxNodeCount  int  `json:"totalMaxNodeCount"`
 }
 
 // gkeNodePool represents a GKE node pool from the REST API.
@@ -240,12 +244,21 @@ func mapNodePoolToNodeGroup(ctx context.Context, np gkeNodePool, region string, 
 		taints = append(taints, taint)
 	}
 
-	// When GKE autoscaling is disabled, the API returns minNodeCount=0 and
-	// maxNodeCount=0 to mean "not applicable" (pool is fixed-size). Treat
-	// MaxCount=0 as uncapped so the optimizer's bounds validation doesn't
-	// reject every scaling operation.
-	minCount := np.Autoscaling.MinNodeCount
-	maxCount := np.Autoscaling.MaxNodeCount
+	// Regional clusters use totalMinNodeCount/totalMaxNodeCount (total across
+	// all zones). Zonal clusters use minNodeCount/maxNodeCount (per zone).
+	// Prefer the total fields when available since they reflect the actual
+	// autoscaler bounds; the per-zone fields are 0 on regional clusters.
+	minCount := np.Autoscaling.TotalMinNodeCount
+	maxCount := np.Autoscaling.TotalMaxNodeCount
+	if minCount == 0 && maxCount == 0 {
+		// Fall back to per-zone fields (zonal clusters or older API versions).
+		minCount = np.Autoscaling.MinNodeCount
+		maxCount = np.Autoscaling.MaxNodeCount
+	}
+
+	// When GKE autoscaling is disabled, the API returns all counts as 0.
+	// Treat MaxCount=0 as uncapped so the optimizer's bounds validation
+	// doesn't reject every scaling operation.
 	if !np.Autoscaling.Enabled {
 		minCount = 0
 		if maxCount == 0 {

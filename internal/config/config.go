@@ -115,6 +115,9 @@ type RebalancerConfig struct {
 	DryRun                 bool          `yaml:"dryRun"`
 	Schedule               string        `yaml:"schedule"` // Cron expression
 	ImbalanceThresholdPct  float64       `yaml:"imbalanceThresholdPct"` // Min imbalance % to trigger rebalance (default 40)
+	TargetUtilizationPct   float64       `yaml:"targetUtilizationPct"`  // Pack target nodes to this % of requests (default 95)
+	ConsolidationInterval  time.Duration `yaml:"consolidationInterval"` // How often to run consolidation (default 60s)
+	MaxEvacuatePerCycle    int           `yaml:"maxEvacuatePerCycle"`   // Max nodes to evacuate per cycle (default 2)
 	RescheduleTimeout      time.Duration `yaml:"rescheduleTimeout"`    // How long to wait for pods to reschedule after eviction (default 60s)
 	BusyRedistribution struct {
 		Enabled                bool    `yaml:"enabled"`
@@ -232,7 +235,7 @@ func DefaultConfig() *Config {
 			NodeTemplatesEnabled: true,
 			ScanInterval:       30 * time.Second,
 			ScaleUpThreshold:   98.0,
-			ScaleDownThreshold: 30.0,
+			ScaleDownThreshold: 50.0,
 			ScaleDownDelay:     10 * time.Minute,
 			MaxScaleUpNodes:    5,
 			MaxScaleDownNodes:  2,
@@ -281,6 +284,9 @@ func DefaultConfig() *Config {
 			DryRun:                true, // safe default
 			Schedule:              "0 3 * * SUN",
 			ImbalanceThresholdPct: 40.0,
+			TargetUtilizationPct:  95.0,
+			ConsolidationInterval: 60 * time.Second,
+			MaxEvacuatePerCycle:   2,
 		},
 		GPU: GPUConfig{
 			Enabled:                      true,

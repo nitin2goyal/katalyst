@@ -189,6 +189,16 @@ func (e *Executor) Execute(ctx context.Context, rec optimizer.Recommendation) er
 	}
 
 uncordon:
+	// For consolidation recommendations, leave the node cordoned so the node
+	// autoscaler (or cloud provider's autoscaler) can remove the empty node.
+	// Uncordoning would let the scheduler place new pods there, defeating
+	// the purpose of evacuation.
+	if rec.Details["consolidate"] == "true" {
+		logger.Info("Consolidation complete, leaving node cordoned for removal",
+			"node", nodeName, "evicted", evicted)
+		return nil
+	}
+
 	// Re-fetch the node to avoid conflicts from stale resourceVersion
 	node = &corev1.Node{}
 	if err := e.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {

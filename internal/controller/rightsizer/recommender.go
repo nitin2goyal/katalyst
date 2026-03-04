@@ -110,11 +110,17 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 			suggestedMem = memFloor
 		}
 
-		// Never increase memory beyond current request — the goal is to free
-		// capacity, not consume more. On highmem nodes the ratio can push
-		// memory well above the current request which is counterproductive.
+		// On highmem nodes (e.g., n4d-highmem-32 with 1:8 CPU:Mem ratio),
+		// the ratio pushes memory well above current request (e.g., a pod
+		// with 5Gi gets recommended 22Gi). Never increase memory — and
+		// fall back to proportional reduction so memory actually decreases
+		// instead of staying frozen at the current value.
 		if suggestedMem > analysis.MemRequestBytes {
-			suggestedMem = analysis.MemRequestBytes
+			cpuKeepRatio := float64(suggestedCPU) / float64(analysis.CPURequestMilli)
+			suggestedMem = int64(float64(analysis.MemRequestBytes) * cpuKeepRatio)
+			if suggestedMem < memFloor {
+				suggestedMem = memFloor
+			}
 		}
 	} else {
 		// No node info — fall back to proportional reduction using same keep-ratio as CPU

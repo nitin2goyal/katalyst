@@ -19,7 +19,7 @@ import (
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
-// Controller periodically rebalances workloads for optimal packing.
+// Controller periodically consolidates workloads for optimal packing.
 type Controller struct {
 	client      client.Client
 	provider    cloudprovider.CloudProvider
@@ -36,6 +36,14 @@ type Controller struct {
 
 func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
 	c := mgr.GetClient()
+	targetPct := cfg.Rebalancer.TargetUtilizationPct
+	if targetPct <= 0 {
+		targetPct = 95.0
+	}
+	maxEvac := cfg.Rebalancer.MaxEvacuatePerCycle
+	if maxEvac <= 0 {
+		maxEvac = 2
+	}
 	return &Controller{
 		client:     c,
 		provider:   provider,
@@ -43,7 +51,7 @@ func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *s
 		guard:      guard,
 		gate:       gate,
 		config:     cfg,
-		planner:    NewPlannerWithThreshold(cfg.Rebalancer.ImbalanceThresholdPct),
+		planner:    NewPlannerWithConfig(targetPct, maxEvac),
 		executor:   NewExecutor(c, cfg),
 		scheduler:  NewScheduler(cfg),
 		busyRedist: NewBusyRedistributor(c, cfg),
@@ -65,7 +73,7 @@ func (c *Controller) Name() string { return "rebalancer" }
 func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnapshot) ([]optimizer.Recommendation, error) {
 	var recs []optimizer.Recommendation
 
-	// Plan optimal distribution
+	// Consolidation: pack pods onto fewer nodes at high utilization.
 	planRecs, err := c.planner.ComputePlan(snapshot)
 	if err != nil {
 		return nil, err
@@ -138,45 +146,43 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 func (c *Controller) run(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("rebalancer")
 
-	// Scheduled rebalancing
+	// Scheduled rebalancing (legacy cron mode, still supported)
 	var cronScheduler *cron.Cron
 	if c.config.Rebalancer.Schedule != "" {
 		cronScheduler = cron.New()
 		cronScheduler.AddFunc(c.config.Rebalancer.Schedule, func() {
 			logger.Info("Running scheduled rebalance")
-			snapshot := c.state.Snapshot()
-			recs, err := c.Analyze(ctx, snapshot)
-			if err != nil {
-				logger.Error(err, "Scheduled rebalance analysis failed")
-				return
-			}
-			for _, rec := range recs {
-				if err := c.Execute(ctx, rec); err != nil {
-					logger.Error(err, "Execution failed", "recommendation", rec.ID)
-				}
-			}
+			c.runConsolidationCycle(ctx)
 		})
 		cronScheduler.Start()
 	}
 	defer func() {
 		if cronScheduler != nil {
 			stopCtx := cronScheduler.Stop()
-			// Wait for any in-flight cron jobs to finish
 			<-stopCtx.Done()
 		}
 	}()
 
-	// Continuous busy redistribution
-	if c.config.Rebalancer.BusyRedistribution.Enabled {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if c.state.Breaker.IsTripped(c.Name()) {
-					logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
-					continue
-				}
+	// Continuous consolidation loop: runs every ConsolidationInterval to
+	// pack pods tightly and free nodes for removal.
+	interval := c.config.Rebalancer.ConsolidationInterval
+	if interval <= 0 {
+		interval = 60 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if c.state.Breaker.IsTripped(c.Name()) {
+				logger.V(1).Info("Circuit breaker tripped, skipping consolidation cycle")
+				continue
+			}
+			c.runConsolidationCycle(ctx)
+
+			// Also run busy redistribution if enabled
+			if c.config.Rebalancer.BusyRedistribution.Enabled {
 				snapshot := c.state.Snapshot()
 				recs, err := c.busyRedist.Analyze(ctx, snapshot)
 				if err != nil {
@@ -192,11 +198,28 @@ func (c *Controller) run(ctx context.Context) {
 						c.state.Breaker.RecordSuccess(c.Name())
 					}
 				}
-			case <-ctx.Done():
-				return
 			}
+		case <-ctx.Done():
+			return
 		}
 	}
+}
 
-	<-ctx.Done()
+func (c *Controller) runConsolidationCycle(ctx context.Context) {
+	logger := log.FromContext(ctx).WithName("rebalancer")
+	snapshot := c.state.Snapshot()
+	recs, err := c.planner.ComputePlan(snapshot)
+	if err != nil {
+		logger.Error(err, "Consolidation analysis failed")
+		c.state.Breaker.RecordFailure(c.Name())
+		return
+	}
+	for _, rec := range recs {
+		if err := c.Execute(ctx, rec); err != nil {
+			logger.Error(err, "Consolidation failed", "recommendation", rec.ID)
+			c.state.Breaker.RecordFailure(c.Name())
+		} else {
+			c.state.Breaker.RecordSuccess(c.Name())
+		}
+	}
 }

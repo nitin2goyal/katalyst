@@ -3,7 +3,6 @@ package rebalancer
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -12,196 +11,257 @@ import (
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
-// Planner computes optimal workload distribution using bin-packing.
+// Planner computes consolidation recommendations that pack pods onto fewer
+// nodes at high utilization, freeing lightly-loaded nodes for removal.
 type Planner struct {
-	imbalanceThresholdPct float64
-	simulator             *scheduler.Simulator
+	targetUtilPct float64 // pack target nodes to this % (default 95)
+	maxEvacuate   int     // max nodes to evacuate per cycle
+	simulator     *scheduler.Simulator
 }
 
 func NewPlanner() *Planner {
-	return &Planner{imbalanceThresholdPct: 40.0, simulator: scheduler.NewSimulator()}
+	return &Planner{targetUtilPct: 95.0, maxEvacuate: 2, simulator: scheduler.NewSimulator()}
 }
 
-// NewPlannerWithThreshold creates a Planner with a configurable imbalance threshold.
+// NewPlannerWithThreshold creates a Planner with a configurable target utilization.
 func NewPlannerWithThreshold(thresholdPct float64) *Planner {
 	if thresholdPct <= 0 {
-		thresholdPct = 40.0
+		thresholdPct = 95.0
 	}
-	return &Planner{imbalanceThresholdPct: thresholdPct, simulator: scheduler.NewSimulator()}
+	return &Planner{targetUtilPct: thresholdPct, maxEvacuate: 2, simulator: scheduler.NewSimulator()}
 }
 
-// nodeUtil pairs a node with its CPU utilization percentage.
-type nodeUtil struct {
-	index   int
-	node    optimizer.NodeInfo
-	cpuPct  float64
-	freeCPU int64
+// NewPlannerWithConfig creates a Planner with full configuration.
+func NewPlannerWithConfig(targetPct float64, maxEvacuate int) *Planner {
+	if targetPct <= 0 {
+		targetPct = 95.0
+	}
+	if maxEvacuate <= 0 {
+		maxEvacuate = 2
+	}
+	return &Planner{targetUtilPct: targetPct, maxEvacuate: maxEvacuate, simulator: scheduler.NewSimulator()}
 }
 
-// ComputePlan generates rebalancing recommendations with bin-packing.
+// consolidationNode tracks request-based utilization for bin-packing.
+type consolidationNode struct {
+	info         optimizer.NodeInfo
+	cpuReqPct    float64
+	memReqPct    float64
+	cpuRequested int64
+	memRequested int64
+	cpuCapacity  int64
+	memCapacity  int64
+}
+
+// ComputePlan identifies lightly-loaded nodes whose pods can be packed onto
+// remaining nodes (targeting 95% request utilization), then recommends
+// evacuating them so the node autoscaler can remove the empty nodes.
 func (p *Planner) ComputePlan(snapshot *optimizer.ClusterSnapshot) ([]optimizer.Recommendation, error) {
 	if len(snapshot.Nodes) < 2 {
 		return nil, nil
 	}
 
-	// Calculate per-node utilization
-	var nodes []nodeUtil
-	for i, n := range snapshot.Nodes {
-		if n.CPUCapacity > 0 {
-			pct := float64(n.CPURequested) / float64(n.CPUCapacity) * 100
-			nodes = append(nodes, nodeUtil{
-				index:   i,
-				node:    n,
-				cpuPct:  pct,
-				freeCPU: n.CPUCapacity - n.CPURequested,
-			})
-		}
-	}
-
-	if len(nodes) == 0 {
-		return nil, nil
-	}
-
-	// Sort by utilization ascending
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].cpuPct < nodes[j].cpuPct })
-
-	spread := nodes[len(nodes)-1].cpuPct - nodes[0].cpuPct
-
-	// Only suggest rebalancing if spread exceeds the configured threshold.
-	if spread < p.imbalanceThresholdPct {
-		return nil, nil
-	}
-
-	avgUtil := 0.0
-	for _, n := range nodes {
-		avgUtil += n.cpuPct
-	}
-	avgUtil /= float64(len(nodes))
-
-	// Identify overloaded and underloaded nodes
-	// Overloaded: above average + 10%, Underloaded: below average - 10%
-	overloadThreshold := avgUtil + 10
-	underloadThreshold := avgUtil - 10
-
-	var overloaded, underloaded []nodeUtil
-	for _, n := range nodes {
-		if n.cpuPct >= overloadThreshold {
-			overloaded = append(overloaded, n)
-		} else if n.cpuPct <= underloadThreshold {
-			underloaded = append(underloaded, n)
-		}
-	}
-
-	// Build pods-by-node map and underloaded node list for simulator
-	podsByNode := make(map[string][]*corev1.Pod)
+	// Build per-node request utilization, skipping GPU and cordoned nodes.
+	var nodes []consolidationNode
 	for _, n := range snapshot.Nodes {
-		podsByNode[n.Node.Name] = n.Pods
-	}
-	var underloadedK8sNodes []*corev1.Node
-	for _, u := range underloaded {
-		if u.node.Node != nil {
-			underloadedK8sNodes = append(underloadedK8sNodes, u.node.Node)
-		}
-	}
-
-	// Bin-packing: identify specific pods on overloaded nodes that could fit on underloaded nodes
-	// Uses the scheduler simulator to check taints, tolerations, affinity, and memory in addition to CPU.
-	var movablePods []string
-	var targetNodes []string
-	podsAffected := 0
-
-	for _, over := range overloaded {
-		if over.node.Node == nil {
+		if n.CPUCapacity <= 0 || n.MemoryCapacity <= 0 {
 			continue
 		}
-		for _, pod := range over.node.Pods {
+		if n.Node.Spec.Unschedulable {
+			continue
+		}
+		if n.IsGPUNode {
+			continue
+		}
+		cpuReqPct := float64(n.CPURequested) / float64(n.CPUCapacity) * 100
+		memReqPct := float64(n.MemoryRequested) / float64(n.MemoryCapacity) * 100
+		nodes = append(nodes, consolidationNode{
+			info:         n,
+			cpuReqPct:    cpuReqPct,
+			memReqPct:    memReqPct,
+			cpuRequested: n.CPURequested,
+			memRequested: n.MemoryRequested,
+			cpuCapacity:  n.CPUCapacity,
+			memCapacity:  n.MemoryCapacity,
+		})
+	}
+
+	if len(nodes) < 2 {
+		return nil, nil
+	}
+
+	// Sort by memory requested ascending — lightest (easiest to evacuate) first.
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].memRequested < nodes[j].memRequested
+	})
+
+	// Source threshold: nodes below 50% on BOTH CPU and memory requests are
+	// candidates for evacuation. They're lightly loaded and their pods can
+	// likely fit on remaining nodes.
+	const sourceThresholdPct = 50.0
+
+	// Build initial pods-by-node map for the simulator. This tracks
+	// accumulated pod placements as we simulate evacuations.
+	podsByNode := make(map[string][]*corev1.Pod)
+	for _, n := range snapshot.Nodes {
+		podsByNode[n.Node.Name] = append([]*corev1.Pod{}, n.Pods...)
+	}
+
+	// Track accumulated requests on each node as we simulate placements.
+	accCPU := make(map[string]int64)
+	accMem := make(map[string]int64)
+	for _, n := range nodes {
+		accCPU[n.info.Node.Name] = n.cpuRequested
+		accMem[n.info.Node.Name] = n.memRequested
+	}
+
+	// Track which nodes we've marked for evacuation (excluded from targets).
+	evacuated := make(map[string]bool)
+
+	var recs []optimizer.Recommendation
+
+	for _, source := range nodes {
+		if len(recs) >= p.maxEvacuate {
+			break
+		}
+
+		// Only consider lightly-loaded nodes as evacuation sources.
+		if source.cpuReqPct >= sourceThresholdPct || source.memReqPct >= sourceThresholdPct {
+			continue
+		}
+
+		nodeName := source.info.Node.Name
+
+		// Collect movable pods on this source node.
+		var movablePods []*corev1.Pod
+		for _, pod := range source.info.Pods {
 			if pod == nil {
 				continue
 			}
-			// Skip DaemonSet pods
-			isDaemonSet := false
-			for _, ref := range pod.OwnerReferences {
-				if ref.Kind == "DaemonSet" {
-					isDaemonSet = true
+			if !canMovePod(pod) {
+				continue
+			}
+			movablePods = append(movablePods, pod)
+		}
+
+		if len(movablePods) == 0 {
+			continue
+		}
+
+		// Sort pods largest-first (by memory request descending) for
+		// best-fit-decreasing bin packing.
+		sort.Slice(movablePods, func(i, j int) bool {
+			_, memI := scheduler.EffectivePodResources(movablePods[i])
+			_, memJ := scheduler.EffectivePodResources(movablePods[j])
+			return memI > memJ
+		})
+
+		// Build target node list: all schedulable nodes except evacuated
+		// ones and the source itself.
+		var targetNodes []*corev1.Node
+		targetCaps := make(map[string][2]int64) // [cpuCap, memCap]
+		for _, n := range nodes {
+			tName := n.info.Node.Name
+			if tName == nodeName || evacuated[tName] {
+				continue
+			}
+			targetNodes = append(targetNodes, n.info.Node)
+			targetCaps[tName] = [2]int64{n.cpuCapacity, n.memCapacity}
+		}
+
+		// Try to place every movable pod on a target node.
+		allPlaced := true
+		// Track tentative placements so we can roll back on failure.
+		type placement struct {
+			targetNode string
+			pod        *corev1.Pod
+			cpuReq     int64
+			memReq     int64
+		}
+		var placements []placement
+
+		for _, pod := range movablePods {
+			podCPU, podMem := scheduler.EffectivePodResources(pod)
+			placed := false
+
+			// Find fitting nodes using the scheduler (checks taints,
+			// affinity, topology, etc.) then apply the 95% cap.
+			fitting := p.simulator.FindFittingNodes(pod, targetNodes, podsByNode)
+			// Sort fitting nodes by free memory ascending (best-fit: tightest first).
+			sort.Slice(fitting, func(i, j int) bool {
+				return accMem[fitting[i]] > accMem[fitting[j]]
+			})
+
+			for _, tName := range fitting {
+				caps := targetCaps[tName]
+				newCPU := accCPU[tName] + podCPU
+				newMem := accMem[tName] + podMem
+				cpuPct := float64(newCPU) / float64(caps[0]) * 100
+				memPct := float64(newMem) / float64(caps[1]) * 100
+				if cpuPct <= p.targetUtilPct && memPct <= p.targetUtilPct {
+					// Place pod here.
+					accCPU[tName] = newCPU
+					accMem[tName] = newMem
+					podsByNode[tName] = append(podsByNode[tName], pod)
+					placements = append(placements, placement{tName, pod, podCPU, podMem})
+					placed = true
 					break
 				}
 			}
-			if isDaemonSet {
-				continue
-			}
 
-			// Use simulator to find fitting underloaded nodes
-			fitting := p.simulator.FindFittingNodes(pod, underloadedK8sNodes, podsByNode)
-			if len(fitting) > 0 {
-				movablePods = append(movablePods, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
-				targetNodes = append(targetNodes, fitting[0])
-				// Add pod to the target node's existing pods for subsequent checks
-				podsByNode[fitting[0]] = append(podsByNode[fitting[0]], pod)
-				podsAffected++
+			if !placed {
+				allPlaced = false
+				break
 			}
 		}
-	}
 
-	// Build the overloaded/underloaded node name lists
-	var overloadedNames, underloadedNames []string
-	for _, n := range overloaded {
-		if n.node.Node != nil {
-			overloadedNames = append(overloadedNames, n.node.Node.Name)
+		if !allPlaced {
+			// Roll back tentative placements for this source.
+			for _, pl := range placements {
+				accCPU[pl.targetNode] -= pl.cpuReq
+				accMem[pl.targetNode] -= pl.memReq
+				pods := podsByNode[pl.targetNode]
+				if len(pods) > 0 {
+					podsByNode[pl.targetNode] = pods[:len(pods)-1]
+				}
+			}
+			continue
 		}
-	}
-	for _, n := range underloaded {
-		if n.node.Node != nil {
-			underloadedNames = append(underloadedNames, n.node.Node.Name)
-		}
-	}
 
-	details := map[string]string{
-		"spread":           fmt.Sprintf("%.1f", spread),
-		"minUtil":          fmt.Sprintf("%.1f", nodes[0].cpuPct),
-		"maxUtil":          fmt.Sprintf("%.1f", nodes[len(nodes)-1].cpuPct),
-		"avgUtil":          fmt.Sprintf("%.1f", avgUtil),
-		"overloadedNodes":  strings.Join(overloadedNames, ","),
-		"underloadedNodes": strings.Join(underloadedNames, ","),
-	}
+		// All pods from this source can be placed — recommend evacuation.
+		evacuated[nodeName] = true
 
-	if len(movablePods) > 0 {
-		details["movablePods"] = strings.Join(movablePods, ",")
-	}
-	if len(targetNodes) > 0 {
-		details["targetNodes"] = strings.Join(targetNodes, ",")
-	}
-	// Use the most overloaded node as the primary target for execution
-	if len(overloadedNames) > 0 {
-		details["nodeName"] = overloadedNames[0]
-	}
-
-	// Require AI Gate approval for operations affecting many nodes.
-	requiresGate := len(overloaded)+len(underloaded) > 3 || podsAffected > 10
-
-	return []optimizer.Recommendation{
-		{
-			ID:             fmt.Sprintf("rebalance-%d", time.Now().Unix()),
+		recs = append(recs, optimizer.Recommendation{
+			ID:             fmt.Sprintf("consolidate-%s-%d", nodeName, time.Now().Unix()),
 			Type:           optimizer.RecommendationRebalance,
-			Priority:       optimizer.PriorityLow,
+			Priority:       optimizer.PriorityMedium,
 			AutoExecutable: true,
-			RequiresAIGate: requiresGate,
-			TargetKind:     "Cluster",
-			TargetName:     "cluster",
-			Summary:        fmt.Sprintf("Rebalance cluster: utilization spread is %.0f%% (min: %.0f%%, max: %.0f%%, avg: %.0f%%), %d pods to move", spread, nodes[0].cpuPct, nodes[len(nodes)-1].cpuPct, avgUtil, podsAffected),
+			TargetKind:     "Node",
+			TargetName:     nodeName,
+			Summary: fmt.Sprintf("Consolidate: evacuate node %s (CPU req: %.0f%%, Mem req: %.0f%%, %d pods) to pack remaining nodes toward %.0f%%",
+				nodeName, source.cpuReqPct, source.memReqPct, len(movablePods), p.targetUtilPct),
 			ActionSteps: []string{
-				fmt.Sprintf("Cordon overloaded nodes: %s", strings.Join(overloadedNames, ", ")),
-				fmt.Sprintf("Evict %d selected pods (PDB-aware)", podsAffected),
-				fmt.Sprintf("Target underloaded nodes for scheduling: %s", strings.Join(underloadedNames, ", ")),
-				"Let scheduler place pods on less loaded nodes",
-				"Uncordon source nodes after rescheduling completes",
+				fmt.Sprintf("Cordon node %s", nodeName),
+				fmt.Sprintf("Evict %d movable pods (PDB-aware)", len(movablePods)),
+				"Scheduler places pods on remaining nodes (targeting high utilization)",
+				"Node autoscaler removes empty cordoned node",
 			},
 			EstimatedImpact: optimizer.ImpactEstimate{
-				NodesAffected: len(overloaded) + len(underloaded),
-				PodsAffected:  podsAffected,
+				NodesAffected: 1,
+				PodsAffected:  len(movablePods),
 				RiskLevel:     "low",
 			},
-			Details:   details,
+			Details: map[string]string{
+				"nodeName":    nodeName,
+				"consolidate": "true",
+				"cpuReqPct":   fmt.Sprintf("%.1f", source.cpuReqPct),
+				"memReqPct":   fmt.Sprintf("%.1f", source.memReqPct),
+				"podsToMove":  fmt.Sprintf("%d", len(movablePods)),
+				"nodeGroup":   source.info.NodeGroup,
+			},
 			CreatedAt: time.Now(),
-		},
-	}, nil
+		})
+	}
+
+	return recs, nil
 }

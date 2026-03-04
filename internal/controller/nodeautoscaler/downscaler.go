@@ -47,19 +47,23 @@ func (d *Downscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 			continue
 		}
 
-		// Count underutilized nodes
+		// Count underutilized nodes using request-based utilization (not usage).
+		// The scheduler places pods based on requests, so a node that appears
+		// idle by usage but is fully committed by requests cannot accept more
+		// pods — draining it would fail. Request-based counts give a realistic
+		// picture of how many nodes can actually be consolidated.
 		underutilizedCount := 0
 		for _, n := range nodes {
-			cpuUtil := float64(0)
+			cpuReqPct := float64(0)
 			if n.CPUCapacity > 0 {
-				cpuUtil = float64(n.CPUUsed) / float64(n.CPUCapacity) * 100
+				cpuReqPct = float64(n.CPURequested) / float64(n.CPUCapacity) * 100
 			}
-			memUtil := float64(0)
+			memReqPct := float64(0)
 			if n.MemoryCapacity > 0 {
-				memUtil = float64(n.MemoryUsed) / float64(n.MemoryCapacity) * 100
+				memReqPct = float64(n.MemoryRequested) / float64(n.MemoryCapacity) * 100
 			}
-			if cpuUtil < d.config.NodeAutoscaler.ScaleDownThreshold &&
-				memUtil < d.config.NodeAutoscaler.ScaleDownThreshold {
+			if cpuReqPct < d.config.NodeAutoscaler.ScaleDownThreshold &&
+				memReqPct < d.config.NodeAutoscaler.ScaleDownThreshold {
 				underutilizedCount++
 			}
 		}
