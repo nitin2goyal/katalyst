@@ -5,6 +5,11 @@ import { computeRecommendations } from '../recommendations-engine.js';
 
 let _isComputed = false;
 
+// Persist computed rec statuses in localStorage so they survive refresh
+const REC_STATUS_KEY = 'kopt-rec-statuses';
+function loadRecStatuses() { try { return JSON.parse(localStorage.getItem(REC_STATUS_KEY)) || {}; } catch { return {}; } }
+function saveRecStatus(id, status) { const s = loadRecStatuses(); s[id] = status; localStorage.setItem(REC_STATUS_KEY, JSON.stringify(s)); }
+
 export async function renderRecsTab(targetEl) {
   targetEl.innerHTML = skeleton(5);
   try {
@@ -27,6 +32,14 @@ export async function renderRecsTab(targetEl) {
     }
     // Filter out spot recommendations (spot feature removed)
     recList = recList.filter(r => { const t = (r.type || r.Type || '').toLowerCase(); return t !== 'spot' && !t.includes('spot'); });
+    // Restore persisted statuses for computed recommendations
+    const savedStatuses = loadRecStatuses();
+    recList.forEach(r => {
+      const id = r.id || r.ID;
+      if (id && savedStatuses[id]) {
+        r.status = savedStatuses[id];
+      }
+    });
     // When auto-approve is enabled, mark rightsizing recs as auto-approved
     if (autoApproveRightsizer) {
       recList.forEach(r => {
@@ -180,7 +193,8 @@ function updateRecRow(id, newStatus) {
 window.__approveRec = async function (id) {
   if (id && id.startsWith('computed-')) {
     updateRecRow(id, 'approved');
-    toast('Recommendation approved. In OPTIMIZE mode this would be auto-executed.', 'success');
+    saveRecStatus(id, 'approved');
+    toast('Recommendation approved.', 'success');
     return;
   }
   try {
@@ -193,6 +207,7 @@ window.__approveRec = async function (id) {
 window.__dismissRec = async function (id) {
   if (id && id.startsWith('computed-')) {
     updateRecRow(id, 'dismissed');
+    saveRecStatus(id, 'dismissed');
     toast('Recommendation dismissed.', 'info');
     return;
   }

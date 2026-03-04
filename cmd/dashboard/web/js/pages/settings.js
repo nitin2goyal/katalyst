@@ -86,7 +86,7 @@ export async function renderSettings() {
       api('/config'),
       api('/policies').catch(() => null),
       api('/notifications').catch(() => null),
-      api('/audit').catch(() => []),
+      api('/audit?pageSize=1000').catch(() => []),
     ]);
     const mode = config.mode || 'recommend';
     const controllers = config.controllers || {};

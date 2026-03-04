@@ -62,7 +62,7 @@ async function renderCostDashboard(targetEl) {
   targetEl.innerHTML = skeleton(5);
   try {
     const [summary, byNs, byWl, trend, savings, comparison] = await Promise.all([
-      api('/cost/summary'), api('/cost/by-namespace'), api('/cost/by-workload').catch(() => null),
+      api('/cost/summary'), api('/cost/by-namespace?pageSize=1000'), api('/cost/by-workload?pageSize=1000').catch(() => null),
       api('/cost/trend').catch(() => null), api('/cost/savings').catch(() => null),
       api('/cost/comparison').catch(() => null),
     ]);
@@ -238,7 +238,7 @@ async function renderCostDashboard(targetEl) {
 async function renderNamespaceBreakdown(targetEl) {
   targetEl.innerHTML = skeleton(3);
   try {
-    const byNs = await api('/cost/by-namespace');
+    const byNs = await api('/cost/by-namespace?pageSize=1000');
     let nsEntries;
     const nsArr = toArray(byNs, 'data', 'namespaces');
     if (nsArr.length && nsArr[0]?.namespace != null) {
@@ -297,7 +297,7 @@ async function renderNamespaceBreakdown(targetEl) {
 async function renderWorkloadBreakdown(targetEl) {
   targetEl.innerHTML = skeleton(3);
   try {
-    const byWl = await api('/cost/by-workload');
+    const byWl = await api('/cost/by-workload?pageSize=1000');
     let wlList = Array.isArray(byWl) ? byWl : (byWl && byWl.workloads ? byWl.workloads : toArray(byWl, 'data'));
     wlList.sort((a, b) => (b.monthlyCostUSD || 0) - (a.monthlyCostUSD || 0));
 
