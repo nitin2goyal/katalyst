@@ -202,9 +202,10 @@ func TestRecommender_BothOverProv_WithNodeRatio(t *testing.T) {
 	}
 }
 
-func TestRecommender_NodeRatio_MemoryIncrease(t *testing.T) {
+func TestRecommender_NodeRatio_MemoryNeverIncreases(t *testing.T) {
 	// Pod has too much CPU and not enough memory relative to node ratio.
-	// CPU should decrease, memory should increase to match node ratio.
+	// CPU should decrease. Memory would increase to match node ratio,
+	// but we cap it at the current request to avoid consuming more resources.
 	cfg := defaultTestConfig()
 	cfg.Rightsizer.MinKeepRatio = 0.3
 	recommender := NewRecommender(cfg)
@@ -215,7 +216,7 @@ func TestRecommender_NodeRatio_MemoryIncrease(t *testing.T) {
 	// Pod: 4000m CPU, 2Gi memory → CPU way over-provisioned
 	// CPU P95=200m → floor = max(200*1.2=240, 4000*0.3=1200) = 1200m
 	// Node-ratio memory for 1200m = 1200 * 4Mi = 4800Mi ≈ 4Gi
-	// Memory goes UP from 2Gi to 4Gi — that's OK
+	// But 4Gi > current 2Gi → capped to 2Gi (never increase memory)
 	analysis := &PodAnalysis{
 		PodInfo:         makePodInfo("skewed-1", "prod", "Deployment", "skewed", 4000, 2*gi),
 		CPURequestMilli: 4000,
@@ -250,11 +251,10 @@ func TestRecommender_NodeRatio_MemoryIncrease(t *testing.T) {
 		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "1200m")
 	}
 
-	// Memory should increase to match node ratio
-	// 1200 * (128*gi / 32000) = 1200 * 4294967.296 = 5153960755 bytes ≈ 4Gi
+	// Memory: node ratio says 4Gi but current request is 2Gi → capped at 2Gi
 	suggestedMem := rec.Details["suggestedMemRequest"]
-	if suggestedMem != "4Gi" {
-		t.Errorf("suggestedMemRequest = %q, want %q (memory should increase to match node ratio)", suggestedMem, "4Gi")
+	if suggestedMem != "2Gi" {
+		t.Errorf("suggestedMemRequest = %q, want %q (memory should not increase beyond current request)", suggestedMem, "2Gi")
 	}
 }
 

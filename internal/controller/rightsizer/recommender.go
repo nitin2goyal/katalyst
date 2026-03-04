@@ -109,6 +109,13 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		if suggestedMem < memFloor {
 			suggestedMem = memFloor
 		}
+
+		// Never increase memory beyond current request — the goal is to free
+		// capacity, not consume more. On highmem nodes the ratio can push
+		// memory well above the current request which is counterproductive.
+		if suggestedMem > analysis.MemRequestBytes {
+			suggestedMem = analysis.MemRequestBytes
+		}
 	} else {
 		// No node info — fall back to proportional reduction using same keep-ratio as CPU
 		cpuKeepRatio := float64(suggestedCPU) / float64(analysis.CPURequestMilli)

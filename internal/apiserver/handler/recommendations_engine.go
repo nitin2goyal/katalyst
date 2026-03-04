@@ -364,6 +364,10 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			if suggestedMem < memFloor {
 				suggestedMem = memFloor
 			}
+			// Never increase memory beyond current request
+			if suggestedMem > avgMemReq {
+				suggestedMem = avgMemReq
+			}
 		} else {
 			// Fallback: proportional reduction
 			cpuKeepRatio := float64(suggestedCPU) / float64(avgCPUReq)
