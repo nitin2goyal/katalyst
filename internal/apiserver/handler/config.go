@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/koptimizer/koptimizer/internal/config"
@@ -11,6 +12,7 @@ import (
 )
 
 type ConfigHandler struct {
+	mu       sync.RWMutex
 	config   *config.Config
 	settings *store.SettingsStore
 }
@@ -20,6 +22,8 @@ func NewConfigHandler(cfg *config.Config, settings *store.SettingsStore) *Config
 }
 
 func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"mode":          h.config.Mode,
 		"cloudProvider": h.config.CloudProvider,
@@ -63,9 +67,11 @@ func (h *ConfigHandler) SetMode(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Mode {
 	case "monitor", "recommend", "active":
+		h.mu.Lock()
 		h.config.Mode = req.Mode
+		h.mu.Unlock()
 		h.settings.SaveMode(req.Mode)
-		writeJSON(w, http.StatusOK, map[string]string{"mode": h.config.Mode})
+		writeJSON(w, http.StatusOK, map[string]string{"mode": req.Mode})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid mode, must be monitor, recommend, or active"})
 	}
@@ -85,9 +91,11 @@ func (h *ConfigHandler) SetPodPurger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.mu.Lock()
 	h.config.PodPurger.Enabled = req.Enabled
+	h.mu.Unlock()
 	h.settings.SavePodPurgerEnabled(req.Enabled)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": h.config.PodPurger.Enabled})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": req.Enabled})
 }
 
 func (h *ConfigHandler) SetController(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +114,7 @@ func (h *ConfigHandler) SetController(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.mu.Lock()
 	switch name {
 	case "costMonitor":
 		h.config.CostMonitor.Enabled = req.Enabled
@@ -132,9 +141,11 @@ func (h *ConfigHandler) SetController(w http.ResponseWriter, r *http.Request) {
 	case "podPurger":
 		h.config.PodPurger.Enabled = req.Enabled
 	default:
+		h.mu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown controller: " + name})
 		return
 	}
+	h.mu.Unlock()
 
 	h.settings.SaveControllerEnabled(name, req.Enabled)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "enabled": req.Enabled})
@@ -156,6 +167,7 @@ func (h *ConfigHandler) SetControllerDryRun(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	h.mu.Lock()
 	switch name {
 	case "nodeAutoscaler":
 		h.config.NodeAutoscaler.DryRun = req.DryRun
@@ -164,9 +176,11 @@ func (h *ConfigHandler) SetControllerDryRun(w http.ResponseWriter, r *http.Reque
 	case "rebalancer":
 		h.config.Rebalancer.DryRun = req.DryRun
 	default:
+		h.mu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "controller does not support dryRun: " + name})
 		return
 	}
+	h.mu.Unlock()
 
 	h.settings.SaveControllerDryRun(name, req.DryRun)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "dryRun": req.DryRun})

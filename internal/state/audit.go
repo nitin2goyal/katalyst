@@ -21,18 +21,20 @@ type AuditEvent struct {
 // AuditLog is a thread-safe ring buffer for audit events with optional SQLite
 // persistence.
 type AuditLog struct {
-	mu     sync.RWMutex
-	events []AuditEvent
-	max    int
-	db     *sql.DB
-	writer *store.Writer
+	mu         sync.RWMutex
+	events     []AuditEvent
+	max        int
+	maxEntries int // max rows returned by GetAll() from SQLite (default 10000)
+	db         *sql.DB
+	writer     *store.Writer
 }
 
 // NewAuditLog creates an audit log with the given max capacity (in-memory only).
 func NewAuditLog(maxEvents int) *AuditLog {
 	return &AuditLog{
-		events: make([]AuditEvent, 0, maxEvents),
-		max:    maxEvents,
+		events:     make([]AuditEvent, 0, maxEvents),
+		max:        maxEvents,
+		maxEntries: 10000,
 	}
 }
 
@@ -40,10 +42,11 @@ func NewAuditLog(maxEvents int) *AuditLog {
 // nil, it behaves identically to NewAuditLog.
 func NewAuditLogWithDB(maxEvents int, db *sql.DB, writer *store.Writer) *AuditLog {
 	return &AuditLog{
-		events: make([]AuditEvent, 0, maxEvents),
-		max:    maxEvents,
-		db:     db,
-		writer: writer,
+		events:     make([]AuditEvent, 0, maxEvents),
+		max:        maxEvents,
+		maxEntries: 10000,
+		db:         db,
+		writer:     writer,
 	}
 }
 
@@ -127,8 +130,13 @@ func (a *AuditLog) GetAll() []AuditEvent {
 }
 
 func (a *AuditLog) queryAll() []AuditEvent {
+	limit := a.maxEntries
+	if limit <= 0 {
+		limit = 10000
+	}
 	rows, err := a.db.Query(
-		"SELECT timestamp, action, target, user, details FROM audit_events ORDER BY timestamp DESC LIMIT 10000",
+		"SELECT timestamp, action, target, user, details FROM audit_events ORDER BY timestamp DESC LIMIT ?",
+		limit,
 	)
 	if err != nil {
 		return nil

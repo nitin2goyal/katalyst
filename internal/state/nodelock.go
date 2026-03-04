@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -96,6 +97,11 @@ func (nl *NodeLock) ExpireStale(maxAge time.Duration) {
 	cutoff := time.Now().Add(-maxAge)
 	for node, entry := range nl.locks {
 		if entry.AcquiredAt.Before(cutoff) {
+			slog.Warn("expiring stale node lock",
+				"node", node,
+				"controller", entry.Controller,
+				"acquiredAt", entry.AcquiredAt.Format(time.RFC3339),
+				"age", time.Since(entry.AcquiredAt).String())
 			delete(nl.locks, node)
 		}
 	}

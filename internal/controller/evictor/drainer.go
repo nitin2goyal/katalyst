@@ -35,6 +35,56 @@ func (d *Drainer) SetLockRefresh(fn func(nodeName, controller string)) {
 	d.lockRefresh = fn
 }
 
+// PreDrainCheck performs a dry-run feasibility check before cordoning.
+// It lists pods on the node and checks PDBs to determine if a drain would
+// succeed. Returns an error describing why the drain would fail, or nil
+// if the drain looks feasible.
+func (d *Drainer) PreDrainCheck(ctx context.Context, nodeName string) error {
+	logger := log.FromContext(ctx).WithName("drainer")
+
+	podList := &corev1.PodList{}
+	if err := d.client.List(ctx, podList, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
+		return fmt.Errorf("pre-drain check: listing pods on %s: %w", nodeName, err)
+	}
+
+	// Pre-fetch PDBs per namespace
+	pdbByNamespace := make(map[string]*policyv1.PodDisruptionBudgetList)
+	for i := range podList.Items {
+		ns := podList.Items[i].Namespace
+		if _, ok := pdbByNamespace[ns]; !ok {
+			pdbList := &policyv1.PodDisruptionBudgetList{}
+			if err := d.client.List(ctx, pdbList, client.InNamespace(ns)); err != nil {
+				pdbByNamespace[ns] = nil
+			} else {
+				pdbByNamespace[ns] = pdbList
+			}
+		}
+	}
+
+	var evictable, pdbBlocked int
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if shouldSkipPod(pod) {
+			continue
+		}
+		if !d.checkPDBSafeWithCache(pod, pdbByNamespace[pod.Namespace]) {
+			pdbBlocked++
+		} else {
+			evictable++
+		}
+	}
+
+	// If there are non-skippable pods but ALL are PDB-blocked, drain will
+	// definitely fail — no point cordoning the node.
+	if pdbBlocked > 0 && evictable == 0 {
+		return fmt.Errorf("pre-drain check failed: all %d evictable pods on %s are PDB-blocked, drain would fail", pdbBlocked, nodeName)
+	}
+
+	logger.V(1).Info("Pre-drain check passed",
+		"node", nodeName, "evictable", evictable, "pdbBlocked", pdbBlocked)
+	return nil
+}
+
 // DrainNode cordons and drains a node.
 // It uncordons the node if pod listing fails or if all evictions fail.
 // A partial drain (some evictions failed) keeps the node cordoned but returns an error.

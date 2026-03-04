@@ -1,6 +1,7 @@
 package state
 
 import (
+	"log/slog"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,6 +14,13 @@ import (
 func (c *ClusterState) Snapshot() *optimizer.ClusterSnapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
+	// Warn if metrics data is stale (older than 5 minutes).
+	if !c.lastMetricsUpdate.IsZero() && time.Since(c.lastMetricsUpdate) > 5*time.Minute {
+		slog.Warn("metrics data is stale, snapshot may contain outdated utilization",
+			"lastRefresh", c.lastMetricsUpdate,
+			"age", time.Since(c.lastMetricsUpdate).Round(time.Second))
+	}
 
 	nodes := make([]optimizer.NodeInfo, 0, len(c.nodes))
 	for _, n := range c.nodes {

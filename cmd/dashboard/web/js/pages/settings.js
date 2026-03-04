@@ -1,6 +1,7 @@
 import { api, apiPut, apiPost, apiDelete } from '../api.js';
 import { $, toArray, timeAgo, errorMsg } from '../utils.js';
 import { skeleton, toast, badge, cardHeader, emptyState, modal, confirmDialog } from '../components.js';
+import { addCleanup } from '../router.js';
 
 const container = () => $('#page-container');
 
@@ -468,6 +469,13 @@ export async function renderSettings() {
         });
       }
     });
+
+    // Register cleanup: remove any open modals from document.body
+    const cleanup = () => {
+      document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+    };
+    addCleanup(cleanup);
+    return cleanup;
 
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load settings: ' + e.message);

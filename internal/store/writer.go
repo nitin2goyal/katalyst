@@ -66,14 +66,16 @@ func (w *Writer) Run(ctx context.Context) {
 // Enqueue adds a write operation to the queue. If the channel is full, it
 // drops the write (backpressure) rather than blocking the caller.
 // Safe to call concurrently with Drain — writes after Drain are silently dropped.
+// The check-and-send is done atomically under the mutex to prevent a TOCTOU
+// race where Drain could close the channel between the check and the send.
 func (w *Writer) Enqueue(fn func(*sql.DB)) {
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()
 		return
 	}
-	w.mu.Unlock()
-
+	// Non-blocking send while holding mu — safe because the select never blocks.
+	// This prevents Drain from closing the channel between our closed check and send.
 	select {
 	case w.ch <- fn:
 	default:
@@ -84,6 +86,7 @@ func (w *Writer) Enqueue(fn func(*sql.DB)) {
 				"totalDropped", count, "queueCap", cap(w.ch))
 		}
 	}
+	w.mu.Unlock()
 }
 
 // DroppedCount returns the number of writes dropped due to backpressure.

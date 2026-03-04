@@ -612,11 +612,11 @@ func discoverZone(ctx context.Context, project, region string, client *http.Clie
 		// Try a lightweight API call to verify the zone exists
 		testURL := fmt.Sprintf("https://compute.googleapis.com/compute/v1/projects/%s/zones/%s/machineTypes?maxResults=1", project, zone)
 		resp, testErr := client.Get(testURL)
-		if testErr == nil {
+		if resp != nil {
 			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				return zone, nil
-			}
+		}
+		if testErr == nil && resp.StatusCode == 200 {
+			return zone, nil
 		}
 	}
 

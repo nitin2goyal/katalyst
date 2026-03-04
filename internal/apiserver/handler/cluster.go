@@ -57,7 +57,7 @@ func (h *ClusterHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	var recList koptv1alpha1.RecommendationList
-	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err == nil {
+	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500)); err == nil {
 		for _, rec := range recList.Items {
 			if rec.Status.State == "pending" || rec.Status.State == "approved" || rec.Status.State == "" {
 				potentialSavings += rec.Spec.EstimatedSaving.MonthlySavingsUSD
@@ -481,7 +481,7 @@ func (h *ClusterHandler) GetClusters(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	var recList koptv1alpha1.RecommendationList
-	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err == nil {
+	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500)); err == nil {
 		for _, rec := range recList.Items {
 			if rec.Status.State == "pending" || rec.Status.State == "approved" || rec.Status.State == "" {
 				potentialSavings += rec.Spec.EstimatedSaving.MonthlySavingsUSD

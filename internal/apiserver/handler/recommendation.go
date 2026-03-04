@@ -29,7 +29,7 @@ func (h *RecommendationHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	var recList koptv1alpha1.RecommendationList
-	crdErr := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"))
+	crdErr := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500))
 	if crdErr != nil && !meta.IsNoMatchError(crdErr) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": crdErr.Error()})
 		return
@@ -240,7 +240,7 @@ func (h *RecommendationHandler) GetSummary(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	var recList koptv1alpha1.RecommendationList
-	crdErr := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"))
+	crdErr := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500))
 	if crdErr != nil && !meta.IsNoMatchError(crdErr) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": crdErr.Error()})
 		return

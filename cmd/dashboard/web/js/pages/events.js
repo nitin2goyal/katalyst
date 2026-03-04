@@ -1,6 +1,7 @@
 import { api, apiPost } from '../api.js';
 import { $, toArray, timeAgo, errorMsg, escapeHtml } from '../utils.js';
 import { skeleton, tabs, attachTabHandlers, filterBar, badge, cardHeader, toast } from '../components.js';
+import { addCleanup } from '../router.js';
 
 const eventColor = (action) => {
   if (!action) return 'gray';
@@ -141,17 +142,30 @@ export async function renderEvents(targetEl) {
     if (tabsEl) attachTabHandlers(tabsEl, (tab) => renderTimeline(tab));
 
     // Filter
+    let filterDebounce;
     const fb = container().querySelector('.filter-bar');
     if (fb) {
       const input = fb.querySelector('.filter-search');
-      input?.addEventListener('input', () => {
-        const search = input.value.toLowerCase();
-        const items = container().querySelectorAll('.audit-event');
-        items.forEach(item => {
-          item.style.display = !search || item.textContent.toLowerCase().includes(search) ? '' : 'none';
-        });
-      });
+      const onInput = () => {
+        clearTimeout(filterDebounce);
+        filterDebounce = setTimeout(() => {
+          const search = input.value.toLowerCase();
+          const items = container().querySelectorAll('.audit-event');
+          items.forEach(item => {
+            item.style.display = !search || item.textContent.toLowerCase().includes(search) ? '' : 'none';
+          });
+        }, 300);
+      };
+      input?.addEventListener('input', onInput);
     }
+
+    // Register cleanup
+    const cleanup = () => {
+      clearTimeout(filterDebounce);
+      delete window.__applyEvent;
+    };
+    addCleanup(cleanup);
+    return cleanup;
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load events: ' + e.message);
   }

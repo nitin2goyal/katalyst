@@ -43,7 +43,7 @@ func (h *CostHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	var recList koptv1alpha1.RecommendationList
-	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err == nil {
+	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500)); err == nil {
 		for _, rec := range recList.Items {
 			if rec.Status.State == "pending" || rec.Status.State == "approved" || rec.Status.State == "" {
 				potentialSavings += rec.Spec.EstimatedSaving.MonthlySavingsUSD
@@ -262,7 +262,7 @@ func (h *CostHandler) GetSavings(w http.ResponseWriter, r *http.Request) {
 
 	var opportunities []map[string]interface{}
 
-	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err != nil {
+	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500)); err != nil {
 		slog.Warn("Failed to list Recommendations for savings", "error", err)
 	} else {
 		for _, rec := range recList.Items {
@@ -437,7 +437,7 @@ func (h *CostHandler) GetImpact(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch all recommendations to find executed ones with real savings
 	var recList koptv1alpha1.RecommendationList
-	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err != nil {
+	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500)); err != nil {
 		slog.Warn("Failed to list Recommendations for impact", "error", err)
 	}
 

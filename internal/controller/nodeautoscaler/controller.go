@@ -9,8 +9,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/internal/controller/evictor"
+	"github.com/koptimizer/koptimizer/internal/scheduler"
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/aigate"
 	"github.com/koptimizer/koptimizer/pkg/cloudprovider"
@@ -31,6 +34,7 @@ type Controller struct {
 	binPacker   *BinPacker
 	sizeAdvisor *SizeAdvisor
 	drainer     *evictor.Drainer
+	simulator   *scheduler.Simulator
 }
 
 func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
@@ -47,6 +51,7 @@ func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *s
 		binPacker:   NewBinPacker(),
 		sizeAdvisor: NewSizeAdvisor(provider, guard),
 		drainer:     evictor.NewDrainer(c, cfg),
+		simulator:   scheduler.NewSimulator(),
 	}
 }
 
@@ -200,6 +205,18 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 			}
 
 			attempted++
+
+			// Pre-drain feasibility: check PDBs and pod placement before cordoning.
+			// This avoids the cordon→fail→uncordon churn when a drain is doomed.
+			if err := c.preDrainFeasibilityCheck(ctx, snapshot, nodeName); err != nil {
+				logger.Info("Skipping node, pre-drain check failed",
+					"node", nodeName, "reason", err.Error())
+				c.state.NodeLock.Unlock(nodeName, "nodeautoscaler")
+				c.state.AuditLog.Record("drain-skipped", nodeName, "nodeautoscaler",
+					fmt.Sprintf("pre-drain check: %v", err))
+				continue
+			}
+
 			c.state.AuditLog.Record("drain-before-scaledown", nodeName, "nodeautoscaler",
 				fmt.Sprintf("draining node before scaling %s to %d", nodeGroupID, desired))
 
@@ -267,6 +284,83 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 		c.state.AuditLog.Record("scale-up-deferred", nodeGroupID, "nodeautoscaler",
 			fmt.Sprintf("scale-up to %d deferred to native autoscaler", desired))
 	}
+	return nil
+}
+
+// preDrainFeasibilityCheck verifies that draining a node will likely succeed
+// by checking two things:
+// 1. PDB check: are there pods that can actually be evicted?
+// 2. Capacity check: can the evictable pods fit on remaining nodes?
+// This prevents the cordon→fail→uncordon churn that blocks all scale-downs.
+func (c *Controller) preDrainFeasibilityCheck(ctx context.Context, snapshot *optimizer.ClusterSnapshot, nodeName string) error {
+	logger := log.FromContext(ctx).WithName("nodeautoscaler")
+
+	// 1. PDB pre-check (uses live API state)
+	if err := c.drainer.PreDrainCheck(ctx, nodeName); err != nil {
+		return err
+	}
+
+	// 2. Capacity pre-check: simulate placing this node's pods on remaining nodes.
+	// Build node and pod maps from the snapshot, excluding the target node.
+	var targetNodeInfo *optimizer.NodeInfo
+	var otherNodes []*corev1.Node
+	podsByNode := make(map[string][]*corev1.Pod)
+
+	for i := range snapshot.Nodes {
+		n := &snapshot.Nodes[i]
+		if n.Node.Name == nodeName {
+			targetNodeInfo = n
+			continue
+		}
+		// Skip nodes that are already unschedulable — they can't accept pods.
+		if n.Node.Spec.Unschedulable {
+			continue
+		}
+		otherNodes = append(otherNodes, n.Node)
+		podsByNode[n.Node.Name] = n.Pods
+	}
+
+	if targetNodeInfo == nil {
+		return fmt.Errorf("node %s not found in snapshot", nodeName)
+	}
+
+	// Check each non-DaemonSet, non-system pod can be placed somewhere.
+	unplaceable := 0
+	for _, pod := range targetNodeInfo.Pods {
+		if pod == nil {
+			continue
+		}
+		isDaemonSet := false
+		for _, ref := range pod.OwnerReferences {
+			if ref.Kind == "DaemonSet" {
+				isDaemonSet = true
+				break
+			}
+		}
+		if isDaemonSet {
+			continue
+		}
+		// Skip system namespaces — these pods won't be evicted.
+		if pod.Namespace == "kube-system" || pod.Namespace == "kube-public" || pod.Namespace == "kube-node-lease" {
+			continue
+		}
+
+		fitting := c.simulator.FindFittingNodes(pod, otherNodes, podsByNode)
+		if len(fitting) == 0 {
+			unplaceable++
+			logger.V(1).Info("Pod has no placement target",
+				"pod", pod.Namespace+"/"+pod.Name, "node", nodeName)
+		} else {
+			// Accumulate: reserve capacity on the target node so subsequent
+			// pods see reduced capacity (same approach as consolidation planner).
+			podsByNode[fitting[0]] = append(podsByNode[fitting[0]], pod)
+		}
+	}
+
+	if unplaceable > 0 {
+		return fmt.Errorf("%d pods on %s cannot be placed on remaining nodes", unplaceable, nodeName)
+	}
+
 	return nil
 }
 

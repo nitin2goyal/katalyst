@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -349,6 +350,8 @@ func doGCPGet(ctx context.Context, client *http.Client, url string) ([]byte, err
 			case <-time.After(backoff):
 			}
 			backoff *= 2 // exponential backoff: 1s, 2s, 4s
+			jitter := time.Duration(rand.Int64N(int64(backoff) / 4))
+			backoff += jitter
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

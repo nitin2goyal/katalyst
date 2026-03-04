@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -94,7 +95,7 @@ func cacheKey(provider, region string) string {
 func (c *PricingCache) Get(provider, region string) (map[string]float64, bool) {
 	key := cacheKey(provider, region)
 
-	// Check in-memory cache.
+	// Fast path: check in-memory cache under read lock.
 	c.mu.RLock()
 	if prices, ok := c.mem[key]; ok {
 		if time.Since(c.memTime[key]) < memoryPricingCacheTTL {
@@ -112,6 +113,24 @@ func (c *PricingCache) Get(provider, region string) (map[string]float64, bool) {
 	// Check SQLite cache.
 	if c.db == nil {
 		return nil, false
+	}
+
+	// Slow path: acquire write lock for the entire DB query + cache
+	// population to prevent multiple goroutines from loading the same
+	// data concurrently and losing writes.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Double-check: another goroutine may have populated the cache
+	// while we waited for the write lock.
+	if prices, ok := c.mem[key]; ok {
+		if time.Since(c.memTime[key]) < memoryPricingCacheTTL {
+			cp := make(map[string]float64, len(prices))
+			for k, v := range prices {
+				cp[k] = v
+			}
+			return cp, true
+		}
 	}
 
 	cutoff := time.Now().Add(-c.ttl).Unix()
@@ -139,10 +158,8 @@ func (c *PricingCache) Get(provider, region string) (map[string]float64, bool) {
 	}
 
 	// Populate in-memory cache from SQLite.
-	c.mu.Lock()
 	c.mem[key] = prices
 	c.memTime[key] = time.Now()
-	c.mu.Unlock()
 
 	// Return a copy.
 	cp := make(map[string]float64, len(prices))
@@ -174,6 +191,7 @@ func (c *PricingCache) Put(provider, region string, prices map[string]float64) {
 	now := time.Now().Unix()
 	tx, err := c.db.Begin()
 	if err != nil {
+		slog.Error("pricing_cache: begin transaction", "error", err)
 		return
 	}
 	stmt, err := tx.Prepare(
@@ -181,6 +199,7 @@ func (c *PricingCache) Put(provider, region string, prices map[string]float64) {
 		 VALUES (?, ?, ?, ?, ?)`,
 	)
 	if err != nil {
+		slog.Error("pricing_cache: prepare statement", "error", err)
 		tx.Rollback()
 		return
 	}
@@ -188,9 +207,12 @@ func (c *PricingCache) Put(provider, region string, prices map[string]float64) {
 
 	for it, price := range prices {
 		if _, err = stmt.Exec(provider, region, it, price, now); err != nil {
+			slog.Error("pricing_cache: exec insert", "instanceType", it, "error", err)
 			tx.Rollback()
 			return
 		}
 	}
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		slog.Error("pricing_cache: commit transaction", "error", err)
+	}
 }

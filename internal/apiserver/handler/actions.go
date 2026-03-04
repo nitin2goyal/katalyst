@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -116,10 +117,11 @@ func (h *ActionsHandler) DeletePods(w http.ResponseWriter, r *http.Request) {
 		pod.Name = ref.Name
 		pod.Namespace = ref.Namespace
 		if err := h.client.Delete(ctx, pod); err != nil {
+			slog.Warn("failed to delete pod", "name", ref.Name, "namespace", ref.Namespace, "error", err)
 			errors = append(errors, deleteError{
 				Name:      ref.Name,
 				Namespace: ref.Namespace,
-				Error:     err.Error(),
+				Error:     "failed to delete pod",
 			})
 		} else {
 			deleted++

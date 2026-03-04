@@ -19,11 +19,12 @@ type CircuitBreaker struct {
 }
 
 type controllerState struct {
-	successes []time.Time
-	failures  []time.Time
-	tripped   bool
-	trippedAt time.Time
-	halfOpen  bool // In half-open state, one probe is allowed through
+	successes     []time.Time
+	failures      []time.Time
+	tripped       bool
+	trippedAt     time.Time
+	halfOpen      bool // In half-open state, one probe is allowed through
+	inFlightProbe bool // True when a probe goroutine is already in flight
 }
 
 // NewCircuitBreaker creates a new circuit breaker with the given threshold and window.
@@ -116,12 +117,28 @@ func (cb *CircuitBreaker) IsTripped(controller string) bool {
 	// Check if cooldown has elapsed — transition to half-open
 	if !s.halfOpen && time.Since(s.trippedAt) >= cb.cooldown {
 		s.halfOpen = true
+		s.inFlightProbe = true
 		return false // Allow one probe through
 	}
 	if s.halfOpen {
-		return false // Already in half-open, allow the probe
+		if s.inFlightProbe {
+			// A probe is already in flight — block additional callers
+			return true
+		}
+		return false
 	}
 	return true
+}
+
+// ProbeCompleted resets the inFlightProbe flag, allowing a new probe to be
+// sent if the breaker is still in half-open state. Call this after the probe
+// result has been recorded via RecordSuccess or RecordFailure.
+func (cb *CircuitBreaker) ProbeCompleted(controller string) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	if s, ok := cb.states[controller]; ok {
+		s.inFlightProbe = false
+	}
 }
 
 // Trip manually trips the circuit breaker for the given controller.

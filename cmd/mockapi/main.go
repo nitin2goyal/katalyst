@@ -47,7 +47,11 @@ func main() {
 	mux.HandleFunc("/api/v1/config/mode", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
 			var body map[string]string
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]string{"error": "invalid JSON"})
+				return
+			}
 			if m, ok := body["mode"]; ok {
 				if m == "recommend" || m == "active" {
 					currentMode = m
@@ -66,8 +70,17 @@ func main() {
 		if strings.HasSuffix(path, "/dry-run") {
 			name := strings.TrimSuffix(path, "/dry-run")
 			if r.Method == http.MethodPut && name != "" {
+				if !validController(name) {
+					w.WriteHeader(http.StatusBadRequest)
+					writeJSON(w, map[string]string{"error": "unknown controller"})
+					return
+				}
 				var body map[string]interface{}
-				json.NewDecoder(r.Body).Decode(&body)
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					writeJSON(w, map[string]string{"error": "invalid JSON"})
+					return
+				}
 				if dr, ok := body["dryRun"].(bool); ok {
 					dryRunStates[name] = dr
 				}
@@ -78,8 +91,17 @@ func main() {
 		// Handle enabled toggle: controllers/{name}
 		name := path
 		if r.Method == http.MethodPut && name != "" {
+			if !validController(name) {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]string{"error": "unknown controller"})
+				return
+			}
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]string{"error": "invalid JSON"})
+				return
+			}
 			if enabled, ok := body["enabled"].(bool); ok {
 				controllerStates[name] = enabled
 			}
@@ -89,7 +111,11 @@ func main() {
 	mux.HandleFunc("/api/v1/config/pod-purger", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]string{"error": "invalid JSON"})
+				return
+			}
 			if enabled, ok := body["enabled"].(bool); ok {
 				controllerStates["podPurger"] = enabled
 			}
@@ -213,7 +239,11 @@ func main() {
 		switch r.Method {
 		case http.MethodPut:
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]string{"error": "invalid JSON"})
+				return
+			}
 			if enabled, ok := body["enabled"].(bool); ok {
 				mockChannels[idx]["enabled"] = enabled
 			}
@@ -231,7 +261,11 @@ func main() {
 	mux.HandleFunc("/api/v1/notifications/channels", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]string{"error": "invalid JSON"})
+				return
+			}
 			ch := map[string]any{
 				"type":    body["type"],
 				"name":    body["name"],
@@ -287,6 +321,16 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+var validControllers = map[string]bool{
+	"costMonitor": true, "nodeAutoscaler": true, "evictor": true,
+	"workloadScaler": true, "rebalancer": true, "gpuReclaimer": true,
+	"spotManager": true, "scavenger": true,
+}
+
+func validController(name string) bool {
+	return validControllers[name]
 }
 
 func jitter(base float64, pct float64) float64 {

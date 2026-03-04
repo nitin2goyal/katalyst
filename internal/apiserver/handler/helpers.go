@@ -31,11 +31,14 @@ type PaginatedResponse struct {
 func parsePagination(r *http.Request) (page, pageSize int) {
 	page, _ = strconv.Atoi(r.URL.Query().Get("page"))
 	pageSize, _ = strconv.Atoi(r.URL.Query().Get("pageSize"))
-	if pageSize <= 0 || pageSize > 10000 {
-		pageSize = defaultPageSize
-	}
-	if page <= 0 {
+	if page < 1 {
 		page = 1
+	}
+	if pageSize < 10 {
+		pageSize = 10
+	}
+	if pageSize > 10000 {
+		pageSize = 10000
 	}
 	return
 }

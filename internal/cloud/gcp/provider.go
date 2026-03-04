@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -34,12 +35,25 @@ func NewProvider(region string, pricingCache *store.PricingCache) (*Provider, er
 		project = os.Getenv("GCP_PROJECT")
 	}
 	if project == "" {
-		project = "gc-qa6" // hardcoded fallback for apps-gke cluster
+		project = "gc-qa6"
+		slog.Warn("using default GCP project, set GOOGLE_CLOUD_PROJECT", "project", "gc-qa6")
 	}
 
 	clusterName := os.Getenv("KOPTIMIZER_CLUSTER_NAME")
 	if clusterName == "" {
-		clusterName = "apps-gke" // hardcoded fallback
+		clusterName = "apps-gke"
+		slog.Warn("using default cluster name, set KOPTIMIZER_CLUSTER_NAME", "cluster", "apps-gke")
+	}
+
+	// Validate parameters to prevent path-traversal in API URLs.
+	for _, p := range []struct{ name, val string }{
+		{"project", project},
+		{"clusterName", clusterName},
+		{"region", region},
+	} {
+		if strings.ContainsAny(p.val, "/?#\\") {
+			return nil, fmt.Errorf("invalid %s %q: contains forbidden characters", p.name, p.val)
+		}
 	}
 
 	ctx := context.Background()

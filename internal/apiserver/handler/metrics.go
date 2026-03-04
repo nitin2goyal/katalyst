@@ -74,10 +74,10 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Potential savings from recommendations
 	potentialSavings := 0.0
 	recByStatus := make(map[string]int)
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	var recList koptv1alpha1.RecommendationList
-	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system")); err != nil {
+	if err := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500)); err != nil {
 		slog.Warn("metrics: failed to list recommendations", "error", err)
 	} else {
 		for _, rec := range recList.Items {

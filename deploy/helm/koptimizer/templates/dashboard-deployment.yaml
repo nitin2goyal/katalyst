@@ -46,6 +46,12 @@ spec:
               port: http
             initialDelaySeconds: 2
             periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

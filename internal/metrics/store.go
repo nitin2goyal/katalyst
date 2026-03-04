@@ -173,6 +173,14 @@ func (s *Store) RecordPodMetrics(m pkgmetrics.PodMetrics) {
 		}
 	}
 
+	// If pod series count exceeds 120% of the cap, trigger inline cleanup
+	// to prevent unbounded memory growth between hourly scheduled cleanups.
+	if len(s.podSeries) > int(float64(maxPodSeriesKeys)*1.2) {
+		slog.Warn("metrics: pod series exceeded 120% of cap, triggering inline cleanup",
+			"current", len(s.podSeries), "cap", maxPodSeriesKeys)
+		s.cleanupLocked()
+	}
+
 	// Single enqueue for all containers in this pod
 	if s.writer != nil && len(rows) > 0 {
 		s.writer.Enqueue(func(db *sql.DB) {
@@ -265,7 +273,11 @@ func (s *Store) evict(series map[string][]dataPoint, key string) {
 func (s *Store) Cleanup() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.cleanupLocked()
+}
 
+// cleanupLocked performs cleanup while the caller already holds s.mu.
+func (s *Store) cleanupLocked() {
 	cutoff := time.Now().Add(-s.retention)
 	for key, points := range s.nodeSeries {
 		if len(points) == 0 || points[len(points)-1].Timestamp.Before(cutoff) {

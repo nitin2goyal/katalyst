@@ -1,5 +1,6 @@
 // Reusable UI components
 import { $, $$, badge, escapeHtml } from './utils.js';
+import { addCleanup } from './router.js';
 export { badge };
 
 export function skeleton(rows = 3) {
@@ -94,8 +95,14 @@ export function attachFilterHandlers(containerEl, tableEl, pagination) {
     if (pagination) pagination.refresh();
   }
 
-  input?.addEventListener('input', applyFilters);
+  let debounceTimer;
+  const debouncedApply = () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(applyFilters, 300);
+  };
+  input?.addEventListener('input', debouncedApply);
   selects.forEach(s => s.addEventListener('change', applyFilters));
+  addCleanup(() => clearTimeout(debounceTimer));
 }
 
 export function modal(title, body, actions = '') {
@@ -238,11 +245,13 @@ export function attachColumnToggle(containerEl, tableEl, storageKey, columns) {
   });
 
   // Close dropdown on outside click
-  document.addEventListener('click', (e) => {
+  const outsideClickHandler = (e) => {
     if (!toggle.contains(e.target)) {
       toggle.classList.remove('open');
     }
-  });
+  };
+  document.addEventListener('click', outsideClickHandler);
+  addCleanup(() => document.removeEventListener('click', outsideClickHandler));
 }
 
 // In-memory sort state persisted across data refreshes (not cleared by store.clear())

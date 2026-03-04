@@ -3,6 +3,7 @@ package gpu
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -15,6 +16,7 @@ import (
 // Detector identifies idle and underutilized GPU nodes.
 type Detector struct {
 	config    *config.Config
+	mu        sync.Mutex
 	idleSince map[string]time.Time // nodeName -> when it became idle
 }
 
@@ -45,11 +47,13 @@ func (d *Detector) DetectIdle(ctx context.Context, snapshot *optimizer.ClusterSn
 
 		if gpuIdle || gpuUnderutilized {
 			// Track how long it's been idle
+			d.mu.Lock()
 			if _, ok := d.idleSince[node.Node.Name]; !ok {
 				d.idleSince[node.Node.Name] = time.Now()
 			}
 
 			idleDuration := time.Since(d.idleSince[node.Node.Name])
+			d.mu.Unlock()
 			if idleDuration >= d.config.GPU.IdleDuration {
 				idleCount++
 				monthlyCost := node.HourlyCostUSD * 730
@@ -99,7 +103,9 @@ func (d *Detector) DetectIdle(ctx context.Context, snapshot *optimizer.ClusterSn
 			}
 		} else {
 			// GPU is active, reset idle timer
+			d.mu.Lock()
 			delete(d.idleSince, node.Node.Name)
+			d.mu.Unlock()
 		}
 	}
 

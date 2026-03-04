@@ -204,9 +204,13 @@ func (h *NotificationHandler) DeleteChannel(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
 		return
 	}
+	if idx < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel index"})
+		return
+	}
 
 	h.mu.Lock()
-	if idx < 0 || idx >= len(h.cfg.Alerts.Channels) {
+	if idx >= len(h.cfg.Alerts.Channels) {
 		h.mu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
 		return
@@ -224,6 +228,10 @@ func (h *NotificationHandler) ToggleChannel(w http.ResponseWriter, r *http.Reque
 	idx, err := strconv.Atoi(chi.URLParam(r, "idx"))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+		return
+	}
+	if idx < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel index"})
 		return
 	}
 

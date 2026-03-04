@@ -3,7 +3,7 @@ import { $$ } from './utils.js';
 import { destroyCharts } from './charts.js';
 
 const routes = [];
-let currentCleanup = null;
+let cleanups = [];
 
 export function addRoute(pattern, handler) {
   // Convert pattern like '/nodes/{name}' to regex
@@ -49,12 +49,14 @@ function matchRoute(path) {
   return null;
 }
 
+export function addCleanup(fn) {
+  if (typeof fn === 'function') cleanups.push(fn);
+}
+
 export function handleNavigation() {
   destroyCharts();
-  if (currentCleanup) {
-    currentCleanup();
-    currentCleanup = null;
-  }
+  cleanups.forEach(fn => { try { fn(); } catch (_) {} });
+  cleanups = [];
 
   const path = currentRoute();
   const result = matchRoute(path);
@@ -68,7 +70,7 @@ export function handleNavigation() {
 
   if (result) {
     const cleanup = result.handler(result.params);
-    if (typeof cleanup === 'function') currentCleanup = cleanup;
+    if (typeof cleanup === 'function') cleanups.push(cleanup);
   }
 }
 

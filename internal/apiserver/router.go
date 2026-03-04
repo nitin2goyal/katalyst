@@ -23,6 +23,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(middleware.Throttle(100))
 
 	clusterHandler := handler.NewClusterHandler(clusterState, provider, cfg, k8sClient, metricsStore)
 	nodeHandler := handler.NewNodeHandler(clusterState)

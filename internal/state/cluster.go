@@ -165,6 +165,7 @@ func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) (
 
 			var summary kubeletStatsSummary
 			if err := json.Unmarshal(data, &summary); err != nil {
+				slog.Warn("failed to unmarshal disk stats", "node", nodeName, "error", err)
 				return
 			}
 			mu.Lock()

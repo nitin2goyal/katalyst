@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -261,7 +263,7 @@ func DefaultConfig() *Config {
 			DryRun:                 true, // safe default: recommend-only until explicitly enabled
 			UtilizationThreshold:   40.0,
 			ConsolidationInterval:  5 * time.Minute,
-			MaxConcurrentEvictions: 1,
+			MaxConcurrentEvictions: 3,
 			DrainTimeout:           5 * time.Minute,
 			PartialDrainTTL:        30 * time.Minute,
 		},
@@ -358,15 +360,23 @@ func DefaultConfig() *Config {
 }
 
 // LoadFromFile loads config from a YAML file, overlaying on defaults.
+// If the file does not exist, returns defaults (this is expected on first run).
+// If the file exists but cannot be parsed, returns an error.
 func LoadFromFile(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			slog.Info("config file not found, using defaults", "path", path)
+			cfg.applyEnvOverrides()
+			return cfg, nil
+		}
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
+		slog.Warn("config file exists but failed to parse", "path", path, "error", err)
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 

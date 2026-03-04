@@ -3,6 +3,7 @@ package workloadscaler
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/koptimizer/koptimizer/internal/config"
@@ -12,6 +13,7 @@ import (
 // SurgeDetector detects anomalous usage spikes and triggers immediate scaling.
 type SurgeDetector struct {
 	config    *config.Config
+	mu        sync.Mutex
 	baselines map[string]float64 // workloadKey -> baseline CPU usage
 }
 
@@ -57,6 +59,7 @@ func (s *SurgeDetector) Detect(ctx context.Context, snapshot *optimizer.ClusterS
 	for key, wl := range workloads {
 		currentUsage := float64(wl.totalCPU)
 
+		s.mu.Lock()
 		isSurge := false
 		if baseline, ok := s.baselines[key]; ok && baseline > 0 {
 			ratio := currentUsage / baseline
@@ -96,6 +99,7 @@ func (s *SurgeDetector) Detect(ctx context.Context, snapshot *optimizer.ClusterS
 				s.baselines[key] = currentUsage
 			}
 		}
+		s.mu.Unlock()
 	}
 
 	return recs, nil
