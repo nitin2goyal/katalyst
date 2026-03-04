@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, escapeHtml } from '../utils.js';
 import { skeleton, breadcrumbs, tabs, attachTabHandlers, badge } from '../components.js';
-import { makeChart } from '../charts.js';
+import { makeChart, destroyCharts } from '../charts.js';
 
 const container = () => $('#page-container');
 
@@ -50,6 +50,7 @@ export async function renderWorkloadDetail(params) {
     const tabContent = $('#wl-tab-content');
 
     function renderTab(tab) {
+      destroyCharts();
       if (tab === 'overview') {
         tabContent.innerHTML = `
           <div class="grid-2" style="margin-top:16px">

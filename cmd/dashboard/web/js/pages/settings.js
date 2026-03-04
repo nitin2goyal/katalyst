@@ -1,6 +1,6 @@
 import { api, apiPut, apiPost, apiDelete } from '../api.js';
 import { $, toArray, timeAgo, errorMsg } from '../utils.js';
-import { skeleton, toast, badge, cardHeader, emptyState, modal, confirmDialog } from '../components.js';
+import { skeleton, toast, badge, cardHeader, emptyState, modal, confirmDialog, makeSortable, attachPagination } from '../components.js';
 import { addCleanup } from '../router.js';
 
 const container = () => $('#page-container');
@@ -398,6 +398,12 @@ export async function renderSettings() {
       }
       seg.querySelectorAll('button').forEach(b => b.disabled = false);
     });
+
+    // Audit log pagination
+    if (auditEvents.length) {
+      makeSortable($('#audit-table'));
+      attachPagination($('#audit-table'), { pageSize: 25 });
+    }
 
     // Node template cards
     if (templates.length) {

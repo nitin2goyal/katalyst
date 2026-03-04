@@ -216,15 +216,26 @@ export function attachColumnToggle(containerEl, tableEl, storageKey, columns) {
     cb.checked = visibility[cb.dataset.col] !== false;
   });
 
+  // Use a <style> element for O(1) column visibility instead of per-cell queries
+  const tableId = tableEl.id || ('ct-' + Math.random().toString(36).slice(2, 8));
+  if (!tableEl.id) tableEl.id = tableId;
+  let styleEl = document.getElementById('col-vis-' + tableId);
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'col-vis-' + tableId;
+    document.head.appendChild(styleEl);
+    addCleanup(() => styleEl.remove());
+  }
+
   function applyVisibility() {
+    const rules = [];
     columns.forEach((c, idx) => {
-      const show = visibility[c.key] !== false;
-      const colIdx = idx + 1; // CSS nth-child is 1-based
-      const ths = tableEl.querySelectorAll(`thead th:nth-child(${colIdx})`);
-      const tds = tableEl.querySelectorAll(`tbody td:nth-child(${colIdx})`);
-      ths.forEach(el => el.style.display = show ? '' : 'none');
-      tds.forEach(el => el.style.display = show ? '' : 'none');
+      if (visibility[c.key] === false) {
+        const colIdx = idx + 1;
+        rules.push(`#${tableId} th:nth-child(${colIdx}), #${tableId} td:nth-child(${colIdx}) { display: none; }`);
+      }
     });
+    styleEl.textContent = rules.join('\n');
   }
 
   applyVisibility();
@@ -294,7 +305,9 @@ function applySortToTable(tableEl, headers, colIdx, asc) {
     if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
     return asc ? at.localeCompare(bt) : bt.localeCompare(at);
   });
-  rows.forEach(r => tbody.appendChild(r));
+  const frag = document.createDocumentFragment();
+  rows.forEach(r => frag.appendChild(r));
+  tbody.appendChild(frag);
 }
 
 // Pagination controller linked to each table (set by attachPagination)

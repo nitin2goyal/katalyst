@@ -17,11 +17,13 @@ function scoreColor(score) {
 export async function renderOverview() {
   container().innerHTML = skeleton(5);
   try {
-    const [summary, health, efficiency, score] = await Promise.all([
+    const [summary, health, efficiency, score, costSummary, ngsData] = await Promise.all([
       api('/cluster/summary'),
       api('/cluster/health'),
       api('/cluster/efficiency').catch(() => null),
       api('/cluster/score').catch(() => null),
+      api('/cost/summary').catch(() => null),
+      api('/nodegroups').catch(() => []),
     ]);
     const s = summary || {};
     // Fallback chain for potentialSavings:
@@ -29,14 +31,9 @@ export async function renderOverview() {
     // 2. cost/summary endpoint
     // 3. Client-side computation
     let _savingsSource = s.potentialSavings ? 'cluster/summary API' : '';
-    if (!s.potentialSavings) {
-      try {
-        const costSummary = await api('/cost/summary').catch(() => null);
-        if (costSummary?.potentialSavings) {
-          s.potentialSavings = costSummary.potentialSavings;
-          _savingsSource = 'cost/summary API';
-        }
-      } catch {}
+    if (!s.potentialSavings && costSummary?.potentialSavings) {
+      s.potentialSavings = costSummary.potentialSavings;
+      _savingsSource = 'cost/summary API';
     }
     if (!s.potentialSavings) {
       const computed = await computeRecommendations();
@@ -179,10 +176,9 @@ export async function renderOverview() {
       }).join('');
     }
 
-    // Node groups mini-table
-    try {
-      const ngs = await api('/nodegroups');
-      const list = toArray(ngs, 'nodeGroups');
+    // Node groups mini-table (data pre-fetched in initial Promise.all)
+    {
+      const list = toArray(ngsData, 'nodeGroups');
       $('#overview-ng-body').innerHTML = list.length ? list.slice(0, 10).map(ng => `<tr class="clickable-row" onclick="location.hash='#/nodegroups/${ng.id || ''}'">
         <td>${ng.name || ''}</td><td>${ng.instanceType || ''}</td>
         <td>${ng.currentCount ?? 0}</td>
@@ -190,8 +186,6 @@ export async function renderOverview() {
         <td>${fmt$(ng.monthlyCostUSD)}</td>
       </tr>`).join('') : '<tr><td colspan="6" style="color:var(--text-muted)">No node groups found</td></tr>';
       makeSortable($('#overview-ng-table'));
-    } catch (_) {
-      $('#overview-ng-body').innerHTML = '<tr><td colspan="6" style="color:var(--text-muted)">No node group data</td></tr>';
     }
 
     // Activity tabs (Events / Audit)

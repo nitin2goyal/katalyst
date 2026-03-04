@@ -13,12 +13,9 @@ function saveRecStatus(id, status) { const s = loadRecStatuses(); s[id] = status
 export async function renderRecsTab(targetEl) {
   targetEl.innerHTML = skeleton(5);
   try {
-    const [recs, summary, clusterNodes, clusterWorkloads, debugData, configData] = await Promise.all([
+    const [recs, summary, configData] = await Promise.all([
       api('/recommendations?pageSize=1000'),
       api('/recommendations/summary').catch(() => null),
-      api('/nodes?pageSize=1000').catch(() => []),
-      api('/workloads?pageSize=1000').catch(() => []),
-      api('/recommendations/debug').catch(() => null),
       api('/config').catch(() => ({})),
     ]);
     const autoApproveRightsizer = (configData.autoApprove || {}).rightsizer ?? false;
@@ -59,15 +56,6 @@ export async function renderRecsTab(targetEl) {
     const approved = recList.filter(r => (r.status || r.Status) === 'approved').length;
     const totalSavings = recList.reduce((s, r) => s + (r.estimatedSavings || 0), 0);
 
-    // --- Debug: compute cluster stats for validation ---
-    const nodeList = Array.isArray(clusterNodes) ? clusterNodes : (clusterNodes?.data || clusterNodes?.nodes || []);
-    const wlList = Array.isArray(clusterWorkloads) ? clusterWorkloads : (clusterWorkloads?.data || clusterWorkloads?.workloads || []);
-    const totalNodeCost = nodeList.reduce((s, n) => s + (n.hourlyCostUSD || 0) * 730.5, 0);
-    const nodesWithUsage = nodeList.filter(n => (n.cpuUsed || 0) > 0 || (n.memUsed || 0) > 0).length;
-    const avgNodeCPU = nodeList.length ? nodeList.reduce((s, n) => s + ((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100), 0) / nodeList.length : 0;
-    const avgNodeMem = nodeList.length ? nodeList.reduce((s, n) => s + ((n.memUsed || 0) / (n.memCapacity || 1) * 100), 0) / nodeList.length : 0;
-    const emptyNodes = nodeList.filter(n => (n.podCount || 0) === 0).length;
-    const gpuNodes = nodeList.filter(n => n.isGPU).length;
     const recsByType = {};
     recList.forEach(r => { const t = r.type || r.Type || '?'; recsByType[t] = (recsByType[t] || 0) + 1; });
     const savingsByType = {};
@@ -86,26 +74,10 @@ export async function renderRecsTab(targetEl) {
       </div>
       ${_isComputed ? '<div class="info-banner">These recommendations are computed from live cluster data. Switch to OPTIMIZE mode to enable automatic execution.</div>' : ''}
       ${(autoApproveRightsizer || autoApproveEvictor) ? '<div class="info-banner" style="border-color:var(--green)">Auto-approve is ON for: ' + [autoApproveRightsizer ? 'Rightsizing (once per workload)' : '', autoApproveEvictor ? 'Consolidation (once per node)' : ''].filter(Boolean).join(', ') + '.</div>' : ''}
-      <details class="debug-panel" style="margin-bottom:16px">
+      <details class="debug-panel" id="debug-panel" style="margin-bottom:16px">
         <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);padding:8px 0">Data Validation (click to expand)</summary>
-        <div class="card" style="font-size:12px;line-height:1.8;padding:16px;margin-top:8px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
-            <div><strong>Data Source:</strong> ${debugSrc}</div>
-            <div><strong>Summary API:</strong> ${summary ? JSON.stringify(summary) : 'null/empty'}</div>
-            <div><strong>Nodes:</strong> ${nodeList.length} total, ${emptyNodes} empty, ${gpuNodes} GPU</div>
-            <div><strong>Node Metrics:</strong> ${nodesWithUsage}/${nodeList.length} have usage data</div>
-            <div><strong>Avg Node Util:</strong> CPU ${avgNodeCPU.toFixed(1)}%, Mem ${avgNodeMem.toFixed(1)}%</div>
-            <div><strong>Total Cluster Cost:</strong> ${fmt$(totalNodeCost)}/mo (from node hourly costs)</div>
-            <div><strong>Workloads:</strong> ${wlList.length}</div>
-            <div><strong>Savings as % of cost:</strong> ${totalNodeCost > 0 ? (totalSavings / totalNodeCost * 100).toFixed(1) : 0}%</div>
-          </div>
-          <div style="margin-top:12px"><strong>Recs by type:</strong> ${Object.entries(recsByType).map(([t, c]) => `${t}: ${c}`).join(' | ')}</div>
-          <div><strong>Savings by type:</strong> ${Object.entries(savingsByType).map(([t, s]) => `${t}: ${fmt$(s)}`).join(' | ')}</div>
-          <div style="margin-top:8px;color:var(--text-muted)">Top 5 nodes by cost: ${nodeList.sort((a, b) => (b.hourlyCostUSD || 0) - (a.hourlyCostUSD || 0)).slice(0, 5).map(n => `${n.name}: $${((n.hourlyCostUSD || 0) * 730.5).toFixed(0)}/mo (CPU: ${((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100).toFixed(0)}%, Mem: ${((n.memUsed || 0) / (n.memCapacity || 1) * 100).toFixed(0)}%)`).join(' | ')}</div>
-          ${debugData ? `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
-            <strong>Backend Engine Debug (/api/v1/recommendations/debug):</strong>
-            <pre style="font-size:11px;overflow-x:auto;margin-top:4px;color:var(--text-muted)">${escapeHtml(JSON.stringify(debugData, null, 2))}</pre>
-          </div>` : ''}
+        <div class="card" id="debug-panel-content" style="font-size:12px;line-height:1.8;padding:16px;margin-top:8px">
+          <div style="color:var(--text-muted)">Loading debug data...</div>
         </div>
       </details>
       <div class="card">
@@ -143,6 +115,54 @@ export async function renderRecsTab(targetEl) {
         recList.map(r => [r.type || r.Type, r.target || r.resource, r.description || r.summary, r.estimatedSavings, r.confidence ?? '', r.status || r.Status]),
         'katalyst-recommendations.csv');
     };
+
+    // Lazy-load debug data only when user expands the panel
+    const debugPanel = document.getElementById('debug-panel');
+    if (debugPanel) {
+      debugPanel.addEventListener('toggle', async () => {
+        if (!debugPanel.open || debugPanel.dataset.loaded) return;
+        debugPanel.dataset.loaded = '1';
+        try {
+          const [clusterNodes, clusterWorkloads, debugData] = await Promise.all([
+            api('/nodes?pageSize=1000').catch(() => []),
+            api('/workloads?pageSize=1000').catch(() => []),
+            api('/recommendations/debug').catch(() => null),
+          ]);
+          const nodeList = Array.isArray(clusterNodes) ? clusterNodes : (clusterNodes?.data || clusterNodes?.nodes || []);
+          const wlList = Array.isArray(clusterWorkloads) ? clusterWorkloads : (clusterWorkloads?.data || clusterWorkloads?.workloads || []);
+          const totalNodeCost = nodeList.reduce((s, n) => s + (n.hourlyCostUSD || 0) * 730.5, 0);
+          const nodesWithUsage = nodeList.filter(n => (n.cpuUsed || 0) > 0 || (n.memUsed || 0) > 0).length;
+          const avgNodeCPU = nodeList.length ? nodeList.reduce((s, n) => s + ((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100), 0) / nodeList.length : 0;
+          const avgNodeMem = nodeList.length ? nodeList.reduce((s, n) => s + ((n.memUsed || 0) / (n.memCapacity || 1) * 100), 0) / nodeList.length : 0;
+          const emptyNodes = nodeList.filter(n => (n.podCount || 0) === 0).length;
+          const gpuNodes = nodeList.filter(n => n.isGPU).length;
+          const content = document.getElementById('debug-panel-content');
+          if (content) {
+            content.innerHTML = `
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
+                <div><strong>Data Source:</strong> ${debugSrc}</div>
+                <div><strong>Summary API:</strong> ${summary ? JSON.stringify(summary) : 'null/empty'}</div>
+                <div><strong>Nodes:</strong> ${nodeList.length} total, ${emptyNodes} empty, ${gpuNodes} GPU</div>
+                <div><strong>Node Metrics:</strong> ${nodesWithUsage}/${nodeList.length} have usage data</div>
+                <div><strong>Avg Node Util:</strong> CPU ${avgNodeCPU.toFixed(1)}%, Mem ${avgNodeMem.toFixed(1)}%</div>
+                <div><strong>Total Cluster Cost:</strong> ${fmt$(totalNodeCost)}/mo (from node hourly costs)</div>
+                <div><strong>Workloads:</strong> ${wlList.length}</div>
+                <div><strong>Savings as % of cost:</strong> ${totalNodeCost > 0 ? (totalSavings / totalNodeCost * 100).toFixed(1) : 0}%</div>
+              </div>
+              <div style="margin-top:12px"><strong>Recs by type:</strong> ${Object.entries(recsByType).map(([t, c]) => `${t}: ${c}`).join(' | ')}</div>
+              <div><strong>Savings by type:</strong> ${Object.entries(savingsByType).map(([t, s]) => `${t}: ${fmt$(s)}`).join(' | ')}</div>
+              <div style="margin-top:8px;color:var(--text-muted)">Top 5 nodes by cost: ${nodeList.sort((a, b) => (b.hourlyCostUSD || 0) - (a.hourlyCostUSD || 0)).slice(0, 5).map(n => `${n.name}: $${((n.hourlyCostUSD || 0) * 730.5).toFixed(0)}/mo (CPU: ${((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100).toFixed(0)}%, Mem: ${((n.memUsed || 0) / (n.memCapacity || 1) * 100).toFixed(0)}%)`).join(' | ')}</div>
+              ${debugData ? `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+                <strong>Backend Engine Debug (/api/v1/recommendations/debug):</strong>
+                <pre style="font-size:11px;overflow-x:auto;margin-top:4px;color:var(--text-muted)">${escapeHtml(JSON.stringify(debugData, null, 2))}</pre>
+              </div>` : ''}`;
+          }
+        } catch (err) {
+          const content = document.getElementById('debug-panel-content');
+          if (content) content.innerHTML = `<div style="color:var(--red)">Failed to load debug data: ${escapeHtml(err.message)}</div>`;
+        }
+      });
+    }
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load recommendations: ' + e.message);
   }

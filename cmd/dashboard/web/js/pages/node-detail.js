@@ -178,10 +178,10 @@ export async function renderNodeDetail(params) {
       return `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
       <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
-      <td>${fmtCPU(p.cpuRequest)}</td>
+      <td>${fmtCPUm(cpuReqM)}</td>
       <td>${cpuUsedM != null ? fmtCPUm(cpuUsedM) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${cpuPct != null ? utilBar(cpuPct) : '<span style="color:var(--text-muted)">-</span>'}</td>
-      <td>${fmtMem(p.memRequest)}</td>
+      <td>${fmtMemB(memReqB)}</td>
       <td>${memUsedB != null ? fmtMemB(memUsedB) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${memPctVal != null ? utilBar(memPctVal) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${p.diskUsage ? fmtMem(p.diskUsage) : '-'}</td>
