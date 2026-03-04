@@ -3,6 +3,7 @@ package nodeautoscaler
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -324,8 +325,8 @@ func (c *Controller) preDrainFeasibilityCheck(ctx context.Context, snapshot *opt
 		return fmt.Errorf("node %s not found in snapshot", nodeName)
 	}
 
-	// Check each non-DaemonSet, non-system pod can be placed somewhere.
-	unplaceable := 0
+	// Filter to evictable pods (non-DaemonSet, non-system).
+	var evictablePods []*corev1.Pod
 	for _, pod := range targetNodeInfo.Pods {
 		if pod == nil {
 			continue
@@ -340,20 +341,34 @@ func (c *Controller) preDrainFeasibilityCheck(ctx context.Context, snapshot *opt
 		if isDaemonSet {
 			continue
 		}
-		// Skip system namespaces — these pods won't be evicted.
 		if pod.Namespace == "kube-system" || pod.Namespace == "kube-public" || pod.Namespace == "kube-node-lease" {
 			continue
 		}
+		evictablePods = append(evictablePods, pod)
+	}
 
+	// Sort pods largest-first (by memory request descending) to avoid
+	// fragmentation: placing small pods first fills up free space on nodes,
+	// leaving no single node with enough room for a large pod.
+	sort.Slice(evictablePods, func(i, j int) bool {
+		_, memI := scheduler.EffectivePodResources(evictablePods[i])
+		_, memJ := scheduler.EffectivePodResources(evictablePods[j])
+		return memI > memJ
+	})
+
+	// Check each pod can be placed somewhere.
+	unplaceable := 0
+	for _, pod := range evictablePods {
 		fitting := c.simulator.FindFittingNodes(pod, otherNodes, podsByNode)
 		if len(fitting) == 0 {
 			unplaceable++
 			logger.V(1).Info("Pod has no placement target",
 				"pod", pod.Namespace+"/"+pod.Name, "node", nodeName)
 		} else {
-			// Accumulate: reserve capacity on the target node so subsequent
-			// pods see reduced capacity (same approach as consolidation planner).
-			podsByNode[fitting[0]] = append(podsByNode[fitting[0]], pod)
+			// Pick best-fit node (least free memory that still fits) to
+			// preserve large contiguous free space on other nodes.
+			bestNode := c.pickBestFitNode(pod, fitting, podsByNode)
+			podsByNode[bestNode] = append(podsByNode[bestNode], pod)
 		}
 	}
 
@@ -362,6 +377,33 @@ func (c *Controller) preDrainFeasibilityCheck(ctx context.Context, snapshot *opt
 	}
 
 	return nil
+}
+
+// pickBestFitNode selects the node with the least free memory that still fits
+// the pod. This preserves large contiguous free space on other nodes for
+// subsequent big pods (best-fit decreasing bin-packing heuristic).
+func (c *Controller) pickBestFitNode(pod *corev1.Pod, fitting []string, podsByNode map[string][]*corev1.Pod) string {
+	if len(fitting) == 1 {
+		return fitting[0]
+	}
+	_, podMem := scheduler.EffectivePodResources(pod)
+	best := fitting[0]
+	bestFree := int64(1<<63 - 1) // max int64
+	for _, nodeName := range fitting {
+		usedMem := int64(0)
+		for _, p := range podsByNode[nodeName] {
+			_, pMem := scheduler.EffectivePodResources(p)
+			usedMem += pMem
+		}
+		// free = how much would remain after placing this pod
+		// We want the node where free is smallest (tightest fit)
+		free := -usedMem - podMem // relative; actual cap cancels out in comparison
+		if free < bestFree {
+			bestFree = free
+			best = nodeName
+		}
+	}
+	return best
 }
 
 // uncordonFailedDrainNodes uncordons nodes that were left cordoned after drain

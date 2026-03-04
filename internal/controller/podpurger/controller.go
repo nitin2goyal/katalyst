@@ -89,6 +89,16 @@ func (c *Controller) run(ctx context.Context) {
 					continue
 				}
 
+				// Skip koptimizer's own pods — never purge ourselves.
+				if appName, ok := ps.Pod.Labels["app.kubernetes.io/name"]; ok && appName == "koptimizer" {
+					continue
+				}
+				if appLabel, ok := ps.Pod.Labels["app"]; ok {
+					if appLabel == "koptimizer" || appLabel == "koptimizer-dashboard" || appLabel == "mockapi" {
+						continue
+					}
+				}
+
 				status := computePodStatus(ps.Pod)
 				if !badStatusSet[status] {
 					continue

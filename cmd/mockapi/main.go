@@ -25,6 +25,7 @@ var dryRunStates = map[string]bool{
 }
 var autoApproveStates = map[string]bool{
 	"rightsizer": false,
+	"evictor":    false,
 }
 
 var mockChannels = []map[string]any{

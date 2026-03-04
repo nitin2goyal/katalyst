@@ -3,6 +3,7 @@ package evictor
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -29,6 +30,8 @@ type Controller struct {
 	fragScorer    *FragmentationScorer
 	consolidator  *Consolidator
 	drainer       *Drainer
+	mu            sync.Mutex
+	evicted       map[string]bool // once-only tracking: node name → already evicted
 }
 
 func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
@@ -46,6 +49,7 @@ func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *s
 		fragScorer:   NewFragmentationScorer(),
 		consolidator: NewConsolidator(cfg),
 		drainer:      drainer,
+		evicted:     make(map[string]bool),
 	}
 }
 
@@ -92,6 +96,21 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
+	// Auto-approve gate: consolidation requires auto-approve to be enabled.
+	if !c.config.Evictor.AutoApprove {
+		return nil
+	}
+
+	// Once-only: skip if this node was already evicted in this process lifetime.
+	nodeName := rec.Details["nodeName"]
+	c.mu.Lock()
+	already := c.evicted[nodeName]
+	c.mu.Unlock()
+	if already {
+		logger.V(1).Info("Skipping already-evicted node", "node", nodeName)
+		return nil
+	}
+
 	// AI Gate validation — fail-closed: use RequiresValidation which checks
 	// both the RequiresAIGate flag AND actual impact metrics (cost, nodes affected).
 	if c.gate.RequiresValidation(rec) {
@@ -111,8 +130,6 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return err
 	}
 
-	nodeName := rec.Details["nodeName"]
-
 	// Acquire node-level lock to prevent concurrent operations
 	if err := c.state.NodeLock.TryLock(nodeName, "evictor"); err != nil {
 		return fmt.Errorf("cannot drain node: %w", err)
@@ -127,6 +144,10 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 	} else {
 		c.state.AuditLog.Record("drain-node-complete", nodeName, "evictor",
 			fmt.Sprintf("successfully drained node, recommendation: %s", rec.ID))
+		// Record once-only: don't drain this node again.
+		c.mu.Lock()
+		c.evicted[nodeName] = true
+		c.mu.Unlock()
 	}
 	return err
 }

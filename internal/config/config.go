@@ -95,6 +95,7 @@ type WorkloadScalerConfig struct {
 
 type EvictorConfig struct {
 	Enabled                bool          `yaml:"enabled"`
+	AutoApprove            bool          `yaml:"autoApprove"` // Auto-approve consolidation recommendations (once per node)
 	UtilizationThreshold   float64       `yaml:"utilizationThreshold"` // Below this, node is underutilized
 	ConsolidationInterval  time.Duration `yaml:"consolidationInterval"`
 	MaxConcurrentEvictions int           `yaml:"maxConcurrentEvictions"`

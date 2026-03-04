@@ -226,7 +226,7 @@ export async function renderSettings() {
       nodegroupMgr:   { label: 'Node Group Manager', desc: 'Adjusts node group min counts based on utilization',         category: 'non-intrusive' },
       gpu:            { label: 'GPU Optimizer',      desc: 'Optimizes GPU node scheduling and utilization',              category: 'non-intrusive' },
       nodeAutoscaler: { label: 'Node Autoscaler',    desc: 'Scales nodes up/down based on utilization thresholds',       category: 'mildly-intrusive', hasDryRun: true },
-      evictor:        { label: 'Evictor',            desc: 'Drains underutilized nodes to consolidate workloads',        category: 'mildly-intrusive', hasDryRun: true },
+      evictor:        { label: 'Evictor',            desc: 'Drains underutilized nodes to consolidate workloads',        category: 'mildly-intrusive', hasDryRun: true, hasAutoApprove: true },
       rebalancer:     { label: 'Rebalancer',         desc: 'Rebalances pods across nodes for better distribution',       category: 'mildly-intrusive', hasDryRun: true },
       rightsizer:     { label: 'Rightsizer',         desc: 'Adjusts workload CPU/memory requests to match actual usage', category: 'intrusive', hasAutoApprove: true },
       workloadScaler: { label: 'Workload Scaler',    desc: 'Scales workload replicas and configures HPAs',               category: 'intrusive' },
@@ -260,6 +260,7 @@ export async function renderSettings() {
         <div class="controllers-grid">${items.map(([name, meta]) => {
           const st = ctrlState(name, meta);
           if (meta.hasDryRun) {
+            const autoApprovedDR = meta.hasAutoApprove && ((config.autoApprove || {})[name] ?? false);
             // 3-state segmented: OFF | DRY RUN | LIVE
             return `<div class="controller-item">
               <div style="min-width:0">
@@ -271,7 +272,15 @@ export async function renderSettings() {
                 <button data-state="dryrun" class="${st === 'dryrun' ? 'seg-active-dryrun' : ''}">DRY RUN</button>
                 <button data-state="live" class="${st === 'live' ? 'seg-active-live' : ''}">LIVE</button>
               </div>
-            </div>`;
+            </div>${meta.hasAutoApprove ? `<div class="controller-sub-item">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:12px;font-weight:600;color:var(--text-muted)">Auto-Approve</span>
+              <button class="btn ${autoApprovedDR ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle" data-ctrl="${name}" style="font-size:11px">
+                ${autoApprovedDR ? 'ON' : 'OFF'}
+              </button>
+              <span style="color:var(--text-muted);font-size:11px">${autoApprovedDR ? 'Consolidation applied once per node' : 'Manual approval required'}</span>
+            </div>
+          </div>` : ''}`;
           }
           // Simple ON/OFF toggle
           const enabled = controllers[name] ?? false;
@@ -280,19 +289,19 @@ export async function renderSettings() {
             <div style="min-width:0">
               <div class="controller-name">${meta.label}</div>
               <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${meta.desc}</div>
-              ${meta.hasAutoApprove ? `
-                <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-                  <button class="btn ${autoApproved ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle" data-ctrl="${name}" style="min-width:120px;font-size:11px">
-                    ${autoApproved ? 'AUTO-APPROVE ON' : 'AUTO-APPROVE OFF'}
-                  </button>
-                  <span style="color:var(--text-muted);font-size:11px">${autoApproved ? 'Downsizing applied once per workload' : 'Manual approval required for downsizing'}</span>
-                </div>
-              ` : ''}
             </div>
             <button class="btn ${enabled ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle" data-ctrl="${name}" style="min-width:50px">
               ${enabled ? 'ON' : 'OFF'}
             </button>
-          </div>`;
+          </div>${meta.hasAutoApprove ? `<div class="controller-sub-item">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:12px;font-weight:600;color:var(--text-muted)">Auto-Approve</span>
+              <button class="btn ${autoApproved ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle" data-ctrl="${name}" style="font-size:11px">
+                ${autoApproved ? 'ON' : 'OFF'}
+              </button>
+              <span style="color:var(--text-muted);font-size:11px">${autoApproved ? 'Downsizing applied once per workload' : 'Manual approval required'}</span>
+            </div>
+          </div>` : ''}`;
         }).join('')}</div>
       </div>`;
     }).join('');
@@ -314,7 +323,9 @@ export async function renderSettings() {
           aaBtn.className = `btn ${newState ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle`;
           aaBtn.textContent = newState ? 'AUTO-APPROVE ON' : 'AUTO-APPROVE OFF';
           const descSpan = aaBtn.nextElementSibling;
-          if (descSpan) descSpan.textContent = newState ? 'Downsizing applied once per workload' : 'Manual approval required for downsizing';
+          const onDesc = name === 'evictor' ? 'Consolidation applied once per node' : 'Downsizing applied once per workload';
+          const offDesc = name === 'evictor' ? 'Manual approval required' : 'Manual approval required';
+          if (descSpan) descSpan.textContent = newState ? onDesc : offDesc;
           toast(`${controllerMeta[name]?.label || name} auto-approve ${newState ? 'enabled' : 'disabled'}`, newState ? 'success' : 'info');
         } catch (err) {
           aaBtn.textContent = currentState ? 'AUTO-APPROVE ON' : 'AUTO-APPROVE OFF';

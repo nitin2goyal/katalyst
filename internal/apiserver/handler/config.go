@@ -50,6 +50,7 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 		},
 		"autoApprove": map[string]bool{
 			"rightsizer": h.config.Rightsizer.AutoApprove,
+			"evictor":    h.config.Evictor.AutoApprove,
 		},
 	})
 }
@@ -174,6 +175,8 @@ func (h *ConfigHandler) SetAutoApprove(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "rightsizer":
 		h.config.Rightsizer.AutoApprove = req.AutoApprove
+	case "evictor":
+		h.config.Evictor.AutoApprove = req.AutoApprove
 	default:
 		h.mu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "controller does not support autoApprove: " + name})

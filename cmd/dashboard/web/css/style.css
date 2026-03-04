@@ -1007,6 +1007,15 @@ strong.high, .text-high { color: #ef4444; }
 
 .controller-name { font-weight: 600; }
 
+.controller-sub-item {
+  padding: 6px 14px 6px 32px;
+  background: rgba(255,255,255,0.02);
+  border-radius: 0 0 8px 8px;
+  margin-top: -4px;
+  font-size: 13px;
+  border-top: 1px solid var(--glass-border);
+}
+
 /* Segmented control for OFF / DRY RUN / LIVE */
 .ctrl-seg {
   display: inline-flex;

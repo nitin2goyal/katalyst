@@ -169,6 +169,8 @@ func main() {
 			switch name {
 			case "rightsizer":
 				cfg.Rightsizer.AutoApprove = autoApprove
+			case "evictor":
+				cfg.Evictor.AutoApprove = autoApprove
 			}
 		}
 		setupLog.Info("Restoring persisted auto-approve states", "count", len(autoApproveStates))

@@ -144,9 +144,9 @@ func tolerationMatchesTaint(toleration corev1.Toleration, taint corev1.Taint) bo
 	return toleration.Value == taint.Value
 }
 
-// effectivePodResources computes the effective resource request for a pod,
+// EffectivePodResources computes the effective resource request for a pod,
 // accounting for init containers: max(max(initContainers), sum(containers)).
-func effectivePodResources(pod *corev1.Pod) (cpuMilli, memBytes int64) {
+func EffectivePodResources(pod *corev1.Pod) (cpuMilli, memBytes int64) {
 	for _, c := range pod.Spec.Containers {
 		if cpu, ok := c.Resources.Requests[corev1.ResourceCPU]; ok {
 			cpuMilli += cpu.MilliValue()
@@ -182,14 +182,14 @@ func hasEnoughResources(pod *corev1.Pod, node *corev1.Node, existingPods []*core
 	usedMem := int64(0)
 	usedGPU := int64(0)
 	for _, p := range existingPods {
-		pCPU, pMem := effectivePodResources(p)
+		pCPU, pMem := EffectivePodResources(p)
 		usedCPU += pCPU
 		usedMem += pMem
 		usedGPU += podGPURequest(p)
 	}
 
 	// Calculate pod resource requirements (including init containers)
-	podCPU, podMem := effectivePodResources(pod)
+	podCPU, podMem := EffectivePodResources(pod)
 	podGPU := podGPURequest(pod)
 
 	if usedCPU+podCPU > cpuCap || usedMem+podMem > memCap {

@@ -320,8 +320,18 @@ func isGPUPod(pod *corev1.Pod) bool {
 }
 
 // shouldSkipEviction mirrors the evictor's shouldSkipPod logic.
-// Pods that should not be evicted: DaemonSets, system-critical, mirror pods, completed, excluded.
+// Pods that should not be evicted: koptimizer itself, DaemonSets, system-critical, mirror pods, completed, excluded.
 func shouldSkipEviction(pod *corev1.Pod) bool {
+	// Skip koptimizer's own pods — never evict ourselves.
+	if appName, ok := pod.Labels["app.kubernetes.io/name"]; ok && appName == "koptimizer" {
+		return true
+	}
+	if appLabel, ok := pod.Labels["app"]; ok {
+		if appLabel == "koptimizer" || appLabel == "koptimizer-dashboard" || appLabel == "mockapi" {
+			return true
+		}
+	}
+
 	// Skip system-critical namespaces
 	if pod.Namespace == "kube-system" || pod.Namespace == "kube-public" || pod.Namespace == "kube-node-lease" {
 		return true
