@@ -165,10 +165,20 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 	if direction == "down" {
 		snapshot := c.state.Snapshot()
 		drained := 0
+		attempted := 0
 		nodesToRemove := rec.EstimatedImpact.NodesAffected
+		maxAttempts := c.config.NodeAutoscaler.MaxScaleDownNodes
 
 		for _, n := range snapshot.Nodes {
 			if drained >= nodesToRemove {
+				break
+			}
+			// Stop after max attempts — don't keep cordoning nodes on failures.
+			// Without this, partial drain failures (node stays cordoned, error returned)
+			// let the loop iterate through every node in the group.
+			if attempted >= maxAttempts {
+				logger.Info("Max scale-down attempts reached, stopping",
+					"attempted", attempted, "drained", drained, "maxAttempts", maxAttempts)
 				break
 			}
 			if n.NodeGroup != nodeGroupID {
@@ -189,6 +199,7 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 				continue
 			}
 
+			attempted++
 			c.state.AuditLog.Record("drain-before-scaledown", nodeName, "nodeautoscaler",
 				fmt.Sprintf("draining node before scaling %s to %d", nodeGroupID, desired))
 
@@ -198,7 +209,8 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 				c.state.AuditLog.Record("drain-failed", nodeName, "nodeautoscaler",
 					fmt.Sprintf("drain failed: %v", err))
 				failedDrainNodes = append(failedDrainNodes, nodeName)
-				continue
+				// Stop on first drain failure — don't cascade cordon more nodes
+				break
 			}
 			c.state.NodeLock.Unlock(nodeName, "nodeautoscaler")
 			drainedNodes = append(drainedNodes, nodeName)

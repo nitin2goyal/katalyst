@@ -292,7 +292,7 @@ nodeAutoscaler:
   scaleDownThreshold: 30         # Default: 30 -- CPU util % to trigger scale down
   scaleDownDelay: "10m"          # Default: 10m -- wait before scaling down
   maxScaleUpNodes: 5             # Default: 5 -- max nodes to add in one action
-  maxScaleDownNodes: 3           # Default: 3 -- max nodes to remove in one action
+  maxScaleDownNodes: 2           # Default: 2 -- max nodes to remove in one action
 
 # ── Node Group Manager ───────────────────────────────────────
 nodegroupManager:
@@ -336,10 +336,8 @@ evictor:
   enabled: true                  # Default: true
   utilizationThreshold: 40       # Default: 40 -- below this %, node is underutilized
   consolidationInterval: "5m"    # Default: 5m -- how often to check for consolidation
-  maxConcurrentEvictions: 5      # Default: 5 -- max pods evicted at once
+  maxConcurrentEvictions: 1      # Default: 1 -- max nodes to drain per tick (also global cordon limit)
   drainTimeout: "5m"             # Default: 5m -- max time to drain a node
-  partialDrainTTL: "30m"         # Default: 30m -- auto-uncordon partially drained nodes
-                                 #   after this duration (prevents indefinitely cordoned nodes)
   dryRun: false                  # Default: false -- if true, log but do not evict
 
 # ── Rebalancer ────────────────────────────────────────────────

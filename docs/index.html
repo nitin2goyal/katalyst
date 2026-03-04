@@ -388,7 +388,7 @@ nodeAutoscaler:
   scaleDownThreshold: 30         # Default: 30
   scaleDownDelay: "10m"          # Default: 10m
   maxScaleUpNodes: 5             # Default: 5
-  maxScaleDownNodes: 3           # Default: 3
+  maxScaleDownNodes: 2           # Default: 2
 
 # ── Node Group Manager ──────────────────────────────────
 nodegroupManager:
@@ -431,7 +431,7 @@ evictor:
   enabled: true
   utilizationThreshold: 40
   consolidationInterval: "5m"
-  maxConcurrentEvictions: 5
+  maxConcurrentEvictions: 1
   dryRun: false
 
 # ── Rebalancer ───────────────────────────────────────────

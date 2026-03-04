@@ -230,7 +230,7 @@ func DefaultConfig() *Config {
 			ScaleDownThreshold: 30.0,
 			ScaleDownDelay:     10 * time.Minute,
 			MaxScaleUpNodes:    5,
-			MaxScaleDownNodes:  3,
+			MaxScaleDownNodes:  2,
 		},
 		NodeGroupMgr: NodeGroupMgrConfig{
 			Enabled: true,
@@ -261,7 +261,7 @@ func DefaultConfig() *Config {
 			DryRun:                 true, // safe default: recommend-only until explicitly enabled
 			UtilizationThreshold:   40.0,
 			ConsolidationInterval:  5 * time.Minute,
-			MaxConcurrentEvictions: 5,
+			MaxConcurrentEvictions: 1,
 			DrainTimeout:           5 * time.Minute,
 			PartialDrainTTL:        30 * time.Minute,
 		},

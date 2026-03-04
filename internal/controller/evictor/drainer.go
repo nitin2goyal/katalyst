@@ -127,21 +127,16 @@ func (d *Drainer) DrainNode(ctx context.Context, nodeName string) error {
 		return fmt.Errorf("draining node %s: all %d evictions failed: %w", nodeName, failed, errors.Join(evictErrs...))
 	}
 
-	// Partial failure — keep node cordoned (some pods moved) but annotate with
-	// a timestamp so the node can be auto-uncordoned if the issue isn't resolved.
+	// Partial failure — uncordon the node immediately. Never leave a node
+	// cordoned in limbo; the evicted pods will be rescheduled and we can
+	// retry the drain on the next cycle.
 	if failed > 0 {
-		node := &corev1.Node{}
-		if err := d.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err == nil {
-			if node.Annotations == nil {
-				node.Annotations = make(map[string]string)
-			}
-			node.Annotations["koptimizer.io/partial-drain-at"] = time.Now().UTC().Format(time.RFC3339)
-			node.Annotations["koptimizer.io/partial-drain-reason"] = fmt.Sprintf("%d/%d evictions failed", failed, evicted+failed)
-			if updateErr := d.client.Update(ctx, node); updateErr != nil {
-				logger.Error(updateErr, "Failed to annotate partially drained node", "node", nodeName)
-			}
+		logger.Info("Partial drain failure, uncordoning node to avoid limbo state",
+			"node", nodeName, "evicted", evicted, "failed", failed)
+		if uncordErr := d.uncordonNode(ctx, nodeName); uncordErr != nil {
+			logger.Error(uncordErr, "Failed to uncordon node after partial drain", "node", nodeName)
 		}
-		return fmt.Errorf("draining node %s: %d/%d evictions failed: %w", nodeName, failed, evicted+failed, errors.Join(evictErrs...))
+		return fmt.Errorf("draining node %s: %d/%d evictions failed (node uncordoned): %w", nodeName, failed, evicted+failed, errors.Join(evictErrs...))
 	}
 
 	intmetrics.NodesConsolidated.Inc()
@@ -150,6 +145,27 @@ func (d *Drainer) DrainNode(ctx context.Context, nodeName string) error {
 }
 
 func (d *Drainer) cordonNode(ctx context.Context, nodeName string) error {
+	// Global safety: refuse to cordon if too many nodes are already
+	// unschedulable. This prevents cascading failures where partial drain
+	// errors cause the loop to cordon every node in the cluster.
+	maxCordoned := d.config.Evictor.MaxConcurrentEvictions
+	if maxCordoned <= 0 {
+		maxCordoned = 2
+	}
+	allNodes := &corev1.NodeList{}
+	if err := d.client.List(ctx, allNodes); err != nil {
+		return fmt.Errorf("listing nodes for cordon safety check: %w", err)
+	}
+	cordoned := 0
+	for i := range allNodes.Items {
+		if allNodes.Items[i].Spec.Unschedulable && allNodes.Items[i].Name != nodeName {
+			cordoned++
+		}
+	}
+	if cordoned >= maxCordoned {
+		return fmt.Errorf("refusing to cordon %s: %d nodes already unschedulable (limit %d)", nodeName, cordoned, maxCordoned)
+	}
+
 	node := &corev1.Node{}
 	if err := d.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 		return err
@@ -236,6 +252,19 @@ func (d *Drainer) checkPDBSafeWithCache(pod *corev1.Pod, pdbList *policyv1.PodDi
 }
 
 func shouldSkipPod(pod *corev1.Pod) bool {
+	// Skip koptimizer's own pods — never evict ourselves.
+	// Check both the Helm standard label and pod name prefix for robustness.
+	if appName, ok := pod.Labels["app.kubernetes.io/name"]; ok {
+		if appName == "koptimizer" {
+			return true
+		}
+	}
+	if appLabel, ok := pod.Labels["app"]; ok {
+		if appLabel == "koptimizer" || appLabel == "koptimizer-dashboard" || appLabel == "mockapi" {
+			return true
+		}
+	}
+
 	// Skip system-critical namespaces
 	if pod.Namespace == "kube-system" || pod.Namespace == "kube-public" || pod.Namespace == "kube-node-lease" {
 		return true

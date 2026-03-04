@@ -157,20 +157,21 @@ func (c *Controller) run(ctx context.Context) {
 			// Enforce MaxConcurrentEvictions: only execute up to the
 			// configured limit per tick to prevent cascading failures.
 			maxExec := c.config.Evictor.MaxConcurrentEvictions
-			executed := 0
+			attempted := 0
 			for _, rec := range recs {
-				if maxExec > 0 && executed >= maxExec {
+				if maxExec > 0 && attempted >= maxExec {
 					logger.V(1).Info("MaxConcurrentEvictions reached, deferring remaining",
-						"executed", executed, "remaining", len(recs)-executed)
+						"attempted", attempted, "remaining", len(recs)-attempted)
 					break
 				}
+				attempted++
 				if err := c.Execute(ctx, rec); err != nil {
 					logger.Error(err, "Execution failed", "recommendation", rec.ID)
 					c.state.Breaker.RecordFailure(c.Name())
-				} else {
-					executed++
-					c.state.Breaker.RecordSuccess(c.Name())
+					// Stop on first failure — don't cascade cordon more nodes
+					break
 				}
+				c.state.Breaker.RecordSuccess(c.Name())
 			}
 		case <-ctx.Done():
 			return

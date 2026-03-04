@@ -33,7 +33,7 @@ config:
     scaleDownThreshold: 30
     scaleDownDelay: "10m"
     maxScaleUpNodes: 5
-    maxScaleDownNodes: 3
+    maxScaleDownNodes: 2
 
   nodegroupManager:
     enabled: true
@@ -72,7 +72,7 @@ config:
     enabled: true
     utilizationThreshold: 40
     consolidationInterval: "5m"
-    maxConcurrentEvictions: 5
+    maxConcurrentEvictions: 1
     dryRun: false
 
   rebalancer:
