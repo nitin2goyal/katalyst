@@ -213,21 +213,34 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		return recs
 	}
 
+	// Build node capacity lookup for ratio-based rightsizing
+	nodeByName := make(map[string]*state.NodeState, len(nodes))
+	for _, n := range nodes {
+		nodeByName[n.Node.Name] = n
+	}
+
 	type ownerGroup struct {
 		namespace     string
 		ownerKind     string
 		ownerName     string
 		podCount      int
 		// Aggregated across pods — we average at the end
-		sumCPURequest int64
-		sumMemRequest int64
-		sumCPUP95     int64
-		sumMemP95     int64
-		hasHistorical bool
+		sumCPURequest   int64
+		sumMemRequest   int64
+		sumCPUP95       int64
+		sumMemP95       int64
+		hasHistorical   bool
+		// Node capacity (from first pod's node, used for ratio)
+		nodeCPUCapMilli int64
+		nodeMemCapBytes int64
 	}
 	owners := make(map[string]*ownerGroup)
 	for _, p := range pods {
 		if systemNamespaces[p.Namespace] || p.CPURequest == 0 || p.MemoryRequest == 0 {
+			continue
+		}
+		// Skip DaemonSets
+		if p.OwnerKind == "DaemonSet" {
 			continue
 		}
 		// Only consider running pods
@@ -276,10 +289,9 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			p95Mem = p.MemoryUsage
 		}
 
-		// Require BOTH CPU and memory to be over-provisioned (< 50% utilization)
+		// Require CPU to be over-provisioned (< 50% utilization)
 		cpuEff := float64(p95CPU) / float64(p.CPURequest)
-		memEff := float64(p95Mem) / float64(p.MemoryRequest)
-		if cpuEff >= 0.5 || memEff >= 0.5 {
+		if cpuEff >= 0.5 {
 			continue
 		}
 
@@ -287,6 +299,13 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		if !ok {
 			og = &ownerGroup{namespace: p.Namespace, ownerKind: kind, ownerName: name}
 			owners[ownerKey] = og
+			// Grab node capacity from first pod
+			if p.Pod != nil {
+				if n, ok := nodeByName[p.Pod.Spec.NodeName]; ok {
+					og.nodeCPUCapMilli = n.CPUCapacity
+					og.nodeMemCapBytes = n.MemoryCapacity
+				}
+			}
 		}
 		og.podCount++
 		og.sumCPURequest += p.CPURequest
@@ -309,36 +328,49 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			continue
 		}
 
-		// Proportional keep-ratio algorithm (matches rightsizer controller)
-		cpuKeepRatio := float64(avgCPUP95) * 1.2 / float64(avgCPUReq)
-		memKeepRatio := float64(avgMemP95) * 1.2 / float64(avgMemReq)
+		// Node-ratio-aware algorithm (matches rightsizer controller):
+		// 1. Compute CPU floor from usage, clamped by MinKeepRatio
+		// 2. Use node ratio to compute matching memory
+		// 3. Never increase CPU
 
-		// Use the more conservative (higher) ratio
-		keepRatio := cpuKeepRatio
-		if memKeepRatio > keepRatio {
-			keepRatio = memKeepRatio
+		cpuFloor := int64(float64(avgCPUP95) * 1.2)
+		cpuMinKeep := int64(float64(avgCPUReq) * engineMinKeepRatio)
+		if cpuFloor < cpuMinKeep {
+			cpuFloor = cpuMinKeep
+		}
+		if cpuFloor < 10 {
+			cpuFloor = 10
 		}
 
-		// Clamp to MinKeepRatio — never reduce more than 30% per cycle
-		if keepRatio < engineMinKeepRatio {
-			keepRatio = engineMinKeepRatio
-		}
+		suggestedCPU := cpuFloor
 
-		suggestedCPU := int64(float64(avgCPUReq) * keepRatio)
-		suggestedMem := int64(float64(avgMemReq) * keepRatio)
-
-		// Enforce minimums
-		if suggestedCPU < 10 {
-			suggestedCPU = 10
-		}
-		minMem := int64(32 * 1024 * 1024) // 32Mi
-		if suggestedMem < minMem {
-			suggestedMem = minMem
-		}
-
-		// Only emit if both actually reduce
-		if suggestedCPU >= avgCPUReq || suggestedMem >= avgMemReq {
+		// Never increase CPU
+		if suggestedCPU >= avgCPUReq {
 			continue
+		}
+
+		// Memory floor from usage
+		memFloor := int64(float64(avgMemP95) * 1.2)
+		minMem := int64(32 * 1024 * 1024)
+		if memFloor < minMem {
+			memFloor = minMem
+		}
+
+		var suggestedMem int64
+		if og.nodeCPUCapMilli > 0 && og.nodeMemCapBytes > 0 {
+			// Match node's CPU:memory ratio
+			bytesPerMilli := float64(og.nodeMemCapBytes) / float64(og.nodeCPUCapMilli)
+			suggestedMem = int64(float64(suggestedCPU) * bytesPerMilli)
+			if suggestedMem < memFloor {
+				suggestedMem = memFloor
+			}
+		} else {
+			// Fallback: proportional reduction
+			cpuKeepRatio := float64(suggestedCPU) / float64(avgCPUReq)
+			suggestedMem = int64(float64(avgMemReq) * cpuKeepRatio)
+			if suggestedMem < memFloor {
+				suggestedMem = memFloor
+			}
 		}
 
 		// Per-vCPU / per-GiB savings (matches rightsizer cost model)
@@ -368,15 +400,20 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			confidence = 0.90
 		}
 
+		memDirection := "→"
+		if suggestedMem > avgMemReq {
+			memDirection = "↑"
+		}
+
 		recs = append(recs, ComputedRecommendation{
 			ID:               computedID("rightsizing", key),
 			Type:             "rightsizing",
 			Target:           target,
-			Description: fmt.Sprintf("%s %s/%s: %d pod(s) using %.0f%% CPU, %.0f%% memory. Reduce CPU %dm→%dm, memory %s→%s to save $%.0f/mo.",
+			Description: fmt.Sprintf("%s %s/%s: %d pod(s) using %.0f%% CPU, %.0f%% memory. Reduce CPU %dm→%dm, memory %s%s%s to save $%.0f/mo.",
 				og.ownerKind, og.namespace, og.ownerName, og.podCount,
 				avgCPUPct, avgMemPct,
 				avgCPUReq, suggestedCPU,
-				engineFormatBytes(avgMemReq), engineFormatBytes(suggestedMem),
+				engineFormatBytes(avgMemReq), memDirection, engineFormatBytes(suggestedMem),
 				totalSavings),
 			EstimatedSavings: roundCents(totalSavings),
 			Status:           "pending",

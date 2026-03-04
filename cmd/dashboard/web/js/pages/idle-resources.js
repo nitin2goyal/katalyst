@@ -78,17 +78,17 @@ export async function renderIdleResources(targetEl) {
     window.__exportIdleNodesCSV = () => {
       exportCSV(['Node', 'Instance Type', 'CPU Util %', 'Mem Util %', 'Idle Hours', 'Wasted Cost', 'Reason'],
         nodes.map(n => [n.name, n.instanceType, n.cpuUtilPct, n.memUtilPct, n.idleSinceHrs, n.wastedCostUSD, n.reason]),
-        'koptimizer-idle-nodes.csv');
+        'katalyst-idle-nodes.csv');
     };
     window.__exportIdleWlCSV = () => {
       exportCSV(['Namespace', 'Kind', 'Name', 'CPU Used %', 'Mem Used %', 'Replicas', 'Idle Hours', 'Wasted Cost', 'Reason'],
         workloads.map(w => [w.namespace, w.kind, w.name, w.cpuUsedPct, w.memUsedPct, w.replicas, w.idleSinceHrs, w.wastedCostUSD, w.reason]),
-        'koptimizer-idle-workloads.csv');
+        'katalyst-idle-workloads.csv');
     };
     window.__exportPvcCSV = () => {
       exportCSV(['Name', 'Namespace', 'Size GB', 'Age Days', 'Monthly Cost'],
         pvcs.map(p => [p.name, p.namespace, p.sizeGB, Math.floor(p.ageHours / 24), p.monthlyCostUSD]),
-        'koptimizer-orphaned-pvcs.csv');
+        'katalyst-orphaned-pvcs.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load idle resources: ' + e.message);

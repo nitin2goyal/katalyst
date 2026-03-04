@@ -141,7 +141,7 @@ export async function renderRecsTab(targetEl) {
     window.__exportRecsCSV = () => {
       exportCSV(['Type', 'Target', 'Description', 'Savings', 'Confidence %', 'Status'],
         recList.map(r => [r.type || r.Type, r.target || r.resource, r.description || r.summary, r.estimatedSavings, r.confidence ?? '', r.status || r.Status]),
-        'koptimizer-recommendations.csv');
+        'katalyst-recommendations.csv');
     };
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load recommendations: ' + e.message);

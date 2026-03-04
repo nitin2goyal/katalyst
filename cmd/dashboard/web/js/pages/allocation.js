@@ -86,7 +86,7 @@ export async function renderAllocation(targetEl) {
     window.__exportAllocCSV = () => {
       exportCSV(['Namespace', 'Monthly Cost', '% of Total'],
         nsEntries.map(([ns, cost]) => [ns, cost, totalCost > 0 ? (cost / totalCost * 100).toFixed(1) : 0]),
-        'koptimizer-allocation.csv');
+        'katalyst-allocation.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load allocation data: ' + e.message);

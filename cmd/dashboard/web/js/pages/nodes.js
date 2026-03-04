@@ -55,7 +55,7 @@ export async function renderNodes(targetEl) {
           ]
         })}
         <div class="table-wrap"><table id="node-table">
-          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>Disk</th><th>Disk Util</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Cost/hr</th></tr></thead>
+          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>Disk</th><th>Disk Util</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Cordoned</th><th>Cost/hr</th></tr></thead>
           <tbody id="node-body"></tbody>
         </table></div>
       </div>`;
@@ -88,8 +88,9 @@ export async function renderNodes(targetEl) {
       <td><strong class="${utilClass(n.cpuAllocPct || 0)}">${fmtPct(n.cpuAllocPct)}</strong></td>
       <td><strong class="${utilClass(n.memAllocPct || 0)}">${fmtPct(n.memAllocPct)}</strong></td>
       <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span style="color:var(--text-muted)">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
+      <td>${n.unschedulable ? '<span class="badge badge-red">Yes</span>' : '<span style="color:var(--text-muted)">No</span>'}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
-    </tr>`).join('') : '<tr><td colspan="11" style="color:var(--text-muted)">No nodes</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="12" style="color:var(--text-muted)">No nodes</td></tr>';
 
     makeSortable($('#ng-table'));
     makeSortable($('#node-table'));
@@ -103,12 +104,12 @@ export async function renderNodes(targetEl) {
     window.__exportNgCSV = () => {
       exportCSV(['Name', 'Instance Type', 'Family', 'Disk Type', 'Disk Size (GB)', 'Count', 'Min', 'Max', 'Total Cores', 'Total Memory (GiB)', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'Cluster', 'Taints', 'Cost/mo'],
         ngList.map(ng => [ng.name, ng.instanceType, ng.instanceFamily, ng.diskType || '', ng.diskSizeGB || '', ng.currentCount, ng.minCount, ng.maxCount, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), (ng.cpuAllocPct||0).toFixed(1), (ng.memAllocPct||0).toFixed(1), ng.sprCluster || '', Array.isArray(ng.taints) ? ng.taints.map(t=>t.key+'='+t.value+':'+t.effect).join('; ') : '', ng.monthlyCostUSD]),
-        'koptimizer-nodegroups.csv');
+        'katalyst-nodegroups.csv');
     };
     window.__exportNodesCSV = () => {
       exportCSV(['Name', 'Node Group', 'Instance Type', 'Disk Type', 'Disk Size (GB)', 'Disk Util %', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'App Pods', 'System Pods', 'Total Pods', 'Cost/hr'],
         nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, n.diskType || '', n.diskSizeGB || '', (n.diskUtilPct||0).toFixed(1), (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), (n.cpuAllocPct||0).toFixed(1), (n.memAllocPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.hourlyCostUSD]),
-        'koptimizer-nodes.csv');
+        'katalyst-nodes.csv');
     };
 
   } catch (e) {

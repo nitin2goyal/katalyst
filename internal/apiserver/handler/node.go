@@ -61,6 +61,7 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 			"systemPodCount": sysCount,
 			"diskType":       diskType,
 			"diskSizeGB":     diskSizeGB,
+			"unschedulable":  n.Node.Spec.Unschedulable,
 		})
 	}
 	writePaginatedJSON(w, r, result)

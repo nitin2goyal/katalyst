@@ -117,7 +117,7 @@ export async function renderSettings() {
 
       <div class="card">
         <h2>Operating Mode</h2>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Control how KOptimizer operates on your cluster</p>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Control how Katalyst operates on your cluster</p>
         <div class="mode-toggle" id="mode-toggle">
           <button class="mode-btn ${mode === 'recommend' ? 'mode-btn-active' : ''}" data-mode="recommend">
             <span class="mode-btn-title">Recommend</span>

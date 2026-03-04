@@ -55,47 +55,71 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 	return recs
 }
 
-// recommendProportionalDownsize generates a single combined CPU+memory recommendation
-// that reduces both resources by the same proportion. It uses the more conservative
-// (less aggressive) keep-ratio between CPU and memory, and clamps to MinKeepRatio
-// to prevent reducing by more than 30% per cycle (default).
-func (r *Recommender) recommendProportionalDownsize(analysis *PodAnalysis, replicaCount int64) *optimizer.Recommendation {
+// recommendNodeRatioDownsize generates a combined CPU+memory recommendation that
+// aligns the pod's CPU:memory ratio to the node's ratio for optimal bin-packing.
+//
+// Algorithm:
+//  1. Compute CPU floor from usage (P95 * 1.2, clamped by MinKeepRatio)
+//  2. If node capacity is known, compute memory to match node's CPU:memory ratio
+//  3. If node capacity is unknown, fall back to proportional reduction
+//  4. Never increase CPU (only decrease or hold). Memory may increase to match ratio.
+//  5. Only emit if CPU actually decreases (the main savings driver).
+func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaCount int64) *optimizer.Recommendation {
 	pod := analysis.PodInfo
 
-	// Compute keep-ratios: (P95 * 1.2) / request
-	cpuKeepRatio := float64(analysis.CPUP95) * 1.2 / float64(analysis.CPURequestMilli)
-	memKeepRatio := float64(analysis.MemP95) * 1.2 / float64(analysis.MemRequestBytes)
-
-	// Use the more conservative (higher) ratio — less aggressive reduction
-	keepRatio := cpuKeepRatio
-	if memKeepRatio > keepRatio {
-		keepRatio = memKeepRatio
-	}
-
-	// Clamp to MinKeepRatio — never reduce more than configured % per cycle
 	minKeepRatio := r.config.Rightsizer.MinKeepRatio
 	if minKeepRatio <= 0 {
 		minKeepRatio = 0.7 // fallback default
 	}
-	if keepRatio < minKeepRatio {
-		keepRatio = minKeepRatio
+
+	// CPU floor: max of usage-based and minKeepRatio-based
+	cpuFloor := int64(float64(analysis.CPUP95) * 1.2)
+	cpuMinKeep := int64(float64(analysis.CPURequestMilli) * minKeepRatio)
+	if cpuFloor < cpuMinKeep {
+		cpuFloor = cpuMinKeep
+	}
+	if cpuFloor < 10 {
+		cpuFloor = 10
 	}
 
-	// Apply proportional reduction
-	suggestedCPU := int64(float64(analysis.CPURequestMilli) * keepRatio)
-	suggestedMem := int64(float64(analysis.MemRequestBytes) * keepRatio)
+	suggestedCPU := cpuFloor
 
-	// Enforce minimums
-	if suggestedCPU < 10 {
-		suggestedCPU = 10
+	// Never increase CPU
+	if suggestedCPU >= analysis.CPURequestMilli {
+		return nil
 	}
+
+	// Memory floor: ensure we don't go below usage
+	memFloor := int64(float64(analysis.MemP95) * 1.2)
 	minMem := int64(32 * 1024 * 1024) // 32Mi
-	if suggestedMem < minMem {
-		suggestedMem = minMem
+	if memFloor < minMem {
+		memFloor = minMem
 	}
 
-	// Only emit if both actually reduce
-	if suggestedCPU >= analysis.CPURequestMilli || suggestedMem >= analysis.MemRequestBytes {
+	var suggestedMem int64
+
+	if analysis.NodeCPUCapMilli > 0 && analysis.NodeMemCapBytes > 0 {
+		// Node ratio: bytes of memory per millicore of CPU
+		bytesPerMilli := float64(analysis.NodeMemCapBytes) / float64(analysis.NodeCPUCapMilli)
+
+		// Set memory to match node ratio for the target CPU
+		suggestedMem = int64(float64(suggestedCPU) * bytesPerMilli)
+
+		// Ensure memory doesn't go below usage floor
+		if suggestedMem < memFloor {
+			suggestedMem = memFloor
+		}
+	} else {
+		// No node info — fall back to proportional reduction using same keep-ratio as CPU
+		cpuKeepRatio := float64(suggestedCPU) / float64(analysis.CPURequestMilli)
+		suggestedMem = int64(float64(analysis.MemRequestBytes) * cpuKeepRatio)
+		if suggestedMem < memFloor {
+			suggestedMem = memFloor
+		}
+	}
+
+	// CPU must actually decrease to be worth emitting
+	if suggestedCPU >= analysis.CPURequestMilli {
 		return nil
 	}
 
@@ -103,6 +127,11 @@ func (r *Recommender) recommendProportionalDownsize(analysis *PodAnalysis, repli
 	memSavings := estimateMemorySavings(analysis.MemRequestBytes, suggestedMem, r.config.CloudProvider)
 	perPodSavings := cpuSavings + memSavings
 	totalSavings := perPodSavings * float64(replicaCount)
+
+	memDirection := "→"
+	if suggestedMem > analysis.MemRequestBytes {
+		memDirection = "↑"
+	}
 
 	return &optimizer.Recommendation{
 		ID:              fmt.Sprintf("rightsize-combined-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
@@ -112,10 +141,10 @@ func (r *Recommender) recommendProportionalDownsize(analysis *PodAnalysis, repli
 		TargetKind:      pod.OwnerKind,
 		TargetName:      pod.OwnerName,
 		TargetNamespace: pod.Pod.Namespace,
-		Summary: fmt.Sprintf("Reduce CPU+memory for %s/%s: CPU %dm→%dm, memory %s→%s (%d replicas)",
+		Summary: fmt.Sprintf("Rightsize %s/%s: CPU %dm→%dm, memory %s%s%s (%d replicas)",
 			pod.Pod.Namespace, pod.OwnerName,
 			analysis.CPURequestMilli, suggestedCPU,
-			formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem),
+			formatBytes(analysis.MemRequestBytes), memDirection, formatBytes(suggestedMem),
 			replicaCount),
 		ActionSteps: []string{
 			fmt.Sprintf("Patch CPU request from %dm to %dm and memory from %s to %s",
@@ -135,7 +164,6 @@ func (r *Recommender) recommendProportionalDownsize(analysis *PodAnalysis, repli
 			"suggestedMemRequest": formatBytes(suggestedMem),
 			"p95CPU":              fmt.Sprintf("%dm", analysis.CPUP95),
 			"p95Mem":              formatBytes(analysis.MemP95),
-			"keepRatio":           fmt.Sprintf("%.3f", keepRatio),
 			"replicaCount":        fmt.Sprintf("%d", replicaCount),
 		},
 		CreatedAt: time.Now(),

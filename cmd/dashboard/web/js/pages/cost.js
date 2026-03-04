@@ -222,12 +222,12 @@ async function renderCostDashboard(targetEl) {
     window.__exportSavingsCSV = () => {
       exportCSV(['Type', 'Description', 'Est. Savings'],
         savingsList.map(s => [s.type, s.description || s.name, s.estimatedSavings || s.savings]),
-        'koptimizer-savings.csv');
+        'katalyst-savings.csv');
     };
     window.__exportWlCostCSV = () => {
       exportCSV(['Namespace', 'Kind', 'Name', 'Monthly Cost'],
         wlList.map(w => [w.namespace, w.kind, w.name, w.monthlyCostUSD]),
-        'koptimizer-workload-costs.csv');
+        'katalyst-workload-costs.csv');
     };
 
   } catch (e) {
@@ -287,7 +287,7 @@ async function renderNamespaceBreakdown(targetEl) {
     window.__exportNsCSV = () => {
       exportCSV(['Namespace', 'Monthly Cost', '% of Total'],
         nsEntries.map(([ns, cost]) => [ns, cost.toFixed(2), total > 0 ? (cost / total * 100).toFixed(1) : '0']),
-        'koptimizer-namespace-costs.csv');
+        'katalyst-namespace-costs.csv');
     };
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load namespace cost data: ' + e.message);
@@ -338,7 +338,7 @@ async function renderWorkloadBreakdown(targetEl) {
     window.__exportWlBreakdownCSV = () => {
       exportCSV(['Namespace', 'Kind', 'Name', 'Monthly Cost', '% of Total'],
         wlList.map(w => [w.namespace, w.kind, w.name, (w.monthlyCostUSD || 0).toFixed(2), total > 0 ? ((w.monthlyCostUSD || 0) / total * 100).toFixed(1) : '0']),
-        'koptimizer-workload-costs.csv');
+        'katalyst-workload-costs.csv');
     };
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load workload cost data: ' + e.message);

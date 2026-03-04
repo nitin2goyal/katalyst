@@ -92,7 +92,7 @@ export async function renderNetworkCost(targetEl) {
     window.__exportNetCSV = () => {
       exportCSV(['Namespace', 'Workload', 'Source AZ', 'Dest AZ', 'Traffic (GB)', 'Monthly Cost', 'Type'],
         flows.map(f => [f.namespace, f.workload, f.sourceAZ, f.destAZ, f.trafficGB, f.monthlyCostUSD, f.sourceAZ !== f.destAZ ? 'cross-az' : 'in-az']),
-        'koptimizer-network-costs.csv');
+        'katalyst-network-costs.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load network cost data: ' + e.message);

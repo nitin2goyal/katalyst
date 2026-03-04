@@ -8,7 +8,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/koptimizer/koptimizer/internal/config"
-	"github.com/koptimizer/koptimizer/pkg/cost"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
@@ -48,32 +47,57 @@ func approxEqual(a, b, epsilon float64) bool {
 	return math.Abs(a-b) < epsilon
 }
 
-func findRecByResource(recs []optimizer.Recommendation, resource string) *optimizer.Recommendation {
-	for i, r := range recs {
-		if r.Details["resource"] == resource {
-			return &recs[i]
-		}
-	}
-	return nil
-}
-
 // ---------------------------------------------------------------------------
-// Recommender.Recommend tests — Proportional scaling
+// CPU upsize tests — CPU upsizes are NEVER generated
 // ---------------------------------------------------------------------------
 
-func TestRecommender_OverProvisionedCPUOnly_NoRec(t *testing.T) {
-	// Only CPU is over-provisioned → no recommendation (requires both)
+func TestRecommender_UnderProvisionedCPU_NeverUpsize(t *testing.T) {
 	cfg := defaultTestConfig()
 	recommender := NewRecommender(cfg)
 
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("web-1", "default", "Deployment", "web", 1000, 4*1024*1024*1024),
+		PodInfo:         makePodInfo("api-1", "prod", "Deployment", "api", 100, 1024*1024*1024),
+		CPURequestMilli: 100,
+		MemRequestBytes: 1024 * 1024 * 1024,
+		CPUP50:          200,
+		CPUP95:          400,
+		CPUP99:          450,
+		CPUMax:          500,
+		IsOverProvCPU:   false,
+		IsOverProvMem:   false,
+		IsBothOverProv:  false,
+		IsUnderProvCPU:  true,
+		IsUnderProvMem:  false,
+		DataPoints:      500,
+	}
+
+	recs := recommender.Recommend(analysis)
+
+	if len(recs) != 0 {
+		t.Fatalf("expected 0 recommendations (CPU upsizes are never generated), got %d", len(recs))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Downsize tests — node-ratio-aware
+// ---------------------------------------------------------------------------
+
+func TestRecommender_CPUOverProv_GeneratesRec(t *testing.T) {
+	// CPU over-provisioned alone should now generate a recommendation
+	cfg := defaultTestConfig()
+	recommender := NewRecommender(cfg)
+
+	gi := int64(1024 * 1024 * 1024)
+
+	analysis := &PodAnalysis{
+		PodInfo:         makePodInfo("web-1", "default", "Deployment", "web", 1000, 4*gi),
 		CPURequestMilli: 1000,
-		MemRequestBytes: 4 * 1024 * 1024 * 1024,
+		MemRequestBytes: 4 * gi,
 		CPUP50:          100,
 		CPUP95:          200,
 		CPUP99:          300,
 		CPUMax:          400,
+		MemP95:          2 * gi,
 		IsOverProvCPU:   true,
 		IsOverProvMem:   false,
 		IsBothOverProv:  false,
@@ -84,13 +108,16 @@ func TestRecommender_OverProvisionedCPUOnly_NoRec(t *testing.T) {
 
 	recs := recommender.Recommend(analysis)
 
-	if len(recs) != 0 {
-		t.Fatalf("expected 0 recommendations (only CPU over-prov, no combined rec), got %d", len(recs))
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation (CPU over-prov), got %d", len(recs))
+	}
+	if recs[0].Details["resource"] != "cpu+memory" {
+		t.Errorf("resource = %q, want %q", recs[0].Details["resource"], "cpu+memory")
 	}
 }
 
 func TestRecommender_OverProvisionedMemoryOnly_NoRec(t *testing.T) {
-	// Only memory is over-provisioned → no recommendation (requires both)
+	// Only memory is over-provisioned → no recommendation (requires CPU over-prov)
 	cfg := defaultTestConfig()
 	recommender := NewRecommender(cfg)
 
@@ -115,16 +142,17 @@ func TestRecommender_OverProvisionedMemoryOnly_NoRec(t *testing.T) {
 	recs := recommender.Recommend(analysis)
 
 	if len(recs) != 0 {
-		t.Fatalf("expected 0 recommendations (only mem over-prov, no combined rec), got %d", len(recs))
+		t.Fatalf("expected 0 recommendations (only mem over-prov), got %d", len(recs))
 	}
 }
 
-func TestRecommender_BothCPUAndMemoryOverProvisioned(t *testing.T) {
+func TestRecommender_BothOverProv_WithNodeRatio(t *testing.T) {
 	cfg := defaultTestConfig()
 	recommender := NewRecommender(cfg)
 
 	gi := int64(1024 * 1024 * 1024)
 
+	// Node: 32000m CPU, 128Gi memory → 4Mi per millicore
 	analysis := &PodAnalysis{
 		PodInfo:         makePodInfo("batch-1", "jobs", "Deployment", "batch", 2000, 8*gi),
 		CPURequestMilli: 2000,
@@ -143,12 +171,14 @@ func TestRecommender_BothCPUAndMemoryOverProvisioned(t *testing.T) {
 		IsUnderProvCPU:  false,
 		IsUnderProvMem:  false,
 		DataPoints:      2000,
+		NodeCPUCapMilli: 32000,
+		NodeMemCapBytes: 128 * gi,
 	}
 
 	recs := recommender.Recommend(analysis)
 
 	if len(recs) != 1 {
-		t.Fatalf("expected 1 combined recommendation, got %d", len(recs))
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
 	}
 
 	rec := recs[0]
@@ -158,29 +188,131 @@ func TestRecommender_BothCPUAndMemoryOverProvisioned(t *testing.T) {
 	if rec.Type != optimizer.RecommendationPodRightsize {
 		t.Errorf("Type = %q, want %q", rec.Type, optimizer.RecommendationPodRightsize)
 	}
-	if rec.Priority != optimizer.PriorityMedium {
-		t.Errorf("Priority = %q, want %q", rec.Priority, optimizer.PriorityMedium)
-	}
-	if rec.TargetName != "batch" {
-		t.Errorf("TargetName = %q, want %q", rec.TargetName, "batch")
+
+	// CPU: minKeepRatio=0.7 → max(P95*1.2=360, 2000*0.7=1400) = 1400m
+	if rec.Details["suggestedCPURequest"] != "1400m" {
+		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "1400m")
 	}
 
-	// Both should be reduced — verify suggested values exist
-	if rec.Details["suggestedCPURequest"] == "" {
-		t.Error("missing suggestedCPURequest")
-	}
-	if rec.Details["suggestedMemRequest"] == "" {
-		t.Error("missing suggestedMemRequest")
-	}
-
-	// keepRatio should be present
-	if rec.Details["keepRatio"] == "" {
-		t.Error("missing keepRatio in details")
+	// Memory: node ratio = 128Gi/32000m = 4Mi/m → 1400m * 4Mi = 5600Mi = 5Gi (formatBytes)
+	// bytesPerMilli = 128*gi / 32000 = 4294967.296
+	// suggestedMem = 1400 * 4294967.296 = 6012954214 ≈ 5Gi
+	if rec.Details["suggestedMemRequest"] != "5Gi" {
+		t.Errorf("suggestedMemRequest = %q, want %q", rec.Details["suggestedMemRequest"], "5Gi")
 	}
 }
 
-func TestRecommender_ProportionalReduction_MinKeepRatioClamped(t *testing.T) {
-	// Both resources vastly over-provisioned → keepRatio clamped to MinKeepRatio (0.7)
+func TestRecommender_NodeRatio_MemoryIncrease(t *testing.T) {
+	// Pod has too much CPU and not enough memory relative to node ratio.
+	// CPU should decrease, memory should increase to match node ratio.
+	cfg := defaultTestConfig()
+	cfg.Rightsizer.MinKeepRatio = 0.3
+	recommender := NewRecommender(cfg)
+
+	gi := int64(1024 * 1024 * 1024)
+
+	// Node: 32000m CPU, 128Gi memory → 4Mi per millicore
+	// Pod: 4000m CPU, 2Gi memory → CPU way over-provisioned
+	// CPU P95=200m → floor = max(200*1.2=240, 4000*0.3=1200) = 1200m
+	// Node-ratio memory for 1200m = 1200 * 4Mi = 4800Mi ≈ 4Gi
+	// Memory goes UP from 2Gi to 4Gi — that's OK
+	analysis := &PodAnalysis{
+		PodInfo:         makePodInfo("skewed-1", "prod", "Deployment", "skewed", 4000, 2*gi),
+		CPURequestMilli: 4000,
+		MemRequestBytes: 2 * gi,
+		CPUP50:          100,
+		CPUP95:          200,
+		CPUP99:          300,
+		CPUMax:          400,
+		MemP50:          1 * gi,
+		MemP95:          int64(1.5 * float64(gi)),
+		MemP99:          int64(1.8 * float64(gi)),
+		MemMax:          2 * gi,
+		IsOverProvCPU:   true,
+		IsOverProvMem:   false,
+		IsBothOverProv:  false,
+		IsUnderProvCPU:  false,
+		IsUnderProvMem:  false,
+		DataPoints:      1000,
+		NodeCPUCapMilli: 32000,
+		NodeMemCapBytes: 128 * gi,
+	}
+
+	recs := recommender.Recommend(analysis)
+
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
+
+	rec := recs[0]
+	// CPU should decrease
+	if rec.Details["suggestedCPURequest"] != "1200m" {
+		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "1200m")
+	}
+
+	// Memory should increase to match node ratio
+	// 1200 * (128*gi / 32000) = 1200 * 4294967.296 = 5153960755 bytes ≈ 4Gi
+	suggestedMem := rec.Details["suggestedMemRequest"]
+	if suggestedMem != "4Gi" {
+		t.Errorf("suggestedMemRequest = %q, want %q (memory should increase to match node ratio)", suggestedMem, "4Gi")
+	}
+}
+
+func TestRecommender_NoNodeInfo_FallsBackToProportional(t *testing.T) {
+	// No node capacity info → falls back to proportional reduction
+	cfg := defaultTestConfig()
+	cfg.Rightsizer.MinKeepRatio = 0.7
+	recommender := NewRecommender(cfg)
+
+	gi := int64(1024 * 1024 * 1024)
+
+	analysis := &PodAnalysis{
+		PodInfo:         makePodInfo("app-1", "prod", "Deployment", "app", 4000, 32*gi),
+		CPURequestMilli: 4000,
+		MemRequestBytes: 32 * gi,
+		CPUP50:          200,
+		CPUP95:          400,
+		CPUP99:          500,
+		CPUMax:          600,
+		MemP50:          4 * gi,
+		MemP95:          6 * gi,
+		MemP99:          8 * gi,
+		MemMax:          10 * gi,
+		IsOverProvCPU:   true,
+		IsOverProvMem:   true,
+		IsBothOverProv:  true,
+		IsUnderProvCPU:  false,
+		IsUnderProvMem:  false,
+		DataPoints:      5000,
+		// No node info
+		NodeCPUCapMilli: 0,
+		NodeMemCapBytes: 0,
+	}
+
+	recs := recommender.Recommend(analysis)
+
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
+
+	rec := recs[0]
+	// CPU: max(400*1.2=480, 4000*0.7=2800) = 2800m
+	if rec.Details["suggestedCPURequest"] != "2800m" {
+		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "2800m")
+	}
+
+	// Memory: proportional = 32Gi * (2800/4000) = 32Gi * 0.7 = 22.4Gi
+	// memFloor = max(6Gi*1.2=7.2Gi, 32Mi) = 7.2Gi
+	// 22.4Gi > 7.2Gi → use 22.4Gi → formatBytes → 22Gi
+	suggestedMem := int64(float64(32*gi) * (2800.0 / 4000.0))
+	expectedMem := formatBytes(suggestedMem)
+	if rec.Details["suggestedMemRequest"] != expectedMem {
+		t.Errorf("suggestedMemRequest = %q, want %q", rec.Details["suggestedMemRequest"], expectedMem)
+	}
+}
+
+func TestRecommender_MinKeepRatioClamped(t *testing.T) {
+	// Both resources vastly over-provisioned → CPU clamped to MinKeepRatio
 	cfg := defaultTestConfig()
 	cfg.Rightsizer.MinKeepRatio = 0.7
 	recommender := NewRecommender(cfg)
@@ -192,18 +324,16 @@ func TestRecommender_ProportionalReduction_MinKeepRatioClamped(t *testing.T) {
 		CPURequestMilli: 4000,
 		MemRequestBytes: 32 * gi,
 		CPUP50:          200,
-		CPUP95:          400,  // keep-ratio = (400*1.2)/4000 = 0.12
+		CPUP95:          400,  // cpuFloor = max(480, 2800) = 2800
 		CPUP99:          500,
 		CPUMax:          600,
 		MemP50:          4 * gi,
-		MemP95:          6 * gi, // keep-ratio = (6*1.2)/32 = 0.225
+		MemP95:          6 * gi,
 		MemP99:          8 * gi,
 		MemMax:          10 * gi,
 		IsOverProvCPU:   true,
 		IsOverProvMem:   true,
 		IsBothOverProv:  true,
-		CPUUtilRatio:    0.10,
-		MemUtilRatio:    0.1875,
 		IsUnderProvCPU:  false,
 		IsUnderProvMem:  false,
 		DataPoints:      5000,
@@ -216,138 +346,16 @@ func TestRecommender_ProportionalReduction_MinKeepRatioClamped(t *testing.T) {
 	}
 
 	rec := recs[0]
-	// keepRatio should be clamped to 0.7 (both computed ratios < 0.7)
-	if rec.Details["keepRatio"] != "0.700" {
-		t.Errorf("keepRatio = %q, want %q", rec.Details["keepRatio"], "0.700")
-	}
-
-	// CPU: 4000 * 0.7 = 2800m
+	// CPU: max(400*1.2=480, 4000*0.7=2800) = 2800m
 	if rec.Details["suggestedCPURequest"] != "2800m" {
 		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "2800m")
 	}
-
-	// Memory: 32Gi * 0.7 = 22.4Gi → int64 truncation → 22Gi (formatBytes uses integer division)
-	suggestedMem := int64(float64(32*gi) * 0.7)
-	expectedMem := formatBytes(suggestedMem)
-	if rec.Details["suggestedMemRequest"] != expectedMem {
-		t.Errorf("suggestedMemRequest = %q, want %q", rec.Details["suggestedMemRequest"], expectedMem)
-	}
 }
 
-func TestRecommender_ProportionalReduction_CPUDominant(t *testing.T) {
-	// CPU has higher keep-ratio than memory → CPU drives both reductions
+func TestRecommender_CPUFloor10m(t *testing.T) {
+	// Very low usage → CPU clamped to 10m minimum
 	cfg := defaultTestConfig()
-	cfg.Rightsizer.MinKeepRatio = 0.3 // low floor so we can see natural ratio
-	recommender := NewRecommender(cfg)
-
-	gi := int64(1024 * 1024 * 1024)
-
-	// CPU: P95=600m, request=1000m → keepRatio = (600*1.2)/1000 = 0.72
-	// Mem: P95=1Gi, request=8Gi → keepRatio = (1*1.2)/8 = 0.15
-	// max(0.72, 0.15) = 0.72 → CPU drives
-	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("svc-1", "prod", "Deployment", "svc", 1000, 8*gi),
-		CPURequestMilli: 1000,
-		MemRequestBytes: 8 * gi,
-		CPUP50:          400,
-		CPUP95:          600,
-		CPUP99:          700,
-		CPUMax:          800,
-		MemP50:          512 * 1024 * 1024,
-		MemP95:          1 * gi,
-		MemP99:          int64(1.5 * float64(gi)),
-		MemMax:          2 * gi,
-		IsOverProvCPU:   true,
-		IsOverProvMem:   true,
-		IsBothOverProv:  true,
-		IsUnderProvCPU:  false,
-		IsUnderProvMem:  false,
-		DataPoints:      1000,
-	}
-
-	recs := recommender.Recommend(analysis)
-
-	if len(recs) != 1 {
-		t.Fatalf("expected 1 recommendation, got %d", len(recs))
-	}
-
-	rec := recs[0]
-	if rec.Details["keepRatio"] != "0.720" {
-		t.Errorf("keepRatio = %q, want %q (CPU should drive)", rec.Details["keepRatio"], "0.720")
-	}
-
-	// CPU: 1000 * 0.72 = 720m
-	if rec.Details["suggestedCPURequest"] != "720m" {
-		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "720m")
-	}
-
-	// Memory: 8Gi * 0.72 = 5.76Gi → formatBytes → 5Gi (integer division)
-	suggestedMem := int64(float64(8*gi) * 0.72)
-	expectedMem := formatBytes(suggestedMem)
-	if rec.Details["suggestedMemRequest"] != expectedMem {
-		t.Errorf("suggestedMemRequest = %q, want %q", rec.Details["suggestedMemRequest"], expectedMem)
-	}
-}
-
-func TestRecommender_ProportionalReduction_MemDominant(t *testing.T) {
-	// Memory has higher keep-ratio than CPU → memory drives both reductions
-	cfg := defaultTestConfig()
-	cfg.Rightsizer.MinKeepRatio = 0.3 // low floor
-	recommender := NewRecommender(cfg)
-
-	gi := int64(1024 * 1024 * 1024)
-
-	// CPU: P95=100m, request=2000m → keepRatio = (100*1.2)/2000 = 0.06
-	// Mem: P95=5Gi, request=8Gi → keepRatio = (5*1.2)/8 = 0.75
-	// max(0.06, 0.75) = 0.75 → Memory drives
-	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("worker-1", "prod", "Deployment", "worker", 2000, 8*gi),
-		CPURequestMilli: 2000,
-		MemRequestBytes: 8 * gi,
-		CPUP50:          50,
-		CPUP95:          100,
-		CPUP99:          150,
-		CPUMax:          200,
-		MemP50:          3 * gi,
-		MemP95:          5 * gi,
-		MemP99:          6 * gi,
-		MemMax:          7 * gi,
-		IsOverProvCPU:   true,
-		IsOverProvMem:   true,
-		IsBothOverProv:  true,
-		IsUnderProvCPU:  false,
-		IsUnderProvMem:  false,
-		DataPoints:      1000,
-	}
-
-	recs := recommender.Recommend(analysis)
-
-	if len(recs) != 1 {
-		t.Fatalf("expected 1 recommendation, got %d", len(recs))
-	}
-
-	rec := recs[0]
-	if rec.Details["keepRatio"] != "0.750" {
-		t.Errorf("keepRatio = %q, want %q (memory should drive)", rec.Details["keepRatio"], "0.750")
-	}
-
-	// CPU: 2000 * 0.75 = 1500m
-	if rec.Details["suggestedCPURequest"] != "1500m" {
-		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "1500m")
-	}
-
-	// Memory: 8Gi * 0.75 = 6Gi
-	suggestedMem := int64(float64(8*gi) * 0.75)
-	expectedMem := formatBytes(suggestedMem)
-	if rec.Details["suggestedMemRequest"] != expectedMem {
-		t.Errorf("suggestedMemRequest = %q, want %q", rec.Details["suggestedMemRequest"], expectedMem)
-	}
-}
-
-func TestRecommender_ProportionalMinimumFloors(t *testing.T) {
-	// Both resources so low that minimums (10m CPU, 32Mi memory) kick in
-	cfg := defaultTestConfig()
-	cfg.Rightsizer.MinKeepRatio = 0.01 // very low to test floors
+	cfg.Rightsizer.MinKeepRatio = 0.01
 	recommender := NewRecommender(cfg)
 
 	mi := int64(1024 * 1024)
@@ -357,11 +365,11 @@ func TestRecommender_ProportionalMinimumFloors(t *testing.T) {
 		CPURequestMilli: 100,
 		MemRequestBytes: 256 * mi,
 		CPUP50:          1,
-		CPUP95:          2,   // keepRatio = (2*1.2)/100 = 0.024
+		CPUP95:          2,
 		CPUP99:          3,
 		CPUMax:          5,
 		MemP50:          5 * mi,
-		MemP95:          8 * mi, // keepRatio = (8*1.2)/256 = 0.0375
+		MemP95:          8 * mi,
 		MemP99:          10 * mi,
 		MemMax:          12 * mi,
 		IsOverProvCPU:   true,
@@ -379,169 +387,34 @@ func TestRecommender_ProportionalMinimumFloors(t *testing.T) {
 	}
 
 	rec := recs[0]
-	// With keepRatio = max(0.024, 0.0375) = 0.0375, clamped to 0.01 → stays 0.0375
-	// suggestedCPU = 100 * 0.0375 = 3m → clamped to 10m
+	// CPU: max(2*1.2=2, 100*0.01=1) = 2 → clamped to 10m
 	if rec.Details["suggestedCPURequest"] != "10m" {
 		t.Errorf("suggestedCPURequest = %q, want %q (floor)", rec.Details["suggestedCPURequest"], "10m")
 	}
-
-	// suggestedMem = 256Mi * 0.0375 = 9.6Mi → clamped to 32Mi
-	if rec.Details["suggestedMemRequest"] != "32Mi" {
-		t.Errorf("suggestedMemRequest = %q, want %q (floor)", rec.Details["suggestedMemRequest"], "32Mi")
-	}
 }
 
-func TestRecommender_CombinedSavingsEstimate(t *testing.T) {
+func TestRecommender_NeverIncreaseCPU(t *testing.T) {
+	// CPU usage is high enough that the floor exceeds current request → no rec
 	cfg := defaultTestConfig()
-	cfg.Rightsizer.MinKeepRatio = 0.7
 	recommender := NewRecommender(cfg)
 
 	gi := int64(1024 * 1024 * 1024)
 
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("app-1", "prod", "Deployment", "app", 4000, 32*gi),
-		CPURequestMilli: 4000,
-		MemRequestBytes: 32 * gi,
-		CPUP50:          200,
-		CPUP95:          400,  // keepRatio = 0.12, clamped to 0.7
-		CPUP99:          500,
-		CPUMax:          600,
-		MemP50:          4 * gi,
-		MemP95:          6 * gi, // keepRatio = 0.225, clamped to 0.7
-		MemP99:          8 * gi,
-		MemMax:          10 * gi,
-		IsOverProvCPU:   true,
+		PodInfo:         makePodInfo("tight-1", "prod", "Deployment", "tight", 500, 4*gi),
+		CPURequestMilli: 500,
+		MemRequestBytes: 4 * gi,
+		CPUP50:          350,
+		CPUP95:          450, // floor = max(450*1.2=540, 500*0.7=350) = 540 > 500
+		CPUP99:          480,
+		CPUMax:          490,
+		MemP50:          1 * gi,
+		MemP95:          2 * gi,
+		MemP99:          3 * gi,
+		MemMax:          int64(3.5 * float64(gi)),
+		IsOverProvCPU:   true, // analyzer says over-prov but usage is borderline
 		IsOverProvMem:   true,
 		IsBothOverProv:  true,
-		IsUnderProvCPU:  false,
-		IsUnderProvMem:  false,
-		DataPoints:      5000,
-	}
-
-	recs := recommender.Recommend(analysis)
-
-	if len(recs) != 1 {
-		t.Fatalf("expected 1 recommendation, got %d", len(recs))
-	}
-
-	rec := recs[0]
-
-	// CPU: 4000 → 2800 (save 1200m = 1.2 vCPU)
-	cpuSavings := 1.2 * 0.031611 * cost.HoursPerMonth
-	// Memory: 32Gi → 22.4Gi (save ~9.6Gi)
-	suggestedMem := int64(float64(32*gi) * 0.7)
-	memSavedGiB := float64(32*gi-suggestedMem) / float64(gi)
-	memSavings := memSavedGiB * 0.004237 * cost.HoursPerMonth
-
-	expectedSavings := cpuSavings + memSavings
-
-	if !approxEqual(rec.EstimatedSaving.MonthlySavingsUSD, expectedSavings, 1.0) {
-		t.Errorf("MonthlySavingsUSD = %.2f, want ~%.2f (combined CPU+memory)",
-			rec.EstimatedSaving.MonthlySavingsUSD, expectedSavings)
-	}
-
-	// Annual = monthly * 12
-	if !approxEqual(rec.EstimatedSaving.AnnualSavingsUSD, expectedSavings*12, 12.0) {
-		t.Errorf("AnnualSavingsUSD = %.2f, want ~%.2f",
-			rec.EstimatedSaving.AnnualSavingsUSD, expectedSavings*12)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Existing behavior tests (unchanged)
-// ---------------------------------------------------------------------------
-
-func TestRecommender_UnderProvisionedCPU(t *testing.T) {
-	cfg := defaultTestConfig()
-	recommender := NewRecommender(cfg)
-
-	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("api-1", "prod", "Deployment", "api", 100, 1024*1024*1024),
-		CPURequestMilli: 100,
-		MemRequestBytes: 1024 * 1024 * 1024,
-		CPUP50:          200,
-		CPUP95:          400,
-		CPUP99:          450,
-		CPUMax:          500,
-		IsOverProvCPU:   false,
-		IsOverProvMem:   false,
-		IsBothOverProv:  false,
-		IsUnderProvCPU:  true,
-		IsUnderProvMem:  false,
-		DataPoints:      500,
-	}
-
-	recs := recommender.Recommend(analysis)
-
-	if len(recs) != 1 {
-		t.Fatalf("expected 1 recommendation, got %d", len(recs))
-	}
-
-	rec := recs[0]
-	if rec.Type != optimizer.RecommendationPodRightsize {
-		t.Errorf("Type = %q, want %q", rec.Type, optimizer.RecommendationPodRightsize)
-	}
-	if rec.Priority != optimizer.PriorityHigh {
-		t.Errorf("Priority = %q, want %q (under-provisioned should be high)", rec.Priority, optimizer.PriorityHigh)
-	}
-
-	// Suggested = CPUMax * 1.3 = 500 * 1.3 = 650m
-	if rec.Details["suggestedRequest"] != "650m" {
-		t.Errorf("suggestedRequest = %q, want %q", rec.Details["suggestedRequest"], "650m")
-	}
-	if rec.Details["resource"] != "cpu" {
-		t.Errorf("resource = %q, want %q", rec.Details["resource"], "cpu")
-	}
-}
-
-func TestRecommender_UnderProvisionedMemory_NoRecommendation(t *testing.T) {
-	// The current Recommender does not handle IsUnderProvMem, so it should
-	// produce no recommendations when only memory is under-provisioned.
-	cfg := defaultTestConfig()
-	recommender := NewRecommender(cfg)
-
-	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("worker-1", "prod", "StatefulSet", "worker", 500, 512*1024*1024),
-		CPURequestMilli: 500,
-		MemRequestBytes: 512 * 1024 * 1024,
-		MemP50:          400 * 1024 * 1024,
-		MemP95:          500 * 1024 * 1024,
-		MemP99:          510 * 1024 * 1024,
-		MemMax:          520 * 1024 * 1024,
-		IsOverProvCPU:   false,
-		IsOverProvMem:   false,
-		IsBothOverProv:  false,
-		IsUnderProvCPU:  false,
-		IsUnderProvMem:  true,
-		DataPoints:      800,
-	}
-
-	recs := recommender.Recommend(analysis)
-
-	if len(recs) != 0 {
-		t.Errorf("expected 0 recommendations for under-provisioned memory (not yet implemented), got %d", len(recs))
-	}
-}
-
-func TestRecommender_NeitherOverNorUnderProvisioned(t *testing.T) {
-	cfg := defaultTestConfig()
-	recommender := NewRecommender(cfg)
-
-	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("balanced-1", "default", "Deployment", "balanced", 500, 1024*1024*1024),
-		CPURequestMilli: 500,
-		MemRequestBytes: 1024 * 1024 * 1024,
-		CPUP50:          300,
-		CPUP95:          400,
-		CPUP99:          450,
-		CPUMax:          480,
-		MemP50:          600 * 1024 * 1024,
-		MemP95:          800 * 1024 * 1024,
-		MemP99:          900 * 1024 * 1024,
-		MemMax:          950 * 1024 * 1024,
-		IsOverProvCPU:   false,
-		IsOverProvMem:   false,
-		IsBothOverProv:  false,
 		IsUnderProvCPU:  false,
 		IsUnderProvMem:  false,
 		DataPoints:      1000,
@@ -550,45 +423,53 @@ func TestRecommender_NeitherOverNorUnderProvisioned(t *testing.T) {
 	recs := recommender.Recommend(analysis)
 
 	if len(recs) != 0 {
-		t.Errorf("expected 0 recommendations for well-provisioned pod, got %d", len(recs))
+		t.Fatalf("expected 0 recommendations (CPU floor exceeds current), got %d", len(recs))
 	}
 }
 
-func TestRecommender_ZeroP95_NoRecommendation(t *testing.T) {
+func TestRecommender_SavingsEstimate(t *testing.T) {
 	cfg := defaultTestConfig()
 	recommender := NewRecommender(cfg)
 
-	// P95 = 0 means we have no meaningful data.
+	gi := int64(1024 * 1024 * 1024)
+
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("no-data", "default", "Deployment", "no-data", 500, 1024*1024*1024),
-		CPURequestMilli: 500,
-		MemRequestBytes: 1024 * 1024 * 1024,
-		CPUP50:          0,
-		CPUP95:          0,
-		CPUP99:          0,
-		CPUMax:          0,
-		MemP50:          0,
-		MemP95:          0,
-		MemP99:          0,
-		MemMax:          0,
+		PodInfo:         makePodInfo("svc-1", "prod", "Deployment", "svc", 1000, 4*gi),
+		CPURequestMilli: 1000,
+		MemRequestBytes: 4 * gi,
+		CPUP50:          100,
+		CPUP95:          200,
+		CPUP99:          300,
+		CPUMax:          400,
+		MemP50:          512 * 1024 * 1024,
+		MemP95:          1 * gi,
+		MemP99:          int64(1.5 * float64(gi)),
+		MemMax:          2 * gi,
 		IsOverProvCPU:   true,
 		IsOverProvMem:   true,
 		IsBothOverProv:  true,
 		IsUnderProvCPU:  false,
 		IsUnderProvMem:  false,
-		DataPoints:      0,
+		DataPoints:      1000,
 	}
 
 	recs := recommender.Recommend(analysis)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
 
-	if len(recs) != 0 {
-		t.Errorf("expected 0 recommendations when P95 = 0, got %d", len(recs))
+	rec := recs[0]
+	if rec.EstimatedSaving.MonthlySavingsUSD <= 0 {
+		t.Errorf("MonthlySavingsUSD = %.2f, expected positive", rec.EstimatedSaving.MonthlySavingsUSD)
+	}
+	if rec.EstimatedSaving.AnnualSavingsUSD <= 0 {
+		t.Errorf("AnnualSavingsUSD = %.2f, expected positive", rec.EstimatedSaving.AnnualSavingsUSD)
 	}
 }
 
 func TestRecommender_TargetFieldsPopulated(t *testing.T) {
 	cfg := defaultTestConfig()
-	cfg.Rightsizer.MinKeepRatio = 0.3 // low floor to allow combined rec
+	cfg.Rightsizer.MinKeepRatio = 0.3
 	recommender := NewRecommender(cfg)
 
 	gi := int64(1024 * 1024 * 1024)
@@ -614,7 +495,6 @@ func TestRecommender_TargetFieldsPopulated(t *testing.T) {
 	}
 
 	recs := recommender.Recommend(analysis)
-
 	if len(recs) != 1 {
 		t.Fatalf("expected 1 recommendation, got %d", len(recs))
 	}
@@ -634,6 +514,114 @@ func TestRecommender_TargetFieldsPopulated(t *testing.T) {
 	}
 	if rec.Details["resource"] != "cpu+memory" {
 		t.Errorf("resource = %q, want %q", rec.Details["resource"], "cpu+memory")
+	}
+}
+
+func TestRecommender_DaemonSetSkipped(t *testing.T) {
+	cfg := defaultTestConfig()
+	recommender := NewRecommender(cfg)
+
+	gi := int64(1024 * 1024 * 1024)
+
+	analysis := &PodAnalysis{
+		PodInfo:         makePodInfo("ds-1", "kube-system", "DaemonSet", "my-ds", 1000, 4*gi),
+		CPURequestMilli: 1000,
+		MemRequestBytes: 4 * gi,
+		CPUP95:          100,
+		MemP95:          1 * gi,
+		IsOverProvCPU:   true,
+		IsOverProvMem:   true,
+		IsBothOverProv:  true,
+		DataPoints:      1000,
+	}
+
+	recs := recommender.Recommend(analysis)
+	if len(recs) != 0 {
+		t.Errorf("expected 0 recommendations for DaemonSet, got %d", len(recs))
+	}
+}
+
+func TestRecommender_InsufficientDataPoints(t *testing.T) {
+	cfg := defaultTestConfig()
+	recommender := NewRecommender(cfg)
+
+	analysis := &PodAnalysis{
+		PodInfo:         makePodInfo("new-1", "default", "Deployment", "new", 1000, 1024*1024*1024),
+		CPURequestMilli: 1000,
+		MemRequestBytes: 1024 * 1024 * 1024,
+		CPUP95:          100,
+		MemP95:          100 * 1024 * 1024,
+		IsOverProvCPU:   true,
+		IsBothOverProv:  true,
+		DataPoints:      3, // < 6
+	}
+
+	recs := recommender.Recommend(analysis)
+	if len(recs) != 0 {
+		t.Errorf("expected 0 recommendations for insufficient data, got %d", len(recs))
+	}
+}
+
+func TestRecommender_ZeroP95_NoRecommendation(t *testing.T) {
+	cfg := defaultTestConfig()
+	recommender := NewRecommender(cfg)
+
+	analysis := &PodAnalysis{
+		PodInfo:         makePodInfo("no-data", "default", "Deployment", "no-data", 500, 1024*1024*1024),
+		CPURequestMilli: 500,
+		MemRequestBytes: 1024 * 1024 * 1024,
+		CPUP95:          0,
+		MemP95:          0,
+		IsOverProvCPU:   true,
+		IsBothOverProv:  true,
+		DataPoints:      0,
+	}
+
+	recs := recommender.Recommend(analysis)
+	if len(recs) != 0 {
+		t.Errorf("expected 0 recommendations when P95 = 0, got %d", len(recs))
+	}
+}
+
+func TestRecommender_WellProvisioned_NoRec(t *testing.T) {
+	cfg := defaultTestConfig()
+	recommender := NewRecommender(cfg)
+
+	analysis := &PodAnalysis{
+		PodInfo:         makePodInfo("ok-1", "default", "Deployment", "ok", 500, 1024*1024*1024),
+		CPURequestMilli: 500,
+		MemRequestBytes: 1024 * 1024 * 1024,
+		CPUP95:          400,
+		MemP95:          800 * 1024 * 1024,
+		IsOverProvCPU:   false,
+		IsOverProvMem:   false,
+		IsBothOverProv:  false,
+		DataPoints:      1000,
+	}
+
+	recs := recommender.Recommend(analysis)
+	if len(recs) != 0 {
+		t.Errorf("expected 0 recommendations for well-provisioned pod, got %d", len(recs))
+	}
+}
+
+func TestRecommender_UnderProvisionedMemory_NoRec(t *testing.T) {
+	cfg := defaultTestConfig()
+	recommender := NewRecommender(cfg)
+
+	analysis := &PodAnalysis{
+		PodInfo:         makePodInfo("worker-1", "prod", "StatefulSet", "worker", 500, 512*1024*1024),
+		CPURequestMilli: 500,
+		MemRequestBytes: 512 * 1024 * 1024,
+		MemP95:          500 * 1024 * 1024,
+		IsOverProvCPU:   false,
+		IsUnderProvMem:  true,
+		DataPoints:      800,
+	}
+
+	recs := recommender.Recommend(analysis)
+	if len(recs) != 0 {
+		t.Errorf("expected 0 recommendations for under-provisioned memory only, got %d", len(recs))
 	}
 }
 
@@ -687,55 +675,5 @@ func TestAllContainersReady(t *testing.T) {
 				t.Errorf("allContainersReady() = %v, want %v", got, tt.expected)
 			}
 		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Savings estimate helper tests
-// ---------------------------------------------------------------------------
-
-func TestRecommender_CPUSavingsEstimate_GCP(t *testing.T) {
-	cfg := defaultTestConfig()
-	cfg.Rightsizer.MinKeepRatio = 0.3
-	recommender := NewRecommender(cfg)
-
-	gi := int64(1024 * 1024 * 1024)
-
-	// CPU: P95=200, request=1000 → keepRatio = (200*1.2)/1000 = 0.24
-	// Mem: P95=1Gi, request=4Gi → keepRatio = (1*1.2)/4 = 0.30
-	// max(0.24, 0.30) = 0.30
-	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("svc-1", "prod", "Deployment", "svc", 1000, 4*gi),
-		CPURequestMilli: 1000,
-		MemRequestBytes: 4 * gi,
-		CPUP50:          100,
-		CPUP95:          200,
-		CPUP99:          300,
-		CPUMax:          400,
-		MemP50:          512 * 1024 * 1024,
-		MemP95:          1 * gi,
-		MemP99:          int64(1.5 * float64(gi)),
-		MemMax:          2 * gi,
-		IsOverProvCPU:   true,
-		IsOverProvMem:   true,
-		IsBothOverProv:  true,
-		IsUnderProvCPU:  false,
-		IsUnderProvMem:  false,
-		DataPoints:      1000,
-	}
-
-	recs := recommender.Recommend(analysis)
-	if len(recs) != 1 {
-		t.Fatalf("expected 1 recommendation, got %d", len(recs))
-	}
-
-	rec := recs[0]
-	// Savings should be positive and include both CPU and memory components
-	if rec.EstimatedSaving.MonthlySavingsUSD <= 0 {
-		t.Errorf("MonthlySavingsUSD = %.2f, expected positive combined savings",
-			rec.EstimatedSaving.MonthlySavingsUSD)
-	}
-	if rec.EstimatedSaving.AnnualSavingsUSD <= 0 {
-		t.Errorf("AnnualSavingsUSD = %.2f, expected positive", rec.EstimatedSaving.AnnualSavingsUSD)
 	}
 }

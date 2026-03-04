@@ -67,7 +67,7 @@ export async function renderGPU(targetEl) {
     window.__exportGpuCSV = () => {
       exportCSV(['Name', 'Instance Type', 'GPUs', 'GPUs Used', 'CPU Util %', 'Mem Util %', 'Cost/hr'],
         nodeList.map(n => [n.name, n.instanceType, n.gpuCount, n.gpuUsed, (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), n.hourlyCostUSD]),
-        'koptimizer-gpu-nodes.csv');
+        'katalyst-gpu-nodes.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load GPU data: ' + e.message);

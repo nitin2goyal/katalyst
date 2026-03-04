@@ -141,7 +141,7 @@ export async function renderImpact(targetEl) {
     window.__exportImpactCSV = () => {
       exportCSV(['Time', 'Action', 'Category', 'Monthly Savings USD'],
         recentActions.map(a => [a.timestamp, a.action, a.category, a.savingsUSD]),
-        'koptimizer-impact-actions.csv');
+        'katalyst-impact-actions.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load impact data: ' + e.message);

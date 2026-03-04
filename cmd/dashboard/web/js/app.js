@@ -1,4 +1,4 @@
-// KOptimizer Dashboard - ES Module Orchestrator
+// Katalyst Dashboard - ES Module Orchestrator
 import { api, apiPut } from './api.js';
 import { $ } from './utils.js';
 import { store } from './store.js';

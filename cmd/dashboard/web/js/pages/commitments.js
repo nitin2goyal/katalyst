@@ -75,7 +75,7 @@ export async function renderCommitments(targetEl) {
     window.__exportCommitmentsCSV = () => {
       exportCSV(['ID', 'Type', 'Instance Type', 'Utilization %', 'Expires', 'Cost/hr'],
         cList.map(c => [c.id, c.type, c.instanceType, (c.utilizationPct||0).toFixed(1), c.expiresAt, c.hourlyCostUSD]),
-        'koptimizer-commitments.csv');
+        'katalyst-commitments.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load commitment data: ' + e.message);

@@ -84,7 +84,7 @@ export async function renderAudit(targetEl) {
     window.__exportAuditCSV = () => {
       exportCSV(['Timestamp', 'Action', 'Target', 'User', 'Details'],
         events.map(e => [e.timestamp, e.action, e.target, e.user, e.details]),
-        'koptimizer-audit.csv');
+        'katalyst-audit.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load audit log: ' + e.message);

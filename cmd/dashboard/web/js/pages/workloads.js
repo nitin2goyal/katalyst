@@ -154,7 +154,7 @@ export async function renderWorkloads(targetEl) {
             eff?.memEfficiencyPct != null ? fmtPct(eff.memEfficiencyPct) : '',
             eff?.wastedCostUSD != null ? fmt$(eff.wastedCostUSD) : ''];
         }),
-        'koptimizer-workloads.csv');
+        'katalyst-workloads.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load workloads: ' + e.message);

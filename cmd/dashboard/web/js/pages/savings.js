@@ -146,7 +146,7 @@ export async function renderSavings(targetEl) {
     window.__exportSavingsDetailCSV = () => {
       exportCSV(['Type', 'Target', 'Description', 'Est. Monthly Savings'],
         list.map(s => [s.type, s.name || s.target, s.description, s.estimatedSavings || s.savings]),
-        'koptimizer-savings-report.csv');
+        'katalyst-savings-report.csv');
     };
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load savings: ' + e.message);
