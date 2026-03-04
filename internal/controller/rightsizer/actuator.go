@@ -65,6 +65,12 @@ func (a *Actuator) Apply(ctx context.Context, rec optimizer.Recommendation) erro
 	logger := log.FromContext(ctx).WithName("rightsizer-actuator")
 
 	resourceType := rec.Details["resource"]
+
+	// Dispatch combined CPU+memory patches
+	if resourceType == "cpu+memory" {
+		return a.applyCombinedResources(ctx, rec)
+	}
+
 	suggestedStr := rec.Details["suggestedRequest"]
 
 	// Validate inputs before applying any changes
@@ -81,7 +87,7 @@ func (a *Actuator) Apply(ctx context.Context, rec optimizer.Recommendation) erro
 	switch resourceType {
 	case "cpu", "memory":
 	default:
-		return fmt.Errorf("unsupported resource type %q: must be cpu or memory", resourceType)
+		return fmt.Errorf("unsupported resource type %q: must be cpu, memory, or cpu+memory", resourceType)
 	}
 
 	// Try in-place pod resize first if supported
@@ -104,10 +110,78 @@ func (a *Actuator) Apply(ctx context.Context, rec optimizer.Recommendation) erro
 	case "StatefulSet":
 		return a.patchStatefulSet(ctx, rec.TargetNamespace, rec.TargetName, resourceType, suggestedStr)
 	case "ReplicaSet":
-		logger.V(1).Info("Skipping ReplicaSet patch (should patch owning Deployment instead)")
-		return nil
+		// Resolve ReplicaSet → owning Deployment and patch that instead.
+		deployName, err := a.resolveReplicaSetOwner(ctx, rec.TargetNamespace, rec.TargetName)
+		if err != nil {
+			return fmt.Errorf("resolving ReplicaSet %s/%s owner: %w", rec.TargetNamespace, rec.TargetName, err)
+		}
+		logger.Info("Resolved ReplicaSet to Deployment for patching",
+			"replicaSet", rec.TargetName, "deployment", deployName)
+		return a.patchDeployment(ctx, rec.TargetNamespace, deployName, resourceType, suggestedStr)
 	default:
 		logger.V(1).Info("Unsupported target kind for patching", "kind", rec.TargetKind)
+		return nil
+	}
+}
+
+// applyCombinedResources patches both CPU and memory in a single API call.
+func (a *Actuator) applyCombinedResources(ctx context.Context, rec optimizer.Recommendation) error {
+	logger := log.FromContext(ctx).WithName("rightsizer-actuator")
+
+	cpuStr := rec.Details["suggestedCPURequest"]
+	memStr := rec.Details["suggestedMemRequest"]
+	if cpuStr == "" || memStr == "" {
+		return fmt.Errorf("missing suggestedCPURequest or suggestedMemRequest in recommendation details")
+	}
+
+	// Validate both quantities
+	cpuQty, err := resource.ParseQuantity(cpuStr)
+	if err != nil {
+		return fmt.Errorf("invalid CPU quantity %q: %w", cpuStr, err)
+	}
+	memQty, err := resource.ParseQuantity(memStr)
+	if err != nil {
+		return fmt.Errorf("invalid memory quantity %q: %w", memStr, err)
+	}
+	if cpuQty.IsZero() || memQty.IsZero() {
+		return fmt.Errorf("suggested quantities must be positive: cpu=%s, memory=%s", cpuStr, memStr)
+	}
+
+	// Try in-place pod resize first if supported
+	if a.inPlaceResizeSupported && rec.Details["podName"] != "" {
+		err := a.resizePodInPlaceCombined(ctx, rec.TargetNamespace, rec.Details["podName"], cpuStr, memStr)
+		if err == nil {
+			logger.Info("Applied in-place combined pod resize",
+				"pod", rec.Details["podName"],
+				"cpu", cpuStr, "memory", memStr,
+			)
+			return nil
+		}
+		logger.V(1).Info("In-place combined resize failed, falling back to deployment patch", "error", err)
+	}
+
+	targetKind := rec.TargetKind
+	targetName := rec.TargetName
+
+	// Resolve ReplicaSet → Deployment
+	if targetKind == "ReplicaSet" {
+		deployName, err := a.resolveReplicaSetOwner(ctx, rec.TargetNamespace, targetName)
+		if err != nil {
+			return fmt.Errorf("resolving ReplicaSet %s/%s owner: %w", rec.TargetNamespace, targetName, err)
+		}
+		logger.Info("Resolved ReplicaSet to Deployment for combined patching",
+			"replicaSet", targetName, "deployment", deployName)
+		targetKind = "Deployment"
+		targetName = deployName
+	}
+
+	switch targetKind {
+	case "Deployment":
+		return a.patchDeploymentCombined(ctx, rec.TargetNamespace, targetName, cpuStr, memStr)
+	case "StatefulSet":
+		return a.patchStatefulSetCombined(ctx, rec.TargetNamespace, targetName, cpuStr, memStr)
+	default:
+		logger.V(1).Info("Unsupported target kind for combined patching", "kind", targetKind)
 		return nil
 	}
 }
@@ -198,6 +272,141 @@ func (a *Actuator) patchStatefulSet(ctx context.Context, namespace, name, resour
 	}
 
 	return a.client.Patch(ctx, sts, client.RawPatch(types.StrategicMergePatchType, patch))
+}
+
+// resolveReplicaSetOwner looks up a ReplicaSet and returns the name of its
+// owning Deployment. Returns an error if the RS doesn't exist or has no
+// Deployment owner.
+func (a *Actuator) resolveReplicaSetOwner(ctx context.Context, namespace, rsName string) (string, error) {
+	rs := &appsv1.ReplicaSet{}
+	if err := a.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: rsName}, rs); err != nil {
+		return "", fmt.Errorf("getting ReplicaSet %s/%s: %w", namespace, rsName, err)
+	}
+	for _, ref := range rs.OwnerReferences {
+		if ref.Kind == "Deployment" {
+			return ref.Name, nil
+		}
+	}
+	return "", fmt.Errorf("ReplicaSet %s/%s has no Deployment owner", namespace, rsName)
+}
+
+// resizePodInPlaceCombined patches both CPU and memory on a running pod.
+func (a *Actuator) resizePodInPlaceCombined(ctx context.Context, namespace, podName, cpuValue, memValue string) error {
+	pod := &corev1.Pod{}
+	if err := a.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: podName}, pod); err != nil {
+		return fmt.Errorf("getting pod %s/%s: %w", namespace, podName, err)
+	}
+
+	cpuQty, err := resource.ParseQuantity(cpuValue)
+	if err != nil {
+		return fmt.Errorf("parsing CPU quantity %q: %w", cpuValue, err)
+	}
+	memQty, err := resource.ParseQuantity(memValue)
+	if err != nil {
+		return fmt.Errorf("parsing memory quantity %q: %w", memValue, err)
+	}
+
+	containerPatches := make([]map[string]interface{}, len(pod.Spec.Containers))
+	for i, c := range pod.Spec.Containers {
+		containerPatches[i] = map[string]interface{}{
+			"name": c.Name,
+			"resources": map[string]interface{}{
+				"requests": map[string]string{
+					string(corev1.ResourceCPU):    cpuQty.String(),
+					string(corev1.ResourceMemory): memQty.String(),
+				},
+			},
+		}
+	}
+
+	patchData := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"containers": containerPatches,
+		},
+	}
+
+	patch, err := json.Marshal(patchData)
+	if err != nil {
+		return err
+	}
+
+	return a.client.Patch(ctx, pod, client.RawPatch(types.StrategicMergePatchType, patch))
+}
+
+func (a *Actuator) patchDeploymentCombined(ctx context.Context, namespace, name, cpuValue, memValue string) error {
+	deploy := &appsv1.Deployment{}
+	if err := a.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, deploy); err != nil {
+		return fmt.Errorf("getting deployment %s/%s: %w", namespace, name, err)
+	}
+
+	patchData := buildCombinedResourcePatch(deploy.Spec.Template.Spec.Containers, cpuValue, memValue)
+	if patchData == nil {
+		return nil
+	}
+
+	patch, err := json.Marshal(patchData)
+	if err != nil {
+		return err
+	}
+
+	return a.client.Patch(ctx, deploy, client.RawPatch(types.StrategicMergePatchType, patch))
+}
+
+func (a *Actuator) patchStatefulSetCombined(ctx context.Context, namespace, name, cpuValue, memValue string) error {
+	sts := &appsv1.StatefulSet{}
+	if err := a.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, sts); err != nil {
+		return fmt.Errorf("getting statefulset %s/%s: %w", namespace, name, err)
+	}
+
+	patchData := buildCombinedResourcePatch(sts.Spec.Template.Spec.Containers, cpuValue, memValue)
+	if patchData == nil {
+		return nil
+	}
+
+	patch, err := json.Marshal(patchData)
+	if err != nil {
+		return err
+	}
+
+	return a.client.Patch(ctx, sts, client.RawPatch(types.StrategicMergePatchType, patch))
+}
+
+func buildCombinedResourcePatch(containers []corev1.Container, cpuValue, memValue string) map[string]interface{} {
+	if len(containers) == 0 {
+		return nil
+	}
+
+	cpuQty, err := resource.ParseQuantity(cpuValue)
+	if err != nil {
+		return nil
+	}
+	memQty, err := resource.ParseQuantity(memValue)
+	if err != nil {
+		return nil
+	}
+
+	containerPatches := make([]map[string]interface{}, len(containers))
+	for i, c := range containers {
+		containerPatches[i] = map[string]interface{}{
+			"name": c.Name,
+			"resources": map[string]interface{}{
+				"requests": map[string]string{
+					string(corev1.ResourceCPU):    cpuQty.String(),
+					string(corev1.ResourceMemory): memQty.String(),
+				},
+			},
+		}
+	}
+
+	return map[string]interface{}{
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": containerPatches,
+				},
+			},
+		},
+	}
 }
 
 func buildResourcePatch(containers []corev1.Container, resourceType, value string) map[string]interface{} {

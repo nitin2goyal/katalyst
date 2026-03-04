@@ -10,6 +10,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
@@ -73,6 +75,18 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 	// Analyze pod resource usage patterns
 	for _, pod := range snapshot.Pods {
 		if c.isExcluded(pod.Pod.Namespace) {
+			continue
+		}
+
+		// Skip non-Running pods — Pending pods report 0 utilization and
+		// would generate incorrect downsize recommendations.
+		if pod.Pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+
+		// Skip pods with unready containers — they may be starting up or
+		// crashlooping and don't reflect steady-state usage.
+		if !allContainersReady(pod.Pod) {
 			continue
 		}
 
@@ -180,6 +194,20 @@ func (c *Controller) isHPAManaged(pod optimizer.PodInfo, hpaTargets map[string]b
 		}
 	}
 	return false
+}
+
+// allContainersReady returns true if every container in the pod has a Ready
+// condition set to true. Returns false for pods with no container statuses.
+func allContainersReady(pod *corev1.Pod) bool {
+	if len(pod.Status.ContainerStatuses) == 0 {
+		return false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if !cs.Ready {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Controller) run(ctx context.Context) {

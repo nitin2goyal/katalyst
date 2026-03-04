@@ -25,6 +25,9 @@ type PodAnalysis struct {
 	DataPoints      int
 	IsOverProvCPU   bool
 	IsOverProvMem   bool
+	IsBothOverProv  bool    // true when both CPU and memory are over-provisioned
+	CPUUtilRatio    float64 // P95 / request (range 0-1+)
+	MemUtilRatio    float64 // P95 / request (range 0-1+)
 	IsUnderProvCPU  bool
 	IsUnderProvMem  bool
 }
@@ -103,6 +106,9 @@ func (a *Analyzer) AnalyzePod(ctx context.Context, pod optimizer.PodInfo) *PodAn
 
 	analysis.IsOverProvCPU = cpuUtil < a.config.Rightsizer.CPUTargetUtilPct*0.5
 	analysis.IsOverProvMem = memUtil < a.config.Rightsizer.MemoryTargetUtilPct*0.5
+	analysis.IsBothOverProv = analysis.IsOverProvCPU && analysis.IsOverProvMem
+	analysis.CPUUtilRatio = cpuUtil / 100.0 // convert percentage to ratio
+	analysis.MemUtilRatio = memUtil / 100.0
 	analysis.IsUnderProvCPU = cpuUtil > 95
 	analysis.IsUnderProvMem = memUtil > 95
 

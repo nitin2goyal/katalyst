@@ -36,87 +36,16 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 		replicaCount = int64(pod.ReplicaCount)
 	}
 
-	// CPU rightsizing
-	if analysis.IsOverProvCPU && analysis.CPUP95 > 0 {
-		// Recommend P95 + 20% headroom
-		suggestedCPU := int64(float64(analysis.CPUP95) * 1.2)
-		if suggestedCPU < 10 { // minimum 10m
-			suggestedCPU = 10
-		}
-
-		if suggestedCPU < analysis.CPURequestMilli {
-			perPodSavings := estimateCPUSavings(analysis.CPURequestMilli, suggestedCPU, r.config.CloudProvider)
-			savings := perPodSavings * float64(replicaCount)
-			recs = append(recs, optimizer.Recommendation{
-				ID:              fmt.Sprintf("rightsize-cpu-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
-				Type:            optimizer.RecommendationPodRightsize,
-				Priority:        optimizer.PriorityMedium,
-				AutoExecutable:  true,
-				TargetKind:      pod.OwnerKind,
-				TargetName:      pod.OwnerName,
-				TargetNamespace: pod.Pod.Namespace,
-				Summary:         fmt.Sprintf("Reduce CPU request for %s/%s from %dm to %dm (%d replicas)", pod.Pod.Namespace, pod.OwnerName, analysis.CPURequestMilli, suggestedCPU, replicaCount),
-				ActionSteps: []string{
-					fmt.Sprintf("Patch CPU request from %dm to %dm", analysis.CPURequestMilli, suggestedCPU),
-				},
-				EstimatedSaving: optimizer.SavingEstimate{
-					MonthlySavingsUSD: savings,
-					AnnualSavingsUSD:  savings * 12,
-					Currency:          "USD",
-				},
-				Details: map[string]string{
-					"resource":         "cpu",
-					"currentRequest":   fmt.Sprintf("%dm", analysis.CPURequestMilli),
-					"suggestedRequest": fmt.Sprintf("%dm", suggestedCPU),
-					"p95Usage":         fmt.Sprintf("%dm", analysis.CPUP95),
-					"replicaCount":     fmt.Sprintf("%d", replicaCount),
-				},
-				CreatedAt: time.Now(),
-			})
+	// Proportional downsize: only when BOTH CPU and memory are over-provisioned.
+	// Uses the same reduction ratio for both resources to preserve CPU:memory proportion.
+	if analysis.IsBothOverProv && analysis.CPUP95 > 0 && analysis.MemP95 > 0 {
+		rec := r.recommendProportionalDownsize(analysis, replicaCount)
+		if rec != nil {
+			recs = append(recs, *rec)
 		}
 	}
 
-	// Memory rightsizing
-	if analysis.IsOverProvMem && analysis.MemP95 > 0 {
-		suggestedMem := int64(float64(analysis.MemP95) * 1.2)
-		minMem := int64(32 * 1024 * 1024) // 32Mi minimum
-		if suggestedMem < minMem {
-			suggestedMem = minMem
-		}
-
-		if suggestedMem < analysis.MemRequestBytes {
-			perPodSavings := estimateMemorySavings(analysis.MemRequestBytes, suggestedMem, r.config.CloudProvider)
-			savings := perPodSavings * float64(replicaCount)
-			recs = append(recs, optimizer.Recommendation{
-				ID:              fmt.Sprintf("rightsize-mem-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
-				Type:            optimizer.RecommendationPodRightsize,
-				Priority:        optimizer.PriorityMedium,
-				AutoExecutable:  true,
-				TargetKind:      pod.OwnerKind,
-				TargetName:      pod.OwnerName,
-				TargetNamespace: pod.Pod.Namespace,
-				Summary:         fmt.Sprintf("Reduce memory request for %s/%s from %s to %s (%d replicas)", pod.Pod.Namespace, pod.OwnerName, formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem), replicaCount),
-				ActionSteps: []string{
-					fmt.Sprintf("Patch memory request from %s to %s", formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem)),
-				},
-				EstimatedSaving: optimizer.SavingEstimate{
-					MonthlySavingsUSD: savings,
-					AnnualSavingsUSD:  savings * 12,
-					Currency:          "USD",
-				},
-				Details: map[string]string{
-					"resource":         "memory",
-					"currentRequest":   formatBytes(analysis.MemRequestBytes),
-					"suggestedRequest": formatBytes(suggestedMem),
-					"p95Usage":         formatBytes(analysis.MemP95),
-					"replicaCount":     fmt.Sprintf("%d", replicaCount),
-				},
-				CreatedAt: time.Now(),
-			})
-		}
-	}
-
-	// Under-provisioned CPU
+	// Under-provisioned CPU (independent — safety concern, always emit)
 	if analysis.IsUnderProvCPU {
 		suggestedCPU := int64(float64(analysis.CPUMax) * 1.3)
 		recs = append(recs, optimizer.Recommendation{
@@ -142,6 +71,93 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 	}
 
 	return recs
+}
+
+// recommendProportionalDownsize generates a single combined CPU+memory recommendation
+// that reduces both resources by the same proportion. It uses the more conservative
+// (less aggressive) keep-ratio between CPU and memory, and clamps to MinKeepRatio
+// to prevent reducing by more than 30% per cycle (default).
+func (r *Recommender) recommendProportionalDownsize(analysis *PodAnalysis, replicaCount int64) *optimizer.Recommendation {
+	pod := analysis.PodInfo
+
+	// Compute keep-ratios: (P95 * 1.2) / request
+	cpuKeepRatio := float64(analysis.CPUP95) * 1.2 / float64(analysis.CPURequestMilli)
+	memKeepRatio := float64(analysis.MemP95) * 1.2 / float64(analysis.MemRequestBytes)
+
+	// Use the more conservative (higher) ratio — less aggressive reduction
+	keepRatio := cpuKeepRatio
+	if memKeepRatio > keepRatio {
+		keepRatio = memKeepRatio
+	}
+
+	// Clamp to MinKeepRatio — never reduce more than configured % per cycle
+	minKeepRatio := r.config.Rightsizer.MinKeepRatio
+	if minKeepRatio <= 0 {
+		minKeepRatio = 0.7 // fallback default
+	}
+	if keepRatio < minKeepRatio {
+		keepRatio = minKeepRatio
+	}
+
+	// Apply proportional reduction
+	suggestedCPU := int64(float64(analysis.CPURequestMilli) * keepRatio)
+	suggestedMem := int64(float64(analysis.MemRequestBytes) * keepRatio)
+
+	// Enforce minimums
+	if suggestedCPU < 10 {
+		suggestedCPU = 10
+	}
+	minMem := int64(32 * 1024 * 1024) // 32Mi
+	if suggestedMem < minMem {
+		suggestedMem = minMem
+	}
+
+	// Only emit if both actually reduce
+	if suggestedCPU >= analysis.CPURequestMilli || suggestedMem >= analysis.MemRequestBytes {
+		return nil
+	}
+
+	cpuSavings := estimateCPUSavings(analysis.CPURequestMilli, suggestedCPU, r.config.CloudProvider)
+	memSavings := estimateMemorySavings(analysis.MemRequestBytes, suggestedMem, r.config.CloudProvider)
+	perPodSavings := cpuSavings + memSavings
+	totalSavings := perPodSavings * float64(replicaCount)
+
+	return &optimizer.Recommendation{
+		ID:              fmt.Sprintf("rightsize-combined-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
+		Type:            optimizer.RecommendationPodRightsize,
+		Priority:        optimizer.PriorityMedium,
+		AutoExecutable:  true,
+		TargetKind:      pod.OwnerKind,
+		TargetName:      pod.OwnerName,
+		TargetNamespace: pod.Pod.Namespace,
+		Summary: fmt.Sprintf("Reduce CPU+memory for %s/%s: CPU %dm→%dm, memory %s→%s (%d replicas)",
+			pod.Pod.Namespace, pod.OwnerName,
+			analysis.CPURequestMilli, suggestedCPU,
+			formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem),
+			replicaCount),
+		ActionSteps: []string{
+			fmt.Sprintf("Patch CPU request from %dm to %dm and memory from %s to %s",
+				analysis.CPURequestMilli, suggestedCPU,
+				formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem)),
+		},
+		EstimatedSaving: optimizer.SavingEstimate{
+			MonthlySavingsUSD: totalSavings,
+			AnnualSavingsUSD:  totalSavings * 12,
+			Currency:          "USD",
+		},
+		Details: map[string]string{
+			"resource":            "cpu+memory",
+			"currentCPURequest":   fmt.Sprintf("%dm", analysis.CPURequestMilli),
+			"suggestedCPURequest": fmt.Sprintf("%dm", suggestedCPU),
+			"currentMemRequest":   formatBytes(analysis.MemRequestBytes),
+			"suggestedMemRequest": formatBytes(suggestedMem),
+			"p95CPU":              fmt.Sprintf("%dm", analysis.CPUP95),
+			"p95Mem":              formatBytes(analysis.MemP95),
+			"keepRatio":           fmt.Sprintf("%.3f", keepRatio),
+			"replicaCount":        fmt.Sprintf("%d", replicaCount),
+		},
+		CreatedAt: time.Now(),
+	}
 }
 
 // vCPUHourlyCostByCloud returns an approximate per-vCPU hourly cost for the cloud provider.

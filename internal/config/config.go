@@ -75,6 +75,7 @@ type RightsizingConfig struct {
 	MemoryTargetUtilPct float64       `yaml:"memoryTargetUtilPct"`
 	MinCPURequest       string        `yaml:"minCPURequest"`
 	MinMemoryRequest    string        `yaml:"minMemoryRequest"`
+	MinKeepRatio        float64       `yaml:"minKeepRatio"` // Min fraction to keep per cycle (default 0.7 = max 30% reduction)
 	OOMBumpMultiplier   float64       `yaml:"oomBumpMultiplier"` // e.g., 2.5
 	ExcludeNamespaces   []string      `yaml:"excludeNamespaces"`
 }
@@ -244,6 +245,7 @@ func DefaultConfig() *Config {
 			MemoryTargetUtilPct: 75.0,
 			MinCPURequest:       "10m",
 			MinMemoryRequest:    "32Mi",
+			MinKeepRatio:        0.7,
 			OOMBumpMultiplier:   2.5,
 			ExcludeNamespaces:   []string{"kube-system"},
 		},
