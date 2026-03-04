@@ -79,6 +79,12 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 	// Build HPA targets set to skip HPA-managed workloads
 	hpaTargets := c.buildHPATargets(ctx)
 
+	// Build node capacity lookup for ratio-based rightsizing
+	nodeCapacity := make(map[string]*optimizer.NodeInfo, len(snapshot.Nodes))
+	for i := range snapshot.Nodes {
+		nodeCapacity[snapshot.Nodes[i].Node.Name] = &snapshot.Nodes[i]
+	}
+
 	// Analyze pod resource usage patterns
 	for _, pod := range snapshot.Pods {
 		if c.isExcluded(pod.Pod.Namespace) {
@@ -108,6 +114,12 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 			continue
 		}
 
+		// Attach node capacity for ratio-based rightsizing
+		if node, ok := nodeCapacity[pod.Pod.Spec.NodeName]; ok {
+			analysis.NodeCPUCapMilli = node.CPUCapacity
+			analysis.NodeMemCapBytes = node.MemoryCapacity
+		}
+
 		podRecs := c.recommender.Recommend(analysis)
 		recs = append(recs, podRecs...)
 	}
@@ -123,7 +135,7 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
-	// Safety actions (OOM bumps, CPU upsizes) always execute immediately.
+	// Safety actions (OOM memory bumps) always execute immediately.
 	if !isDownsizeRec(rec) {
 		return c.executeWithGate(ctx, rec)
 	}
@@ -169,7 +181,7 @@ func (c *Controller) executeWithGate(ctx context.Context, rec optimizer.Recommen
 }
 
 // isDownsizeRec returns true for proportional CPU+memory downsize recommendations.
-// OOM bumps and CPU upsizes are safety actions and return false.
+// OOM memory bumps are safety actions and return false.
 func isDownsizeRec(rec optimizer.Recommendation) bool {
 	return rec.Details["resource"] == "cpu+memory"
 }

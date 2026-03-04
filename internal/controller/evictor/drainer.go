@@ -195,9 +195,9 @@ func (d *Drainer) DrainNode(ctx context.Context, nodeName string) error {
 }
 
 func (d *Drainer) cordonNode(ctx context.Context, nodeName string) error {
-	// Global safety: refuse to cordon if too many nodes are already
-	// unschedulable. This prevents cascading failures where partial drain
-	// errors cause the loop to cordon every node in the cluster.
+	// Safety: refuse to cordon if too many nodes are already cordoned *by us*.
+	// Only count nodes with our annotation so that externally-cordoned nodes
+	// (e.g. GKE maintenance, other controllers) don't block scale-down.
 	maxCordoned := d.config.Evictor.MaxConcurrentEvictions
 	if maxCordoned <= 0 {
 		maxCordoned = 2
@@ -208,12 +208,22 @@ func (d *Drainer) cordonNode(ctx context.Context, nodeName string) error {
 	}
 	cordoned := 0
 	for i := range allNodes.Items {
-		if allNodes.Items[i].Spec.Unschedulable && allNodes.Items[i].Name != nodeName {
-			cordoned++
+		n := &allNodes.Items[i]
+		if n.Name == nodeName {
+			continue
+		}
+		if !n.Spec.Unschedulable {
+			continue
+		}
+		// Only count nodes we cordoned (have our annotation)
+		if n.Annotations != nil {
+			if _, ours := n.Annotations["koptimizer.io/cordoned-by"]; ours {
+				cordoned++
+			}
 		}
 	}
 	if cordoned >= maxCordoned {
-		return fmt.Errorf("refusing to cordon %s: %d nodes already unschedulable (limit %d)", nodeName, cordoned, maxCordoned)
+		return fmt.Errorf("refusing to cordon %s: %d nodes already cordoned by koptimizer (limit %d)", nodeName, cordoned, maxCordoned)
 	}
 
 	node := &corev1.Node{}
@@ -222,6 +232,10 @@ func (d *Drainer) cordonNode(ctx context.Context, nodeName string) error {
 	}
 
 	node.Spec.Unschedulable = true
+	if node.Annotations == nil {
+		node.Annotations = map[string]string{}
+	}
+	node.Annotations["koptimizer.io/cordoned-by"] = "koptimizer"
 	return d.client.Update(ctx, node)
 }
 
@@ -232,6 +246,9 @@ func (d *Drainer) uncordonNode(ctx context.Context, nodeName string) error {
 	}
 
 	node.Spec.Unschedulable = false
+	if node.Annotations != nil {
+		delete(node.Annotations, "koptimizer.io/cordoned-by")
+	}
 	return d.client.Update(ctx, node)
 }
 
@@ -248,6 +265,7 @@ func (d *Drainer) UncordonAndCleanup(ctx context.Context, nodeName string) error
 	if node.Annotations != nil {
 		delete(node.Annotations, "koptimizer.io/partial-drain-at")
 		delete(node.Annotations, "koptimizer.io/partial-drain-reason")
+		delete(node.Annotations, "koptimizer.io/cordoned-by")
 	}
 	return d.client.Update(ctx, node)
 }

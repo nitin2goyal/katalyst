@@ -314,6 +314,36 @@ func main() {
 	mux.HandleFunc("/api/v1/cost/impact", jsonHandler(costImpact))
 	mux.HandleFunc("/api/v1/policies", jsonHandler(policiesData))
 
+	// Actions: bad-pods list and delete-pods
+	mux.HandleFunc("/api/v1/actions/bad-pods", jsonHandler(func() any {
+		return map[string]any{
+			"pods":    []any{},
+			"summary": map[string]any{"byNamespace": map[string]int{}, "byStatus": map[string]int{}},
+		}
+	}))
+	mux.HandleFunc("/api/v1/actions/delete-pods", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.WriteHeader(204)
+			return
+		}
+		var req struct {
+			Pods []struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"pods"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Pods) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"error": "no pods specified"})
+			return
+		}
+		writeJSON(w, map[string]any{"deleted": len(req.Pods), "errors": []any{}})
+	})
+
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Mock KOptimizer API on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, corsMiddleware(mux)))

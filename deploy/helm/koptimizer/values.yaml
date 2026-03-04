@@ -73,7 +73,7 @@ config:
     enabled: true
     utilizationThreshold: 40
     consolidationInterval: "5m"
-    maxConcurrentEvictions: 1
+    maxConcurrentEvictions: 2
     dryRun: false
 
   rebalancer:

@@ -30,6 +30,10 @@ type PodAnalysis struct {
 	MemUtilRatio    float64 // P95 / request (range 0-1+)
 	IsUnderProvCPU  bool
 	IsUnderProvMem  bool
+
+	// Node capacity for ratio-based rightsizing (0 if unknown)
+	NodeCPUCapMilli int64
+	NodeMemCapBytes int64
 }
 
 // Analyzer performs usage pattern analysis on pod metrics.

@@ -30,46 +30,26 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 
 	pod := analysis.PodInfo
 
+	// Never generate any recommendations for DaemonSets. DaemonSets run on
+	// every node, so any resource change multiplies across the entire cluster.
+	if pod.OwnerKind == "DaemonSet" {
+		return nil
+	}
+
 	// Determine replica count for scaling per-pod savings
 	replicaCount := int64(1)
 	if pod.ReplicaCount > 1 {
 		replicaCount = int64(pod.ReplicaCount)
 	}
 
-	// Proportional downsize: only when BOTH CPU and memory are over-provisioned.
-	// Uses the same reduction ratio for both resources to preserve CPU:memory proportion.
-	if analysis.IsBothOverProv && analysis.CPUP95 > 0 && analysis.MemP95 > 0 {
-		rec := r.recommendProportionalDownsize(analysis, replicaCount)
+	// Downsize when CPU is over-provisioned. Memory is adjusted to match the
+	// node's CPU:memory ratio for optimal bin-packing. Memory may increase if
+	// needed to maintain the ratio — that's acceptable.
+	if analysis.IsOverProvCPU && analysis.CPUP95 > 0 {
+		rec := r.recommendNodeRatioDownsize(analysis, replicaCount)
 		if rec != nil {
 			recs = append(recs, *rec)
 		}
-	}
-
-	// Under-provisioned CPU (independent — safety concern, always emit)
-	// DaemonSets run on every node, so upsizes multiply across all nodes and
-	// dramatically increase cluster cost. Skip CPU upsizes for DaemonSets.
-	if analysis.IsUnderProvCPU && pod.OwnerKind != "DaemonSet" {
-		suggestedCPU := int64(float64(analysis.CPUMax) * 1.3)
-		recs = append(recs, optimizer.Recommendation{
-			ID:              fmt.Sprintf("rightsize-cpuup-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
-			Type:            optimizer.RecommendationPodRightsize,
-			Priority:        optimizer.PriorityHigh,
-			AutoExecutable:  true,
-			TargetKind:      pod.OwnerKind,
-			TargetName:      pod.OwnerName,
-			TargetNamespace: pod.Pod.Namespace,
-			Summary:         fmt.Sprintf("Increase CPU request for %s/%s from %dm to %dm (CPU throttled)", pod.Pod.Namespace, pod.OwnerName, analysis.CPURequestMilli, suggestedCPU),
-			ActionSteps: []string{
-				fmt.Sprintf("Patch CPU request from %dm to %dm", analysis.CPURequestMilli, suggestedCPU),
-			},
-			Details: map[string]string{
-				"resource":         "cpu",
-				"currentRequest":   fmt.Sprintf("%dm", analysis.CPURequestMilli),
-				"suggestedRequest": fmt.Sprintf("%dm", suggestedCPU),
-				"maxUsage":         fmt.Sprintf("%dm", analysis.CPUMax),
-			},
-			CreatedAt: time.Now(),
-		})
 	}
 
 	return recs

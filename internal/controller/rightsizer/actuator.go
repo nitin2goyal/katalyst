@@ -64,6 +64,12 @@ func (a *Actuator) hasResizePolicy(pod *corev1.Pod) bool {
 func (a *Actuator) Apply(ctx context.Context, rec optimizer.Recommendation) error {
 	logger := log.FromContext(ctx).WithName("rightsizer-actuator")
 
+	// Safety net: never patch DaemonSet workloads.
+	if rec.TargetKind == "DaemonSet" {
+		logger.Info("Skipping DaemonSet workload", "name", rec.TargetName, "namespace", rec.TargetNamespace)
+		return nil
+	}
+
 	resourceType := rec.Details["resource"]
 
 	// Dispatch combined CPU+memory patches
