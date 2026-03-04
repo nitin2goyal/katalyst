@@ -46,7 +46,9 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 	}
 
 	// Under-provisioned CPU (independent — safety concern, always emit)
-	if analysis.IsUnderProvCPU {
+	// DaemonSets run on every node, so upsizes multiply across all nodes and
+	// dramatically increase cluster cost. Skip CPU upsizes for DaemonSets.
+	if analysis.IsUnderProvCPU && pod.OwnerKind != "DaemonSet" {
 		suggestedCPU := int64(float64(analysis.CPUMax) * 1.3)
 		recs = append(recs, optimizer.Recommendation{
 			ID:              fmt.Sprintf("rightsize-cpuup-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
