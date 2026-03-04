@@ -30,6 +30,7 @@ type Controller struct {
 	recommender  *Recommender
 	actuator     *Actuator
 	oomTracker   *OOMTracker
+	notifier     *Notifier
 }
 
 func NewController(mgr ctrl.Manager, st *state.ClusterState, gate *aigate.AIGate, cfg *config.Config, metricsStore *metrics.Store) *Controller {
@@ -44,6 +45,7 @@ func NewController(mgr ctrl.Manager, st *state.ClusterState, gate *aigate.AIGate
 		recommender:  NewRecommender(cfg),
 		actuator:     NewActuator(c, cfg),
 		oomTracker:   NewOOMTracker(c, cfg),
+		notifier:     NewNotifier(cfg, st.AuditLog),
 	}
 }
 
@@ -230,6 +232,9 @@ func (c *Controller) run(ctx context.Context) {
 				continue
 			}
 			for _, rec := range recs {
+				// Push to notification channels (with cooldown dedup)
+				c.notifier.Notify(ctx, rec)
+
 				if err := c.Execute(ctx, rec); err != nil {
 					logger.Error(err, "Execution failed", "recommendation", rec.ID)
 					c.state.Breaker.RecordFailure(c.Name())

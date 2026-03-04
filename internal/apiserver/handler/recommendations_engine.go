@@ -187,17 +187,19 @@ func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.N
 	return recs
 }
 
-// --- Algorithm 3: Pod rightsizing ---
+// --- Algorithm 3: Pod rightsizing (proportional CPU+memory) ---
+// Aligned with the rightsizer controller's proportional algorithm.
 // Uses P95 over 24h when historical data is available.
+// Only recommends when BOTH CPU and memory are over-provisioned.
+
+// Per-resource hourly cost rates (matching rightsizer cost model).
+const (
+	engineVCPUHourlyGCP = 0.031611 // n2 rate
+	engineMemGiBHourlyGCP = 0.004237 // n2 rate
+	engineMinKeepRatio  = 0.7      // never reduce more than 30% per cycle
+)
 
 func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.NodeState, pods []*state.PodState, now string, metricsStore *intmetrics.Store) []ComputedRecommendation {
-	nodeCostMap := make(map[string]float64, len(nodes))
-	nodeCPUReqMap := make(map[string]int64, len(nodes))
-	for _, n := range nodes {
-		nodeCostMap[n.Node.Name] = n.HourlyCostUSD
-		nodeCPUReqMap[n.Node.Name] = n.CPURequested
-	}
-
 	// Check if pod-level metrics are available. Without metrics, we cannot
 	// make accurate rightsizing recommendations — skip entirely.
 	metricsCount := 0
@@ -208,7 +210,6 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 	}
 	hasMetrics := metricsCount > len(pods)/10
 	if !hasMetrics {
-		// No metrics data available — cannot compute rightsizing recommendations.
 		return recs
 	}
 
@@ -216,25 +217,24 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		namespace     string
 		ownerKind     string
 		ownerName     string
-		allocated     float64
-		wasted        float64
 		podCount      int
-		sumCPUEff     float64
-		sumMemEff     float64
+		// Aggregated across pods — we average at the end
+		sumCPURequest int64
+		sumMemRequest int64
+		sumCPUP95     int64
+		sumMemP95     int64
 		hasHistorical bool
 	}
 	owners := make(map[string]*ownerGroup)
 	for _, p := range pods {
-		if systemNamespaces[p.Namespace] || p.CPURequest == 0 {
+		if systemNamespaces[p.Namespace] || p.CPURequest == 0 || p.MemoryRequest == 0 {
 			continue
 		}
-		// Only consider running pods — completed/failed Job pods still have
-		// spec.nodeName set but are NOT counted in the node's CPURequested,
-		// which causes fraction > 1.0 and inflated savings.
+		// Only consider running pods
 		if p.Pod != nil && p.Pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
-		// Skip pods younger than 10 minutes — insufficient metrics history
+		// Skip pods younger than 10 minutes
 		if p.Pod != nil && p.Pod.Status.StartTime != nil {
 			if time.Since(p.Pod.Status.StartTime.Time) < 10*time.Minute {
 				continue
@@ -248,7 +248,7 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		ownerKey := p.Namespace + "/" + kind + "/" + name
 
 		// Try historical P95 over 24h for each pod's containers
-		var cpuEff, memEff float64
+		var p95CPU, p95Mem int64
 		usedHistorical := false
 		if metricsStore != nil && p.Pod != nil {
 			var totalP95CPU, totalP95Mem int64
@@ -263,66 +263,102 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 					break
 				}
 			}
-			if allContainersHaveData && p.CPURequest > 0 {
-				cpuEff = float64(totalP95CPU) / float64(p.CPURequest)
-				if p.MemoryRequest > 0 {
-					memEff = float64(totalP95Mem) / float64(p.MemoryRequest)
-				}
+			if allContainersHaveData {
+				p95CPU = totalP95CPU
+				p95Mem = totalP95Mem
 				usedHistorical = true
 			}
 		}
 
 		if !usedHistorical {
 			// Fall back to point-in-time
-			if !p.IsOverProvisioned(0.5) {
-				continue
-			}
-			cpuEff = p.CPUEfficiency()
-			memEff = p.MemoryEfficiency()
-		} else {
-			// With historical data, check overprovisioning using P95 efficiency
-			maxEff := math.Max(cpuEff, memEff)
-			if maxEff >= 0.5 {
-				continue
-			}
+			p95CPU = p.CPUUsage
+			p95Mem = p.MemoryUsage
 		}
 
-		nodeHourly := nodeCostMap[p.NodeName]
-		nodeCPUReq := nodeCPUReqMap[p.NodeName]
-		if nodeCPUReq == 0 {
+		// Require BOTH CPU and memory to be over-provisioned (< 50% utilization)
+		cpuEff := float64(p95CPU) / float64(p.CPURequest)
+		memEff := float64(p95Mem) / float64(p.MemoryRequest)
+		if cpuEff >= 0.5 || memEff >= 0.5 {
 			continue
 		}
-		fraction := float64(p.CPURequest) / float64(nodeCPUReq)
-		allocatedMonthly := nodeHourly * cost.HoursPerMonth * fraction
-
-		maxEff := math.Max(cpuEff, memEff)
-		wastedMonthly := allocatedMonthly * (1 - maxEff)
 
 		og, ok := owners[ownerKey]
 		if !ok {
 			og = &ownerGroup{namespace: p.Namespace, ownerKind: kind, ownerName: name}
 			owners[ownerKey] = og
 		}
-		og.allocated += allocatedMonthly
-		og.wasted += wastedMonthly
 		og.podCount++
-		og.sumCPUEff += cpuEff
-		og.sumMemEff += memEff
+		og.sumCPURequest += p.CPURequest
+		og.sumMemRequest += p.MemoryRequest
+		og.sumCPUP95 += p95CPU
+		og.sumMemP95 += p95Mem
 		if usedHistorical {
 			og.hasHistorical = true
 		}
 	}
 
 	for key, og := range owners {
-		if og.wasted < minSavingsThreshold {
+		// Average per-pod values
+		avgCPUReq := og.sumCPURequest / int64(og.podCount)
+		avgMemReq := og.sumMemRequest / int64(og.podCount)
+		avgCPUP95 := og.sumCPUP95 / int64(og.podCount)
+		avgMemP95 := og.sumMemP95 / int64(og.podCount)
+
+		if avgCPUReq == 0 || avgMemReq == 0 {
 			continue
 		}
-		avgCPU := og.sumCPUEff / float64(og.podCount) * 100
-		avgMem := og.sumMemEff / float64(og.podCount) * 100
+
+		// Proportional keep-ratio algorithm (matches rightsizer controller)
+		cpuKeepRatio := float64(avgCPUP95) * 1.2 / float64(avgCPUReq)
+		memKeepRatio := float64(avgMemP95) * 1.2 / float64(avgMemReq)
+
+		// Use the more conservative (higher) ratio
+		keepRatio := cpuKeepRatio
+		if memKeepRatio > keepRatio {
+			keepRatio = memKeepRatio
+		}
+
+		// Clamp to MinKeepRatio — never reduce more than 30% per cycle
+		if keepRatio < engineMinKeepRatio {
+			keepRatio = engineMinKeepRatio
+		}
+
+		suggestedCPU := int64(float64(avgCPUReq) * keepRatio)
+		suggestedMem := int64(float64(avgMemReq) * keepRatio)
+
+		// Enforce minimums
+		if suggestedCPU < 10 {
+			suggestedCPU = 10
+		}
+		minMem := int64(32 * 1024 * 1024) // 32Mi
+		if suggestedMem < minMem {
+			suggestedMem = minMem
+		}
+
+		// Only emit if both actually reduce
+		if suggestedCPU >= avgCPUReq || suggestedMem >= avgMemReq {
+			continue
+		}
+
+		// Per-vCPU / per-GiB savings (matches rightsizer cost model)
+		cpuSavedVCPU := float64(avgCPUReq-suggestedCPU) / 1000.0
+		memSavedGiB := float64(avgMemReq-suggestedMem) / (1024 * 1024 * 1024)
+		perPodSavings := cpuSavedVCPU*engineVCPUHourlyGCP*cost.HoursPerMonth +
+			memSavedGiB*engineMemGiBHourlyGCP*cost.HoursPerMonth
+		totalSavings := perPodSavings * float64(og.podCount)
+
+		if totalSavings < minSavingsThreshold {
+			continue
+		}
+
+		avgCPUPct := float64(avgCPUP95) / float64(avgCPUReq) * 100
+		avgMemPct := float64(avgMemP95) / float64(avgMemReq) * 100
+
 		priority := "low"
-		if og.wasted > 100 {
+		if totalSavings > 100 {
 			priority = "high"
-		} else if og.wasted > 20 {
+		} else if totalSavings > 20 {
 			priority = "medium"
 		}
 		target := og.namespace + "/" + og.ownerKind + "/" + og.ownerName
@@ -336,8 +372,13 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			ID:               computedID("rightsizing", key),
 			Type:             "rightsizing",
 			Target:           target,
-			Description:      fmt.Sprintf("%s %s/%s has %d pod(s) using only %.0f%% CPU, %.0f%% memory. Right-size to save $%.0f/mo.", og.ownerKind, og.namespace, og.ownerName, og.podCount, avgCPU, avgMem, og.wasted),
-			EstimatedSavings: roundCents(og.wasted),
+			Description: fmt.Sprintf("%s %s/%s: %d pod(s) using %.0f%% CPU, %.0f%% memory. Reduce CPU %dm→%dm, memory %s→%s to save $%.0f/mo.",
+				og.ownerKind, og.namespace, og.ownerName, og.podCount,
+				avgCPUPct, avgMemPct,
+				avgCPUReq, suggestedCPU,
+				engineFormatBytes(avgMemReq), engineFormatBytes(suggestedMem),
+				totalSavings),
+			EstimatedSavings: roundCents(totalSavings),
 			Status:           "pending",
 			Priority:         priority,
 			CreatedAt:        now,
@@ -345,6 +386,25 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		})
 	}
 	return recs
+}
+
+// engineFormatBytes formats bytes to human-readable Ki/Mi/Gi.
+func engineFormatBytes(b int64) string {
+	const (
+		ki = 1024
+		mi = ki * 1024
+		gi = mi * 1024
+	)
+	switch {
+	case b >= int64(gi):
+		return fmt.Sprintf("%dGi", b/int64(gi))
+	case b >= int64(mi):
+		return fmt.Sprintf("%dMi", b/int64(mi))
+	case b >= int64(ki):
+		return fmt.Sprintf("%dKi", b/int64(ki))
+	default:
+		return fmt.Sprintf("%d", b)
+	}
 }
 
 // --- Algorithm 5: Node group rightsizing ---
