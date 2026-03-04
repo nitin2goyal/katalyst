@@ -46,7 +46,7 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 	// node's CPU:memory ratio for optimal bin-packing. Memory may increase if
 	// needed to maintain the ratio — that's acceptable.
 	if analysis.IsOverProvCPU && analysis.CPUP95 > 0 {
-		rec := r.recommendProportionalDownsize(analysis, replicaCount)
+		rec := r.recommendNodeRatioDownsize(analysis, replicaCount)
 		if rec != nil {
 			recs = append(recs, *rec)
 		}
