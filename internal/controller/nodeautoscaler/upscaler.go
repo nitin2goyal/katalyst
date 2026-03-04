@@ -32,10 +32,12 @@ func NewUpscaler(provider cloudprovider.CloudProvider, guard *familylock.FamilyL
 func (u *Upscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSnapshot) ([]optimizer.Recommendation, error) {
 	var recs []optimizer.Recommendation
 
-	// Find pending pods
+	// Find truly unschedulable pods: Pending AND not yet assigned to a node.
+	// Pods stuck in ImagePullBackOff, CrashLoopBackOff, etc. are already on
+	// a node — adding more nodes won't help them.
 	var pendingPods []optimizer.PodInfo
 	for _, p := range snapshot.Pods {
-		if p.Pod != nil && p.Pod.Status.Phase == "Pending" {
+		if p.Pod != nil && p.Pod.Status.Phase == "Pending" && p.Pod.Spec.NodeName == "" {
 			pendingPods = append(pendingPods, p)
 		}
 	}
