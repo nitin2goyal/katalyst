@@ -238,30 +238,24 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 		}
 	}
 
-	err := c.provider.ScaleNodeGroup(ctx, nodeGroupID, desired)
-	if err != nil {
-		c.state.AuditLog.Record("scale-nodegroup-failed", nodeGroupID, "nodeautoscaler", err.Error())
-
-		// If scale-down failed after draining, uncordon the drained nodes so
-		// they remain usable. Without this, nodes stay cordoned indefinitely
-		// when the cloud API rejects the scale operation (e.g. 403 permission).
-		if direction == "down" && len(drainedNodes) > 0 {
-			logger.Info("Scale-down failed, uncordoning drained nodes to restore capacity",
-				"nodeGroup", nodeGroupID, "drainedNodes", len(drainedNodes))
-			for _, nodeName := range drainedNodes {
-				if uncordErr := c.drainer.UncordonAndCleanup(ctx, nodeName); uncordErr != nil {
-					logger.Error(uncordErr, "Failed to uncordon node after scale-down failure", "node", nodeName)
-				} else {
-					c.state.AuditLog.Record("uncordon-after-scale-failure", nodeName, "nodeautoscaler",
-						fmt.Sprintf("uncordoned after scale-down API failure for %s", nodeGroupID))
-				}
-			}
-		}
-	} else {
+	// Scale-down: drain is sufficient. Drained+cordoned nodes sit empty and
+	// the cloud provider's own autoscaler handles actual node removal. This
+	// avoids needing GCP IAM permissions for setSize and keeps the optimizer
+	// non-intrusive (no direct node pool mutations).
+	//
+	// Scale-up: not auto-executed. Recommendations are generated for review
+	// but adding nodes to the cloud provider is left to the native autoscaler
+	// or manual intervention.
+	if direction == "down" && len(drainedNodes) > 0 {
 		c.state.AuditLog.Record("scale-nodegroup-complete", nodeGroupID, "nodeautoscaler",
-			fmt.Sprintf("scaled to %d nodes", desired))
+			fmt.Sprintf("drained %d nodes (cordoned, awaiting cloud autoscaler removal)", len(drainedNodes)))
+	} else if direction == "up" {
+		logger.Info("Scale-up recommendation generated, skipping cloud API call (left to native autoscaler)",
+			"nodeGroup", nodeGroupID, "desiredCount", desired)
+		c.state.AuditLog.Record("scale-up-deferred", nodeGroupID, "nodeautoscaler",
+			fmt.Sprintf("scale-up to %d deferred to native autoscaler", desired))
 	}
-	return err
+	return nil
 }
 
 // uncordonFailedDrainNodes uncordons nodes that were left cordoned after drain
