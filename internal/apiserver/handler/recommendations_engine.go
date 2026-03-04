@@ -102,7 +102,7 @@ func computeFromData(nodes []*state.NodeState, pods []*state.PodState, nodeGroup
 
 func appendEmptyNodeRecs(recs []ComputedRecommendation, nodes []*state.NodeState, now string) []ComputedRecommendation {
 	for _, n := range nodes {
-		if n.IsGPUNode || !n.IsEmpty() {
+		if n.IsGPUNode || !n.IsEmpty() || n.Node.Spec.Unschedulable {
 			continue
 		}
 		savings := n.HourlyCostUSD * cost.HoursPerMonth
@@ -129,7 +129,7 @@ func appendEmptyNodeRecs(recs []ComputedRecommendation, nodes []*state.NodeState
 
 func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.NodeState, now string, metricsStore *intmetrics.Store) []ComputedRecommendation {
 	for _, n := range nodes {
-		if n.IsGPUNode || n.IsEmpty() {
+		if n.IsGPUNode || n.IsEmpty() || n.Node.Spec.Unschedulable {
 			continue
 		}
 		// Skip nodes where usage is 0 but pods exist — indicates missing metrics, not true idle
@@ -160,7 +160,7 @@ func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.N
 			memUtil = n.MemoryUtilization()
 		}
 
-		if cpuUtil >= 20 || memUtil >= 20 {
+		if cpuUtil >= 15 || memUtil >= 15 {
 			continue
 		}
 
@@ -169,7 +169,7 @@ func appendUnderutilizedNodeRecs(recs []ComputedRecommendation, nodes []*state.N
 			continue
 		}
 		priority := "medium"
-		if cpuUtil < 10 && memUtil < 10 {
+		if cpuUtil < 5 && memUtil < 5 {
 			priority = "high"
 		}
 		recs = append(recs, ComputedRecommendation{

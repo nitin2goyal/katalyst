@@ -1,14 +1,17 @@
 package evictor
 
 import (
+	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
 // FragmentationScorer scores nodes by how fragmented their resource usage is.
-type FragmentationScorer struct{}
+type FragmentationScorer struct {
+	config *config.Config
+}
 
-func NewFragmentationScorer() *FragmentationScorer {
-	return &FragmentationScorer{}
+func NewFragmentationScorer(cfg *config.Config) *FragmentationScorer {
+	return &FragmentationScorer{config: cfg}
 }
 
 // NodeScore represents the fragmentation score for a single node.
@@ -20,14 +23,34 @@ type NodeScore struct {
 	CPUUtilPct     float64
 	MemUtilPct     float64
 	PodCount       int
-	IsCandidate    bool    // true if node is a good consolidation candidate
+	IsCandidate    bool // true if node is a good consolidation candidate
 }
 
 // Score calculates fragmentation scores for all nodes.
 func (f *FragmentationScorer) Score(snapshot *optimizer.ClusterSnapshot) []NodeScore {
 	scores := make([]NodeScore, 0, len(snapshot.Nodes))
 
+	// candidateThreshold: a node is a consolidation candidate when its
+	// allocation is below UtilizationThreshold.  The score is the average
+	// free ratio (0 = packed, 1 = empty), so we convert:
+	//   score > 1 - (threshold/100)
+	// e.g. threshold 15% → score > 0.85 (85% free)
+	threshold := f.config.Evictor.UtilizationThreshold
+	if threshold <= 0 {
+		threshold = 15.0
+	}
+	candidateThreshold := 1.0 - (threshold / 100.0)
+
 	for _, node := range snapshot.Nodes {
+		// Skip cordoned nodes — they're already being drained or managed
+		if node.Node.Spec.Unschedulable {
+			continue
+		}
+		// Skip GPU nodes
+		if node.IsGPUNode {
+			continue
+		}
+
 		cpuUtil := float64(0)
 		if node.CPUCapacity > 0 {
 			cpuUtil = float64(node.CPURequested) / float64(node.CPUCapacity) * 100
@@ -65,7 +88,7 @@ func (f *FragmentationScorer) Score(snapshot *optimizer.ClusterSnapshot) []NodeS
 			CPUUtilPct:  cpuUtil,
 			MemUtilPct:  memUtil,
 			PodCount:    nonDSPods,
-			IsCandidate: score > 0.6, // >60% free = consolidation candidate
+			IsCandidate: score > candidateThreshold,
 		})
 	}
 

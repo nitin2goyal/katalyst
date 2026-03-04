@@ -86,7 +86,7 @@ func memPct(capacity int64, pct float64) int64 {
 // ---------------------------------------------------------------------------
 
 func TestFragmentationScorer_Score(t *testing.T) {
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 
 	tests := []struct {
 		name            string
@@ -203,7 +203,7 @@ func TestFragmentationScorer_Score(t *testing.T) {
 }
 
 func TestFragmentationScorer_Score_CPUFreeAndMemFree(t *testing.T) {
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 
 	cpuCap := int64(4000)
 	cpuReq := int64(1500)
@@ -232,7 +232,7 @@ func TestFragmentationScorer_Score_CPUFreeAndMemFree(t *testing.T) {
 }
 
 func TestFragmentationScorer_Score_MultipleNodesSorted(t *testing.T) {
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 
 	mem16g := int64(16 * 1024 * 1024 * 1024)
 
@@ -312,7 +312,7 @@ func TestConsolidatorPlan_NoCandidates(t *testing.T) {
 		},
 	}
 
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 	scores := scorer.Score(snapshot)
 
 	recs, err := consolidator.Plan(snapshot, scores)
@@ -341,7 +341,7 @@ func TestConsolidatorPlan_OneCandidateFitsElsewhere(t *testing.T) {
 		},
 	}
 
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 	scores := scorer.Score(snapshot)
 
 	recs, err := consolidator.Plan(snapshot, scores)
@@ -384,7 +384,7 @@ func TestConsolidatorPlan_CandidateTooBigToFit(t *testing.T) {
 		},
 	}
 
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 	scores := scorer.Score(snapshot)
 
 	recs, err := consolidator.Plan(snapshot, scores)
@@ -422,7 +422,7 @@ func TestConsolidatorPlan_LimitedByMaxConcurrentEvictions(t *testing.T) {
 		},
 	}
 
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 	scores := scorer.Score(snapshot)
 
 	recs, err := consolidator.Plan(snapshot, scores)
@@ -455,7 +455,7 @@ func TestConsolidatorPlan_SavingsCalculation(t *testing.T) {
 		},
 	}
 
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 	scores := scorer.Score(snapshot)
 
 	recs, err := consolidator.Plan(snapshot, scores)
@@ -498,7 +498,7 @@ func TestConsolidatorPlan_EmptyNodeNoPods_NotCandidate(t *testing.T) {
 		},
 	}
 
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 	scores := scorer.Score(snapshot)
 
 	recs, err := consolidator.Plan(snapshot, scores)
@@ -532,7 +532,7 @@ func TestConsolidatorPlan_RecommendationFields(t *testing.T) {
 		},
 	}
 
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 	scores := scorer.Score(snapshot)
 
 	recs, err := consolidator.Plan(snapshot, scores)
@@ -588,7 +588,7 @@ func TestConsolidatorPlan_CapacityReducedAfterEachConsolidation(t *testing.T) {
 		},
 	}
 
-	scorer := NewFragmentationScorer()
+	scorer := NewFragmentationScorer(defaultTestConfig())
 	scores := scorer.Score(snapshot)
 
 	recs, err := consolidator.Plan(snapshot, scores)

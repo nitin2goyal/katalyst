@@ -46,7 +46,7 @@ func NewController(mgr ctrl.Manager, provider cloudprovider.CloudProvider, st *s
 		guard:        guard,
 		gate:         gate,
 		config:       cfg,
-		fragScorer:   NewFragmentationScorer(),
+		fragScorer:   NewFragmentationScorer(cfg),
 		consolidator: NewConsolidator(cfg),
 		drainer:      drainer,
 		evicted:     make(map[string]bool),

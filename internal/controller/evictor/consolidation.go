@@ -60,7 +60,8 @@ func (c *Consolidator) Plan(snapshot *optimizer.ClusterSnapshot, scores []NodeSc
 	podsByNode := make(map[string][]*corev1.Pod)
 	for _, n := range snapshot.Nodes {
 		name := n.Node.Name
-		if !candidateSet[name] {
+		if !candidateSet[name] && !n.Node.Spec.Unschedulable {
+			// Only schedulable, non-candidate nodes can receive pods
 			nonCandidateNodes = append(nonCandidateNodes, n.Node)
 		}
 		podsByNode[name] = n.Pods
