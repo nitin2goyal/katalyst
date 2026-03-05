@@ -268,7 +268,7 @@ func DefaultConfig() *Config {
 		Evictor: EvictorConfig{
 			Enabled:                true,
 			DryRun:                 true, // safe default: recommend-only until explicitly enabled
-			UtilizationThreshold:   15.0,
+			UtilizationThreshold:   40.0,
 			ConsolidationInterval:  5 * time.Minute,
 			MaxConcurrentEvictions: 3,
 			DrainTimeout:           5 * time.Minute,

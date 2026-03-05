@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -200,14 +199,17 @@ func (c *Controller) run(ctx context.Context) {
 	}
 }
 
-// reconcilePartialDrains finds nodes annotated with koptimizer.io/partial-drain-at
-// and auto-uncordons them if the TTL has expired. This prevents partially drained
-// nodes from staying cordoned indefinitely.
+// reconcilePartialDrains finds nodes cordoned by koptimizer and auto-uncordons
+// them if the cordon TTL has expired. This prevents two deadlock scenarios:
+// 1. Partially drained nodes stuck cordoned (koptimizer.io/partial-drain-at)
+// 2. Successfully drained nodes that GKE never removed (koptimizer.io/cordoned-at)
+// Without this cleanup, cordoned nodes accumulate and block all future drains
+// via the MaxConcurrentEvictions limit.
 func (c *Controller) reconcilePartialDrains(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("evictor")
 	ttl := c.config.Evictor.PartialDrainTTL
 	if ttl <= 0 {
-		return
+		ttl = 30 * time.Minute // fallback default
 	}
 
 	nodes := c.state.GetAllNodes()
@@ -215,43 +217,57 @@ func (c *Controller) reconcilePartialDrains(ctx context.Context) {
 		if ns.Node.Annotations == nil {
 			continue
 		}
-		tsStr, ok := ns.Node.Annotations["koptimizer.io/partial-drain-at"]
-		if !ok {
-			continue
-		}
-		ts, err := time.Parse(time.RFC3339, tsStr)
-		if err != nil {
-			logger.Error(err, "Invalid partial-drain-at timestamp", "node", ns.Node.Name, "value", tsStr)
-			continue
-		}
-		if time.Since(ts) < ttl {
+
+		// Only process nodes cordoned by koptimizer
+		if _, ours := ns.Node.Annotations["koptimizer.io/cordoned-by"]; !ours {
 			continue
 		}
 
-		// TTL expired — uncordon the node and clear the annotation.
-		logger.Info("Auto-uncordoning partially drained node (TTL expired)",
+		// Check both timestamp annotations: partial-drain-at (legacy) and
+		// cordoned-at (set on every cordon). Use whichever is present.
+		var ts time.Time
+		var tsSource string
+		if tsStr, ok := ns.Node.Annotations["koptimizer.io/partial-drain-at"]; ok {
+			parsed, err := time.Parse(time.RFC3339, tsStr)
+			if err != nil {
+				logger.Error(err, "Invalid partial-drain-at timestamp", "node", ns.Node.Name, "value", tsStr)
+				continue
+			}
+			ts = parsed
+			tsSource = "partial-drain-at"
+		} else if tsStr, ok := ns.Node.Annotations["koptimizer.io/cordoned-at"]; ok {
+			parsed, err := time.Parse(time.RFC3339, tsStr)
+			if err != nil {
+				logger.Error(err, "Invalid cordoned-at timestamp", "node", ns.Node.Name, "value", tsStr)
+				continue
+			}
+			ts = parsed
+			tsSource = "cordoned-at"
+		} else {
+			// Cordoned by us but no timestamp — cordon predates this fix.
+			// Uncordon immediately to unblock the deadlock.
+			ts = time.Time{} // zero time → always expired
+			tsSource = "missing-timestamp"
+		}
+
+		if !ts.IsZero() && time.Since(ts) < ttl {
+			continue
+		}
+
+		// TTL expired — uncordon the node and clear all annotations.
+		logger.Info("Auto-uncordoning stale cordoned node (TTL expired)",
 			"node", ns.Node.Name,
-			"partialDrainAt", tsStr,
+			"source", tsSource,
+			"cordonAge", time.Since(ts).Round(time.Second),
 			"ttl", ttl,
 		)
 
-		// Fetch fresh copy from the API server to avoid stale resourceVersion.
-		node := &corev1.Node{}
-		if err := c.client.Get(ctx, client.ObjectKeyFromObject(ns.Node), node); err != nil {
-			logger.Error(err, "Failed to fetch fresh node for uncordon", "node", ns.Node.Name)
-			continue
-		}
-		node.Spec.Unschedulable = false
-		if node.Annotations != nil {
-			delete(node.Annotations, "koptimizer.io/partial-drain-at")
-			delete(node.Annotations, "koptimizer.io/partial-drain-reason")
-		}
-
-		if err := c.client.Update(ctx, node); err != nil {
-			logger.Error(err, "Failed to auto-uncordon partially drained node", "node", ns.Node.Name)
+		if err := c.drainer.UncordonAndCleanup(ctx, ns.Node.Name); err != nil {
+			logger.Error(err, "Failed to auto-uncordon stale node", "node", ns.Node.Name)
 		} else {
 			c.state.AuditLog.Record("auto-uncordon", ns.Node.Name, "evictor",
-				fmt.Sprintf("auto-uncordoned after partial drain TTL (%s)", ttl))
+				fmt.Sprintf("auto-uncordoned stale cordon (%s, age %s, TTL %s)",
+					tsSource, time.Since(ts).Round(time.Second), ttl))
 		}
 	}
 }

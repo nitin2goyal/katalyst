@@ -236,6 +236,7 @@ func (d *Drainer) cordonNode(ctx context.Context, nodeName string) error {
 		node.Annotations = map[string]string{}
 	}
 	node.Annotations["koptimizer.io/cordoned-by"] = "koptimizer"
+	node.Annotations["koptimizer.io/cordoned-at"] = time.Now().Format(time.RFC3339)
 	return d.client.Update(ctx, node)
 }
 
@@ -248,6 +249,7 @@ func (d *Drainer) uncordonNode(ctx context.Context, nodeName string) error {
 	node.Spec.Unschedulable = false
 	if node.Annotations != nil {
 		delete(node.Annotations, "koptimizer.io/cordoned-by")
+		delete(node.Annotations, "koptimizer.io/cordoned-at")
 	}
 	return d.client.Update(ctx, node)
 }
@@ -266,6 +268,7 @@ func (d *Drainer) UncordonAndCleanup(ctx context.Context, nodeName string) error
 		delete(node.Annotations, "koptimizer.io/partial-drain-at")
 		delete(node.Annotations, "koptimizer.io/partial-drain-reason")
 		delete(node.Annotations, "koptimizer.io/cordoned-by")
+		delete(node.Annotations, "koptimizer.io/cordoned-at")
 	}
 	return d.client.Update(ctx, node)
 }
@@ -359,15 +362,18 @@ func shouldSkipPod(pod *corev1.Pod) bool {
 	if v, ok := pod.Annotations["koptimizer.io/exclude"]; ok && v == "true" {
 		return true
 	}
-	// Skip pods with local storage (EmptyDir without safe-to-evict, HostPath)
-	safeToEvict := pod.Annotations["koptimizer.io/safe-to-evict"] == "true" ||
-		pod.Annotations["cluster-autoscaler.kubernetes.io/safe-to-evict"] == "true"
+	// Skip pods with HostPath volumes (node-local state that can't be recreated).
+	// EmptyDir is NOT skipped: it's ephemeral storage that is deleted when the
+	// pod is removed anyway. Skipping EmptyDir pods during drain leaves them
+	// running on a cordoned node, preventing GKE from removing it — creating a
+	// permanent deadlock where the node is cordoned but never deleted.
 	for _, vol := range pod.Spec.Volumes {
-		if vol.EmptyDir != nil && !safeToEvict {
-			return true
-		}
 		if vol.HostPath != nil {
-			return true
+			safeToEvict := pod.Annotations["koptimizer.io/safe-to-evict"] == "true" ||
+				pod.Annotations["cluster-autoscaler.kubernetes.io/safe-to-evict"] == "true"
+			if !safeToEvict {
+				return true
+			}
 		}
 	}
 	return false
