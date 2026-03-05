@@ -333,19 +333,19 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 }
 
 // preDrainFeasibilityCheck verifies that draining a node will likely succeed
-// by checking two things:
-// 1. PDB check: are there pods that can actually be evicted?
-// 2. Capacity check: can the evictable pods fit on remaining nodes?
-// This prevents the cordon→fail→uncordon churn that blocks all scale-downs.
+// by checking that evictable pods can fit on remaining nodes.
+//
+// We intentionally skip PDB pre-checking here. Many underutilized nodes have
+// only 1-3 evictable pods that are temporarily PDB-blocked (disruptionsAllowed=0).
+// PDB budgets refresh rapidly — after other pods are rescheduled or health
+// checks pass, the budget opens. The actual DrainNode handles PDB rejection
+// gracefully (uncordons on failure), so the brief cordon attempt is safe.
+// Without this, nodes with $686/mo savings sit permanently blocked because
+// their single evictable pod has a momentarily exhausted PDB budget.
 func (c *Controller) preDrainFeasibilityCheck(ctx context.Context, snapshot *optimizer.ClusterSnapshot, nodeName string) error {
 	logger := log.FromContext(ctx).WithName("nodeautoscaler")
 
-	// 1. PDB pre-check (uses live API state)
-	if err := c.drainer.PreDrainCheck(ctx, nodeName); err != nil {
-		return err
-	}
-
-	// 2. Capacity pre-check: simulate placing this node's pods on remaining nodes.
+	// Capacity pre-check: simulate placing this node's pods on remaining nodes.
 	// Build node and pod maps from the snapshot, excluding the target node.
 	var targetNodeInfo *optimizer.NodeInfo
 	var otherNodes []*corev1.Node
