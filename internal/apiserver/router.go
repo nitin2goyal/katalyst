@@ -133,6 +133,8 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		// Actions
 		r.Get("/actions/bad-pods", actionsHandler.ListBadPods)
 		r.Post("/actions/delete-pods", actionsHandler.DeletePods)
+		r.Get("/actions/bad-replicasets", actionsHandler.ListBadReplicaSets)
+		r.Post("/actions/delete-replicasets", actionsHandler.DeleteReplicaSets)
 
 		// Autoscaler
 		r.Get("/autoscaler/status", autoscalerHandler.GetStatus)

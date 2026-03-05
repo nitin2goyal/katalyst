@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -204,4 +205,163 @@ func formatAge(now, created time.Time) string {
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
+}
+
+// --- Bad ReplicaSets ---
+
+type badRSEntry struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Reason    string `json:"reason"`
+	Replicas  int32  `json:"replicas"`
+	Ready     int32  `json:"ready"`
+	Owner     string `json:"owner"`
+	Age       string `json:"age"`
+}
+
+func (h *ActionsHandler) ListBadReplicaSets(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	var rsList appsv1.ReplicaSetList
+	if err := h.client.List(ctx, &rsList); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to list replicasets: %v", err)})
+		return
+	}
+
+	now := time.Now()
+	result := []badRSEntry{}
+	byNamespace := map[string]int{}
+	byReason := map[string]int{}
+
+	for i := range rsList.Items {
+		rs := &rsList.Items[i]
+		desired := int32(0)
+		if rs.Spec.Replicas != nil {
+			desired = *rs.Spec.Replicas
+		}
+		ready := rs.Status.ReadyReplicas
+
+		// Determine owner
+		owner := ""
+		for _, ref := range rs.OwnerReferences {
+			if ref.Kind == "Deployment" {
+				owner = ref.Name
+				break
+			}
+		}
+
+		// Classify "bad" ReplicaSets
+		reason := ""
+		switch {
+		case owner == "":
+			// Orphaned — no owning Deployment
+			reason = "Orphaned"
+		case desired == 0 && rs.Status.Replicas == 0:
+			// Stale old revision with 0 replicas
+			reason = "Stale"
+		case desired > 0 && ready == 0:
+			// Stuck — wants replicas but none are ready
+			reason = "Stuck"
+		default:
+			continue
+		}
+
+		entry := badRSEntry{
+			Name:      rs.Name,
+			Namespace: rs.Namespace,
+			Reason:    reason,
+			Replicas:  desired,
+			Ready:     ready,
+			Owner:     owner,
+			Age:       formatAge(now, rs.CreationTimestamp.Time),
+		}
+		result = append(result, entry)
+		byNamespace[rs.Namespace]++
+		byReason[reason]++
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"replicaSets": result,
+		"summary": map[string]interface{}{
+			"byNamespace": byNamespace,
+			"byReason":    byReason,
+		},
+	})
+}
+
+type deleteRSRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+type deleteRSRequest struct {
+	ReplicaSets []deleteRSRef `json:"replicaSets"`
+}
+
+func (h *ActionsHandler) DeleteReplicaSets(w http.ResponseWriter, r *http.Request) {
+	var req deleteRSRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if len(req.ReplicaSets) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no replicasets specified"})
+		return
+	}
+	if len(req.ReplicaSets) > maxDeleteBatch {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("too many replicasets: max %d per request", maxDeleteBatch)})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	deleted := 0
+	errors := []deleteError{}
+	for _, ref := range req.ReplicaSets {
+		if ref.Name == "" || ref.Namespace == "" {
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     "name and namespace are required",
+			})
+			continue
+		}
+		if protectedNamespaces[ref.Namespace] {
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     "cannot delete replicasets in protected namespace",
+			})
+			continue
+		}
+
+		rs := &appsv1.ReplicaSet{}
+		key := client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}
+		if err := h.client.Get(ctx, key, rs); err != nil {
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     fmt.Sprintf("replicaset not found: %v", err),
+			})
+			continue
+		}
+
+		if err := h.client.Delete(ctx, rs); err != nil {
+			slog.Warn("failed to delete replicaset", "name", ref.Name, "namespace", ref.Namespace, "error", err)
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     fmt.Sprintf("failed to delete replicaset: %v", err),
+			})
+		} else {
+			deleted++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"deleted": deleted,
+		"errors":  errors,
+	})
 }

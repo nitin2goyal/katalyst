@@ -1,12 +1,11 @@
 import { api, apiPost } from '../api.js';
-import { $, $$, badge, timeAgo, escapeHtml } from '../utils.js';
+import { $, $$, badge, escapeHtml } from '../utils.js';
 import { skeleton, makeSortable, confirmDialog, toast, cardHeader, attachPagination } from '../components.js';
 
 const BAD_STATUSES = [
   'CrashLoopBackOff', 'Error', 'OOMKilled', 'ImagePullBackOff', 'ErrImagePull',
   'ContainerStatusUnknown', 'Evicted', 'Failed', 'Succeeded', 'Unknown',
   'CreateContainerConfigError',
-  // Init container variants
   'Init:OOMKilled', 'Init:CrashLoopBackOff', 'Init:Error',
   'Init:ImagePullBackOff', 'Init:ErrImagePull', 'Init:ContainerStatusUnknown',
   'Init:CreateContainerConfigError',
@@ -31,19 +30,59 @@ function statusBadgeClass(status) {
   }
 }
 
-// Unique key for a pod (used in the selection Set)
-function podKey(p) {
-  return p.namespace + '/' + p.name;
+function reasonBadgeClass(reason) {
+  switch (reason) {
+    case 'Orphaned': return 'red';
+    case 'Stuck': return 'amber';
+    case 'Stale': return 'gray';
+    default: return 'gray';
+  }
 }
 
+function podKey(p) { return p.namespace + '/' + p.name; }
+function rsKey(r) { return r.namespace + '/' + r.name; }
+
+// ─── Main entry ─────────────────────────────────────────────────────────
 export async function renderActions(targetEl) {
-  targetEl.innerHTML = skeleton(5);
+  targetEl.innerHTML = `
+    <div class="tabs" id="actions-tabs">
+      <button class="tab tab-active" data-tab="bad-pods">Bad Pods</button>
+      <button class="tab" data-tab="bad-rs">Bad ReplicaSets</button>
+    </div>
+    <div id="actions-content"></div>`;
+
+  const contentEl = targetEl.querySelector('#actions-content');
+  let activeTab = 'bad-pods';
+
+  async function switchTab(tabId) {
+    activeTab = tabId;
+    contentEl.innerHTML = '';
+    if (tabId === 'bad-pods') await renderBadPods(contentEl);
+    else await renderBadReplicaSets(contentEl);
+  }
+
+  targetEl.querySelector('#actions-tabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    const tabId = btn.dataset.tab;
+    if (tabId === activeTab) return;
+    targetEl.querySelectorAll('#actions-tabs .tab').forEach(b => b.classList.remove('tab-active'));
+    btn.classList.add('tab-active');
+    switchTab(tabId);
+  });
+
+  await switchTab('bad-pods');
+}
+
+// ─── Bad Pods Tab ───────────────────────────────────────────────────────
+async function renderBadPods(contentEl) {
+  contentEl.innerHTML = skeleton(5);
 
   let data;
   try {
     data = await api('/actions/bad-pods');
   } catch (err) {
-    targetEl.innerHTML = `<div class="error-msg">Failed to load bad pods: ${escapeHtml(err.message)}</div>`;
+    contentEl.innerHTML = `<div class="error-msg">Failed to load bad pods: ${escapeHtml(err.message)}</div>`;
     return;
   }
 
@@ -53,13 +92,11 @@ export async function renderActions(targetEl) {
   const namespaces = Object.keys(byNs).sort();
   const statuses = Object.keys(byStatus).sort();
 
-  // State
   let selectedNamespaces = new Set(namespaces);
   let selectedStatuses = new Set(statuses);
   const selectedPods = new Set();
 
-  // Build page shell once — never rebuilt on filter change
-  targetEl.innerHTML = `
+  contentEl.innerHTML = `
     <div class="kpi-grid">
       <div class="kpi-card"><div class="label">Total Bad Pods</div><div class="value red">${pods.length}</div></div>
       ${namespaces.slice(0, 4).map(ns => `
@@ -129,7 +166,6 @@ export async function renderActions(targetEl) {
   makeSortable(table);
   const pag = attachPagination(table);
 
-  // --- Lightweight filter: toggle row visibility via data attributes ---
   function applyFilters() {
     const rows = $$('tbody tr', table);
     let visibleCount = 0;
@@ -141,12 +177,10 @@ export async function renderActions(targetEl) {
       row.style.display = show ? '' : 'none';
       if (show) visibleCount++;
     });
-    // Prune selectedPods that are now filtered out
     for (const key of selectedPods) {
       const row = table.querySelector(`[data-pod-key="${CSS.escape(key)}"]`);
       if (row && row.closest('tr').dataset.filtered === 'hide') selectedPods.delete(key);
     }
-    // Update count + pagination
     const countEl = document.getElementById('visible-count');
     if (countEl) countEl.textContent = visibleCount;
     if (pag) pag.refresh();
@@ -164,9 +198,7 @@ export async function renderActions(targetEl) {
   }
 
   function syncCheckboxUI() {
-    $$('.pod-check', table).forEach(cb => {
-      cb.checked = selectedPods.has(cb.dataset.podKey);
-    });
+    $$('.pod-check', table).forEach(cb => { cb.checked = selectedPods.has(cb.dataset.podKey); });
     const selectAll = $('#select-all');
     if (selectAll) {
       const visiblePods = pods.filter(p => selectedNamespaces.has(p.namespace) && selectedStatuses.has(p.status));
@@ -174,19 +206,14 @@ export async function renderActions(targetEl) {
     }
   }
 
-  // Select-all checkbox
   $('#select-all')?.addEventListener('change', (e) => {
     const visiblePods = pods.filter(p => selectedNamespaces.has(p.namespace) && selectedStatuses.has(p.status));
-    if (e.target.checked) {
-      visiblePods.forEach(p => selectedPods.add(podKey(p)));
-    } else {
-      visiblePods.forEach(p => selectedPods.delete(podKey(p)));
-    }
+    if (e.target.checked) visiblePods.forEach(p => selectedPods.add(podKey(p)));
+    else visiblePods.forEach(p => selectedPods.delete(podKey(p)));
     syncCheckboxUI();
     updatePurgeBtn();
   });
 
-  // Individual checkbox
   table.addEventListener('change', (e) => {
     if (!e.target.classList.contains('pod-check')) return;
     const key = e.target.dataset.podKey;
@@ -199,15 +226,12 @@ export async function renderActions(targetEl) {
     updatePurgeBtn();
   });
 
-  // Purge button
   $('#purge-btn')?.addEventListener('click', () => {
     if (selectedPods.size === 0) return;
     const keyToPod = new Map();
     pods.forEach(p => keyToPod.set(podKey(p), p));
     const selected = [];
-    for (const key of selectedPods) {
-      if (keyToPod.has(key)) selected.push(keyToPod.get(key));
-    }
+    for (const key of selectedPods) { if (keyToPod.has(key)) selected.push(keyToPod.get(key)); }
     if (selected.length === 0) return;
 
     const nsSummary = {};
@@ -226,7 +250,6 @@ export async function renderActions(targetEl) {
         document.body.appendChild(overlay);
 
         try {
-          // Batch into chunks of 500 to stay within server limits
           const allPods = selected.map(p => ({ name: p.name, namespace: p.namespace }));
           const BATCH = 500;
           let totalDeleted = 0;
@@ -242,35 +265,7 @@ export async function renderActions(targetEl) {
             if (res.errors) allErrors = allErrors.concat(res.errors);
           }
           overlay.remove();
-
-          const errCount = allErrors.length;
-          const deleted = totalDeleted;
-          const result = { errors: allErrors };
-
-          const resultOverlay = document.createElement('div');
-          resultOverlay.className = 'modal-overlay';
-          const errDetail = errCount > 0
-            ? `<div style="margin-top:12px;font-size:12px;color:var(--red)">${result.errors.map(e => `<div>${escapeHtml(e.namespace)}/${escapeHtml(e.name)}: ${escapeHtml(e.error)}</div>`).join('')}</div>`
-            : '';
-          resultOverlay.innerHTML = `<div class="modal" style="min-width:360px">
-            <div class="modal-header"><h3>Purge Complete</h3><button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button></div>
-            <div class="modal-body">
-              <div style="display:flex;gap:16px;margin-bottom:12px">
-                <div class="kpi-card" style="flex:1;animation:none;opacity:1"><div class="label">Deleted</div><div class="value green">${deleted}</div></div>
-                <div class="kpi-card" style="flex:1;animation:none;opacity:1"><div class="label">Failed</div><div class="value ${errCount > 0 ? 'red' : ''}">${errCount}</div></div>
-              </div>
-              ${errDetail}
-            </div>
-            <div class="modal-actions"><button class="btn btn-blue" id="purge-done-btn">Done</button></div>
-          </div>`;
-          document.body.appendChild(resultOverlay);
-          resultOverlay.querySelector('#purge-done-btn').onclick = () => {
-            resultOverlay.remove();
-            renderActions(targetEl);
-          };
-          resultOverlay.onclick = (e) => {
-            if (e.target === resultOverlay) { resultOverlay.remove(); renderActions(targetEl); }
-          };
+          showPurgeResult(totalDeleted, allErrors, () => renderBadPods(contentEl));
         } catch (err) {
           overlay.remove();
           toast('Delete failed: ' + err.message, 'error');
@@ -279,31 +274,265 @@ export async function renderActions(targetEl) {
     );
   });
 
-  // Namespace filter handlers — only toggle visibility, never rebuild DOM
-  function syncNsCheckboxes() {
-    $$('#ns-checks input').forEach(cb => { cb.checked = selectedNamespaces.has(cb.dataset.ns); });
-  }
+  function syncNsCheckboxes() { $$('#ns-checks input').forEach(cb => { cb.checked = selectedNamespaces.has(cb.dataset.ns); }); }
   $('#ns-all')?.addEventListener('click', () => { selectedNamespaces = new Set(namespaces); syncNsCheckboxes(); applyFilters(); });
   $('#ns-none')?.addEventListener('click', () => { selectedNamespaces = new Set(); syncNsCheckboxes(); applyFilters(); });
   $$('#ns-checks input').forEach(cb => {
     cb.addEventListener('change', () => {
-      const ns = cb.dataset.ns;
-      if (cb.checked) selectedNamespaces.add(ns); else selectedNamespaces.delete(ns);
+      if (cb.checked) selectedNamespaces.add(cb.dataset.ns); else selectedNamespaces.delete(cb.dataset.ns);
       applyFilters();
     });
   });
 
-  // Status filter handlers
-  function syncStCheckboxes() {
-    $$('#st-checks input').forEach(cb => { cb.checked = selectedStatuses.has(cb.dataset.status); });
-  }
+  function syncStCheckboxes() { $$('#st-checks input').forEach(cb => { cb.checked = selectedStatuses.has(cb.dataset.status); }); }
   $('#st-all')?.addEventListener('click', () => { selectedStatuses = new Set(statuses); syncStCheckboxes(); applyFilters(); });
   $('#st-none')?.addEventListener('click', () => { selectedStatuses = new Set(); syncStCheckboxes(); applyFilters(); });
   $$('#st-checks input').forEach(cb => {
     cb.addEventListener('change', () => {
-      const st = cb.dataset.status;
-      if (cb.checked) selectedStatuses.add(st); else selectedStatuses.delete(st);
+      if (cb.checked) selectedStatuses.add(cb.dataset.status); else selectedStatuses.delete(cb.dataset.status);
       applyFilters();
     });
   });
+}
+
+// ─── Bad ReplicaSets Tab ────────────────────────────────────────────────
+async function renderBadReplicaSets(contentEl) {
+  contentEl.innerHTML = skeleton(5);
+
+  let data;
+  try {
+    data = await api('/actions/bad-replicasets');
+  } catch (err) {
+    contentEl.innerHTML = `<div class="error-msg">Failed to load bad replicasets: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  const rsList = data.replicaSets || [];
+  const byNs = data.summary?.byNamespace || {};
+  const byReason = data.summary?.byReason || {};
+  const namespaces = Object.keys(byNs).sort();
+  const reasons = Object.keys(byReason).sort();
+
+  let selectedNamespaces = new Set(namespaces);
+  let selectedReasons = new Set(reasons);
+  const selectedRS = new Set();
+
+  contentEl.innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="label">Total Bad ReplicaSets</div><div class="value red">${rsList.length}</div></div>
+      ${reasons.map(r => `
+        <div class="kpi-card"><div class="label">${escapeHtml(r)}</div><div class="value">${byReason[r]}</div></div>
+      `).join('')}
+    </div>
+
+    <div class="card">
+      ${cardHeader('Filters')}
+      <div style="padding: 1rem; display: flex; gap: 2rem; flex-wrap: wrap;">
+        <div>
+          <strong>Namespaces</strong>
+          <div style="margin-top: 0.5rem;">
+            <button class="btn btn-gray btn-sm" id="rs-ns-all">All</button>
+            <button class="btn btn-gray btn-sm" id="rs-ns-none">None</button>
+          </div>
+          <div id="rs-ns-checks" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+            ${namespaces.map(ns => `
+              <label style="display:flex;align-items:center;gap:0.25rem;cursor:pointer;">
+                <input type="checkbox" data-ns="${escapeHtml(ns)}" checked>
+                ${escapeHtml(ns)} <span class="badge badge-gray">${byNs[ns]}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <div>
+          <strong>Reason</strong>
+          <div style="margin-top: 0.5rem;">
+            <button class="btn btn-gray btn-sm" id="rs-reason-all">All</button>
+            <button class="btn btn-gray btn-sm" id="rs-reason-none">None</button>
+          </div>
+          <div id="rs-reason-checks" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+            ${reasons.map(r => `
+              <label style="display:flex;align-items:center;gap:0.25rem;cursor:pointer;">
+                <input type="checkbox" data-reason="${escapeHtml(r)}" checked>
+                ${badge(r, reasonBadgeClass(r))} <span class="badge badge-gray">${byReason[r]}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      ${cardHeader(`Bad ReplicaSets (<span id="rs-visible-count">${rsList.length}</span>)`,
+        `<button class="btn btn-red btn-sm" id="rs-purge-btn" disabled>Purge Selected</button>`
+      )}
+      <div class="table-wrap"><table id="bad-rs-table">
+        <thead><tr>
+          <th style="width:2rem"><input type="checkbox" id="rs-select-all"></th>
+          <th>Name</th><th>Namespace</th><th>Reason</th><th>Owner</th><th>Replicas</th><th>Ready</th><th>Age</th>
+        </tr></thead>
+        <tbody>
+          ${rsList.map((rs, i) => `<tr data-idx="${i}" data-ns="${escapeHtml(rs.namespace)}" data-reason="${escapeHtml(rs.reason)}">
+            <td><input type="checkbox" class="rs-check" data-rs-key="${escapeHtml(rsKey(rs))}"></td>
+            <td>${escapeHtml(rs.name)}</td>
+            <td>${escapeHtml(rs.namespace)}</td>
+            <td>${badge(rs.reason, reasonBadgeClass(rs.reason))}</td>
+            <td>${escapeHtml(rs.owner || '-')}</td>
+            <td>${rs.replicas}</td>
+            <td>${rs.ready}</td>
+            <td>${escapeHtml(rs.age)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>`;
+
+  const table = $('#bad-rs-table');
+  makeSortable(table);
+  const pag = attachPagination(table);
+
+  function applyFilters() {
+    const rows = $$('tbody tr', table);
+    let visibleCount = 0;
+    rows.forEach(row => {
+      const ns = row.dataset.ns;
+      const reason = row.dataset.reason;
+      const show = selectedNamespaces.has(ns) && selectedReasons.has(reason);
+      row.dataset.filtered = show ? '' : 'hide';
+      row.style.display = show ? '' : 'none';
+      if (show) visibleCount++;
+    });
+    for (const key of selectedRS) {
+      const row = table.querySelector(`[data-rs-key="${CSS.escape(key)}"]`);
+      if (row && row.closest('tr').dataset.filtered === 'hide') selectedRS.delete(key);
+    }
+    const countEl = document.getElementById('rs-visible-count');
+    if (countEl) countEl.textContent = visibleCount;
+    if (pag) pag.refresh();
+    updatePurgeBtn();
+    syncCheckboxUI();
+  }
+
+  function updatePurgeBtn() {
+    const btn = $('#rs-purge-btn');
+    if (btn) {
+      const count = selectedRS.size;
+      btn.textContent = count > 0 ? `Purge ${count} RS${count > 1 ? 's' : ''}` : 'Purge Selected';
+      btn.disabled = count === 0;
+    }
+  }
+
+  function syncCheckboxUI() {
+    $$('.rs-check', table).forEach(cb => { cb.checked = selectedRS.has(cb.dataset.rsKey); });
+    const selectAll = $('#rs-select-all');
+    if (selectAll) {
+      const visible = rsList.filter(r => selectedNamespaces.has(r.namespace) && selectedReasons.has(r.reason));
+      selectAll.checked = visible.length > 0 && visible.every(r => selectedRS.has(rsKey(r)));
+    }
+  }
+
+  $('#rs-select-all')?.addEventListener('change', (e) => {
+    const visible = rsList.filter(r => selectedNamespaces.has(r.namespace) && selectedReasons.has(r.reason));
+    if (e.target.checked) visible.forEach(r => selectedRS.add(rsKey(r)));
+    else visible.forEach(r => selectedRS.delete(rsKey(r)));
+    syncCheckboxUI();
+    updatePurgeBtn();
+  });
+
+  table.addEventListener('change', (e) => {
+    if (!e.target.classList.contains('rs-check')) return;
+    const key = e.target.dataset.rsKey;
+    if (e.target.checked) selectedRS.add(key); else selectedRS.delete(key);
+    const selectAll = $('#rs-select-all');
+    if (selectAll) {
+      const visible = rsList.filter(r => selectedNamespaces.has(r.namespace) && selectedReasons.has(r.reason));
+      selectAll.checked = visible.length > 0 && visible.every(r => selectedRS.has(rsKey(r)));
+    }
+    updatePurgeBtn();
+  });
+
+  $('#rs-purge-btn')?.addEventListener('click', () => {
+    if (selectedRS.size === 0) return;
+    const keyToRS = new Map();
+    rsList.forEach(r => keyToRS.set(rsKey(r), r));
+    const selected = [];
+    for (const key of selectedRS) { if (keyToRS.has(key)) selected.push(keyToRS.get(key)); }
+    if (selected.length === 0) return;
+
+    const nsSummary = {};
+    selected.forEach(r => { nsSummary[r.namespace] = (nsSummary[r.namespace] || 0) + 1; });
+    const detail = Object.entries(nsSummary).map(([ns, c]) => `${ns}: ${c}`).join(', ');
+    confirmDialog(
+      `Delete <strong>${selected.length}</strong> ReplicaSet${selected.length > 1 ? 's' : ''}?<br><br>${detail}`,
+      async () => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'cursor:wait;';
+        overlay.innerHTML = `<div class="modal" style="text-align:center;min-width:320px">
+          <div class="loading" style="padding:24px 0;font-size:14px;font-weight:500">Deleting ${selected.length} ReplicaSet${selected.length > 1 ? 's' : ''}...</div>
+        </div>`;
+        document.body.appendChild(overlay);
+
+        try {
+          const allRS = selected.map(r => ({ name: r.name, namespace: r.namespace }));
+          const BATCH = 500;
+          let totalDeleted = 0;
+          let allErrors = [];
+          for (let i = 0; i < allRS.length; i += BATCH) {
+            const batch = allRS.slice(i, i + BATCH);
+            const res = await apiPost('/actions/delete-replicasets', { replicaSets: batch });
+            totalDeleted += res.deleted || 0;
+            if (res.errors) allErrors = allErrors.concat(res.errors);
+          }
+          overlay.remove();
+          showPurgeResult(totalDeleted, allErrors, () => renderBadReplicaSets(contentEl));
+        } catch (err) {
+          overlay.remove();
+          toast('Delete failed: ' + err.message, 'error');
+        }
+      }
+    );
+  });
+
+  function syncNsCheckboxes() { $$('#rs-ns-checks input').forEach(cb => { cb.checked = selectedNamespaces.has(cb.dataset.ns); }); }
+  $('#rs-ns-all')?.addEventListener('click', () => { selectedNamespaces = new Set(namespaces); syncNsCheckboxes(); applyFilters(); });
+  $('#rs-ns-none')?.addEventListener('click', () => { selectedNamespaces = new Set(); syncNsCheckboxes(); applyFilters(); });
+  $$('#rs-ns-checks input').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) selectedNamespaces.add(cb.dataset.ns); else selectedNamespaces.delete(cb.dataset.ns);
+      applyFilters();
+    });
+  });
+
+  function syncReasonCheckboxes() { $$('#rs-reason-checks input').forEach(cb => { cb.checked = selectedReasons.has(cb.dataset.reason); }); }
+  $('#rs-reason-all')?.addEventListener('click', () => { selectedReasons = new Set(reasons); syncReasonCheckboxes(); applyFilters(); });
+  $('#rs-reason-none')?.addEventListener('click', () => { selectedReasons = new Set(); syncReasonCheckboxes(); applyFilters(); });
+  $$('#rs-reason-checks input').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) selectedReasons.add(cb.dataset.reason); else selectedReasons.delete(cb.dataset.reason);
+      applyFilters();
+    });
+  });
+}
+
+// ─── Shared: Purge result modal ─────────────────────────────────────────
+function showPurgeResult(deleted, allErrors, onDone) {
+  const errCount = allErrors.length;
+  const resultOverlay = document.createElement('div');
+  resultOverlay.className = 'modal-overlay';
+  const errDetail = errCount > 0
+    ? `<div style="margin-top:12px;font-size:12px;color:var(--red)">${allErrors.map(e => `<div>${escapeHtml(e.namespace)}/${escapeHtml(e.name)}: ${escapeHtml(e.error)}</div>`).join('')}</div>`
+    : '';
+  resultOverlay.innerHTML = `<div class="modal" style="min-width:360px">
+    <div class="modal-header"><h3>Purge Complete</h3><button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button></div>
+    <div class="modal-body">
+      <div style="display:flex;gap:16px;margin-bottom:12px">
+        <div class="kpi-card" style="flex:1;animation:none;opacity:1"><div class="label">Deleted</div><div class="value green">${deleted}</div></div>
+        <div class="kpi-card" style="flex:1;animation:none;opacity:1"><div class="label">Failed</div><div class="value ${errCount > 0 ? 'red' : ''}">${errCount}</div></div>
+      </div>
+      ${errDetail}
+    </div>
+    <div class="modal-actions"><button class="btn btn-blue" id="purge-done-btn">Done</button></div>
+  </div>`;
+  document.body.appendChild(resultOverlay);
+  resultOverlay.querySelector('#purge-done-btn').onclick = () => { resultOverlay.remove(); onDone(); };
+  resultOverlay.onclick = (e) => { if (e.target === resultOverlay) { resultOverlay.remove(); onDone(); } };
 }
