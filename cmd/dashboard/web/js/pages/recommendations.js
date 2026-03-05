@@ -19,7 +19,6 @@ export async function renderRecsTab(targetEl) {
       api('/config').catch(() => ({})),
     ]);
     const autoApproveRightsizer = (configData.autoApprove || {}).rightsizer ?? false;
-    const autoApproveEvictor = (configData.autoApprove || {}).evictor ?? false;
     let recList = toArray(recs, 'recommendations');
     _isComputed = false;
     // Fallback: compute from live node data when API returns empty
@@ -47,10 +46,6 @@ export async function renderRecsTab(targetEl) {
         r.status = 'approved';
         r._autoApproved = true;
       }
-      if (autoApproveEvictor && (t === 'consolidation' || t === 'eviction')) {
-        r.status = 'approved';
-        r._autoApproved = true;
-      }
     });
     const pending = recList.filter(r => (r.status || r.Status) === 'pending').length;
     const approved = recList.filter(r => (r.status || r.Status) === 'approved').length;
@@ -73,7 +68,7 @@ export async function renderRecsTab(targetEl) {
         <div class="kpi-card"><div class="label">Est. Total Savings</div><div class="value green">${fmt$(totalSavings)}</div><div class="sub">if all pending approved</div></div>
       </div>
       ${_isComputed ? '<div class="info-banner">These recommendations are computed from live cluster data. Switch to OPTIMIZE mode to enable automatic execution.</div>' : ''}
-      ${(autoApproveRightsizer || autoApproveEvictor) ? '<div class="info-banner" style="border-color:var(--green)">Auto-approve is ON for: ' + [autoApproveRightsizer ? 'Rightsizing (once per workload)' : '', autoApproveEvictor ? 'Consolidation (once per node)' : ''].filter(Boolean).join(', ') + '.</div>' : ''}
+      ${autoApproveRightsizer ? '<div class="info-banner" style="border-color:var(--green)">Auto-approve is ON for: Rightsizing (once per workload).</div>' : ''}
       <details class="debug-panel" id="debug-panel" style="margin-bottom:16px">
         <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);padding:8px 0">Data Validation (click to expand)</summary>
         <div class="card" id="debug-panel-content" style="font-size:12px;line-height:1.8;padding:16px;margin-top:8px">

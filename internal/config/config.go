@@ -19,13 +19,10 @@ type Config struct {
 	ReconcileInterval time.Duration `yaml:"reconcileInterval"`
 
 	CostMonitor    CostMonitorConfig    `yaml:"costMonitor"`
-	NodeAutoscaler NodeAutoscalerConfig `yaml:"nodeAutoscaler"`
 	NodeGroupMgr   NodeGroupMgrConfig   `yaml:"nodegroupManager"`
 	Rightsizer     RightsizingConfig    `yaml:"rightsizer"`
 	WorkloadScaler WorkloadScalerConfig `yaml:"workloadScaler"`
-	Evictor        EvictorConfig        `yaml:"evictor"`
 	PodPurger      PodPurgerConfig      `yaml:"podPurger"`
-	Rebalancer     RebalancerConfig     `yaml:"rebalancer"`
 	GPU            GPUConfig            `yaml:"gpu"`
 	Spot           SpotConfig           `yaml:"spot"`
 	Hibernation    HibernationConfig    `yaml:"hibernation"`
@@ -41,18 +38,6 @@ type Config struct {
 type CostMonitorConfig struct {
 	Enabled        bool          `yaml:"enabled"`
 	UpdateInterval time.Duration `yaml:"updateInterval"`
-}
-
-type NodeAutoscalerConfig struct {
-	Enabled            bool          `yaml:"enabled"`
-	NodeTemplatesEnabled bool        `yaml:"nodeTemplatesEnabled"`
-	DryRun             bool          `yaml:"dryRun"`
-	ScanInterval       time.Duration `yaml:"scanInterval"`
-	ScaleUpThreshold   float64       `yaml:"scaleUpThreshold"`   // CPU util % to trigger scale up
-	ScaleDownThreshold float64       `yaml:"scaleDownThreshold"` // CPU util % to trigger scale down
-	ScaleDownDelay     time.Duration `yaml:"scaleDownDelay"`     // Wait before scaling down
-	MaxScaleUpNodes    int           `yaml:"maxScaleUpNodes"`
-	MaxScaleDownNodes  int           `yaml:"maxScaleDownNodes"`
 }
 
 type NodeGroupMgrConfig struct {
@@ -93,37 +78,10 @@ type WorkloadScalerConfig struct {
 	ExcludeNamespaces  []string `yaml:"excludeNamespaces"`
 }
 
-type EvictorConfig struct {
-	Enabled                bool          `yaml:"enabled"`
-	AutoApprove            bool          `yaml:"autoApprove"` // Auto-approve consolidation recommendations (once per node)
-	UtilizationThreshold   float64       `yaml:"utilizationThreshold"` // Below this, node is underutilized
-	ConsolidationInterval  time.Duration `yaml:"consolidationInterval"`
-	MaxConcurrentEvictions int           `yaml:"maxConcurrentEvictions"`
-	DrainTimeout           time.Duration `yaml:"drainTimeout"`
-	PartialDrainTTL        time.Duration `yaml:"partialDrainTTL"` // Auto-uncordon partially drained nodes after this duration (default 30m)
-	DryRun                 bool          `yaml:"dryRun"`
-}
-
 type PodPurgerConfig struct {
 	Enabled      bool          `yaml:"enabled"`
 	PollInterval time.Duration `yaml:"pollInterval"`
 	MinPodAge    time.Duration `yaml:"minPodAge"`
-}
-
-type RebalancerConfig struct {
-	Enabled                bool          `yaml:"enabled"`
-	DryRun                 bool          `yaml:"dryRun"`
-	Schedule               string        `yaml:"schedule"` // Cron expression
-	ImbalanceThresholdPct  float64       `yaml:"imbalanceThresholdPct"` // Min imbalance % to trigger rebalance (default 40)
-	TargetUtilizationPct   float64       `yaml:"targetUtilizationPct"`  // Pack target nodes to this % of requests (default 95)
-	ConsolidationInterval  time.Duration `yaml:"consolidationInterval"` // How often to run consolidation (default 60s)
-	MaxEvacuatePerCycle    int           `yaml:"maxEvacuatePerCycle"`   // Max nodes to evacuate per cycle (default 2)
-	RescheduleTimeout      time.Duration `yaml:"rescheduleTimeout"`    // How long to wait for pods to reschedule after eviction (default 60s)
-	BusyRedistribution struct {
-		Enabled                bool    `yaml:"enabled"`
-		OverloadedThresholdPct float64 `yaml:"overloadedThresholdPct"`
-		TargetUtilizationPct   float64 `yaml:"targetUtilizationPct"`
-	} `yaml:"busyRedistribution"`
 }
 
 type GPUConfig struct {

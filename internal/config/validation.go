@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"strings"
-	"time"
 )
 
 // ValidationError collects multiple validation errors.
@@ -39,35 +38,6 @@ func ValidateDetailed(cfg *Config) *ValidationError {
 	case "aws", "gcp", "azure", "":
 	default:
 		ve.Add(fmt.Sprintf("invalid cloud provider %q", cfg.CloudProvider))
-	}
-
-	// Node autoscaler
-	if cfg.NodeAutoscaler.Enabled {
-		if cfg.NodeAutoscaler.ScaleUpThreshold <= 0 || cfg.NodeAutoscaler.ScaleUpThreshold > 100 {
-			ve.Add("nodeAutoscaler.scaleUpThreshold must be between 0 and 100")
-		}
-		if cfg.NodeAutoscaler.ScaleDownThreshold <= 0 || cfg.NodeAutoscaler.ScaleDownThreshold > 100 {
-			ve.Add("nodeAutoscaler.scaleDownThreshold must be between 0 and 100")
-		}
-		if cfg.NodeAutoscaler.ScaleUpThreshold <= cfg.NodeAutoscaler.ScaleDownThreshold {
-			ve.Add("scaleUpThreshold must be greater than scaleDownThreshold")
-		}
-		if cfg.NodeAutoscaler.MaxScaleDownNodes < 1 {
-			ve.Add("nodeAutoscaler.maxScaleDownNodes must be >= 1")
-		}
-	}
-
-	// Evictor
-	if cfg.Evictor.Enabled {
-		if cfg.Evictor.UtilizationThreshold <= 0 || cfg.Evictor.UtilizationThreshold > 100 {
-			ve.Add("evictor.utilizationThreshold must be between 0 and 100")
-		}
-		if cfg.Evictor.MaxConcurrentEvictions < 1 {
-			ve.Add("evictor.maxConcurrentEvictions must be >= 1")
-		}
-		if cfg.Evictor.DrainTimeout > 0 && cfg.Evictor.DrainTimeout < 30*time.Second {
-			ve.Add("evictor.drainTimeout must be >= 30s when set")
-		}
 	}
 
 	// Rightsizer

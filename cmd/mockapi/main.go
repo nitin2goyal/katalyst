@@ -15,17 +15,14 @@ import (
 
 var currentMode = "recommend"
 var controllerStates = map[string]bool{
-	"costMonitor": true, "nodeAutoscaler": true, "nodegroupMgr": true,
-	"rightsizer": true, "workloadScaler": true, "evictor": true,
-	"rebalancer": true, "gpu": true, "commitments": true, "aiGate": false,
+	"costMonitor": true, "nodegroupMgr": true,
+	"rightsizer": true, "workloadScaler": true,
+	"gpu": true, "commitments": true, "aiGate": false,
 	"podPurger": false,
 }
-var dryRunStates = map[string]bool{
-	"nodeAutoscaler": true, "evictor": true, "rebalancer": true,
-}
+var dryRunStates = map[string]bool{}
 var autoApproveStates = map[string]bool{
 	"rightsizer": false,
-	"evictor":    false,
 }
 
 var mockChannels = []map[string]any{
@@ -375,9 +372,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 var validControllers = map[string]bool{
-	"costMonitor": true, "nodeAutoscaler": true, "evictor": true,
-	"workloadScaler": true, "rebalancer": true, "gpuReclaimer": true,
-	"spotManager": true, "scavenger": true,
+	"costMonitor": true, "workloadScaler": true,
+	"gpuReclaimer": true, "spotManager": true, "scavenger": true,
 }
 
 func validController(name string) bool {
@@ -412,12 +408,9 @@ func clusterHealth() any {
 		"mode":   currentMode,
 		"controllers": map[string]string{
 			"costMonitor":    "healthy",
-			"nodeAutoscaler": "healthy",
 			"nodegroupMgr":   "healthy",
 			"rightsizer":     "healthy",
 			"workloadScaler": "healthy",
-			"evictor":        "healthy",
-			"rebalancer":     "healthy",
 			"gpu":            "healthy",
 			"commitments":    "healthy",
 			"aiGate":         "disabled",

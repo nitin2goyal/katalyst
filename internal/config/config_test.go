@@ -16,12 +16,6 @@ func TestDefaultConfig_ReturnsExpectedDefaults(t *testing.T) {
 	if cfg.ReconcileInterval != 60*time.Second {
 		t.Errorf("ReconcileInterval = %v, want %v", cfg.ReconcileInterval, 60*time.Second)
 	}
-	if cfg.NodeAutoscaler.ScaleUpThreshold != 98.0 {
-		t.Errorf("ScaleUpThreshold = %v, want %v", cfg.NodeAutoscaler.ScaleUpThreshold, 98.0)
-	}
-	if cfg.NodeAutoscaler.ScaleDownThreshold != 50.0 {
-		t.Errorf("ScaleDownThreshold = %v, want %v", cfg.NodeAutoscaler.ScaleDownThreshold, 50.0)
-	}
 	if cfg.Rightsizer.OOMBumpMultiplier != 2.5 {
 		t.Errorf("OOMBumpMultiplier = %v, want %v", cfg.Rightsizer.OOMBumpMultiplier, 2.5)
 	}
@@ -30,9 +24,6 @@ func TestDefaultConfig_ReturnsExpectedDefaults(t *testing.T) {
 	}
 	if cfg.CostMonitor.Enabled != true {
 		t.Error("CostMonitor.Enabled = false, want true")
-	}
-	if cfg.NodeAutoscaler.Enabled != true {
-		t.Error("NodeAutoscaler.Enabled = false, want true")
 	}
 	if cfg.Rightsizer.Enabled != true {
 		t.Error("Rightsizer.Enabled = false, want true")
@@ -115,12 +106,6 @@ region: eastus
 	}
 
 	// Default fields should still be present
-	if cfg.NodeAutoscaler.ScaleUpThreshold != 98.0 {
-		t.Errorf("ScaleUpThreshold = %v, want default %v", cfg.NodeAutoscaler.ScaleUpThreshold, 98.0)
-	}
-	if cfg.NodeAutoscaler.ScaleDownThreshold != 50.0 {
-		t.Errorf("ScaleDownThreshold = %v, want default %v", cfg.NodeAutoscaler.ScaleDownThreshold, 30.0)
-	}
 	if cfg.Rightsizer.OOMBumpMultiplier != 2.5 {
 		t.Errorf("OOMBumpMultiplier = %v, want default %v", cfg.Rightsizer.OOMBumpMultiplier, 2.5)
 	}
@@ -218,41 +203,6 @@ func TestValidate_MissingRegion(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("Validate() with missing region expected error, got nil")
-	}
-}
-
-func TestValidate_ScaleUpThresholdLessThanOrEqualToScaleDown(t *testing.T) {
-	tests := []struct {
-		name      string
-		scaleUp   float64
-		scaleDown float64
-	}{
-		{
-			name:      "equal thresholds",
-			scaleUp:   50.0,
-			scaleDown: 50.0,
-		},
-		{
-			name:      "scaleUp less than scaleDown",
-			scaleUp:   20.0,
-			scaleDown: 60.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := DefaultConfig()
-			cfg.CloudProvider = "aws"
-			cfg.Region = "us-east-1"
-			cfg.NodeAutoscaler.ScaleUpThreshold = tt.scaleUp
-			cfg.NodeAutoscaler.ScaleDownThreshold = tt.scaleDown
-
-			err := cfg.Validate()
-			if err == nil {
-				t.Errorf("Validate() with scaleUp=%.1f, scaleDown=%.1f expected error, got nil",
-					tt.scaleUp, tt.scaleDown)
-			}
-		})
 	}
 }
 

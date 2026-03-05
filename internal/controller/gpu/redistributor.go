@@ -39,7 +39,7 @@ func NewRedistributor(c client.Client, cfg *config.Config, nodeLock *state.NodeL
 }
 
 const (
-	maxRedistributePerCycle = 5
+	maxRedistributePerCycle = 20
 	intuitionNamespace      = "intuition"
 )
 
@@ -112,11 +112,11 @@ func (r *Redistributor) analyzeEvacuate(snapshot *optimizer.ClusterSnapshot) []o
 
 // analyzeAttract finds CPU pods on CPU nodes that could be moved to scavenging GPU nodes with active GPU workloads.
 func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []optimizer.Recommendation {
-	// Compute total available headroom on scavenging GPU nodes that have active GPU pods
+	// Compute total available headroom on scavenging-labeled GPU nodes
 	var totalHeadroomMillis int64
 	for i := range snapshot.Nodes {
 		node := &snapshot.Nodes[i]
-		if !node.IsGPUNode || !nodeHasGPUPods(node) {
+		if !node.IsGPUNode {
 			continue
 		}
 		if node.Node.Labels == nil {
@@ -269,13 +269,36 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 	// Find owning Deployment for surge-then-evict (maxUnavailable=0)
 	deploy, originalReplicas, err := r.findOwningDeployment(ctx, pod)
 	if err != nil || deploy == nil {
-		// No Deployment owner (DaemonSet, standalone pod, etc.) — skip, don't risk downtime
-		r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
-			fmt.Sprintf("pod %s/%s has no Deployment owner, skipping (maxUnavailable=0)", namespace, podName))
+		// No Deployment owner — check if it's a Job/CronJob pod (safe to evict directly)
+		isJobPod := false
+		for _, ref := range pod.OwnerReferences {
+			if ref.Kind == "Job" {
+				isJobPod = true
+				break
+			}
+		}
+		if !isJobPod {
+			r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
+				fmt.Sprintf("pod %s/%s has no Deployment/Job owner, skipping", namespace, podName))
+			return nil
+		}
+		// Job pods: evict directly — the Job controller will reschedule
+		if err := evictPod(ctx, r.client, pod); err != nil {
+			return err
+		}
+		intmetrics.EvictionsTotal.Inc()
+		auditAction := "gpu-redistribute-to-gpu"
+		if action == "evacuate-from-gpu" {
+			auditAction = "gpu-redistribute-evacuate"
+		}
+		r.auditLog.Record(auditAction, nodeName, "gpu-redistributor",
+			fmt.Sprintf("evicted Job pod %s/%s from %s", namespace, podName, nodeName))
+		logger.Info("Redistributed Job pod via direct eviction",
+			"pod", podName, "namespace", namespace, "node", nodeName, "action", action)
 		return nil
 	}
 
-	// Step 1: Surge — scale up Deployment by 1
+	// Deployment-owned pods: surge-then-evict (maxUnavailable=0)
 	surgedReplicas := originalReplicas + 1
 	if err := r.scaleDeployment(ctx, deploy, surgedReplicas); err != nil {
 		r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
@@ -286,10 +309,8 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 		"deployment", deploy.Name, "namespace", namespace,
 		"from", originalReplicas, "to", surgedReplicas)
 
-	// Step 2: Wait for the new replica to become Ready (up to 2 minutes)
 	ready, err := r.waitForReady(ctx, deploy, surgedReplicas, 2*time.Minute)
 	if !ready || err != nil {
-		// Rollback: scale back down
 		logger.Error(err, "New replica not ready in time, rolling back surge",
 			"deployment", deploy.Name)
 		_ = r.scaleDeployment(ctx, deploy, originalReplicas)
@@ -298,7 +319,6 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 		return nil
 	}
 
-	// Step 3: Evict the old pod
 	if err := evictPod(ctx, r.client, pod); err != nil {
 		logger.Error(err, "Failed to evict pod after surge, rolling back",
 			"pod", podName, "namespace", namespace)
@@ -306,10 +326,6 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 		return err
 	}
 
-	// Step 4: Scale back to original replica count
-	// The eviction removed one pod, and we had surgedReplicas running.
-	// After eviction: surgedReplicas-1 = originalReplicas pods remain.
-	// Scale back to originalReplicas so the controller doesn't recreate.
 	if err := r.scaleDeployment(ctx, deploy, originalReplicas); err != nil {
 		logger.Error(err, "Failed to scale back after eviction (will self-correct)",
 			"deployment", deploy.Name, "target", originalReplicas)

@@ -91,11 +91,11 @@ var (
 		Help:      "Monthly wasted cost per underutilized commitment",
 	}, []string{"id", "type"})
 
-	// Evictor metrics
+	// Eviction metrics
 	EvictionsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "koptimizer",
 		Name:      "evictions_total",
-		Help:      "Total pod evictions for consolidation",
+		Help:      "Total pod evictions",
 	})
 
 	NodesConsolidated = promauto.NewCounter(prometheus.CounterOpts{

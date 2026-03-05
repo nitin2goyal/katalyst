@@ -251,8 +251,6 @@ func main() {
 	clusterState.SetRESTConfig(mgr.GetConfig())
 
 	// One-shot cleanup: uncordon any nodes previously cordoned by koptimizer.
-	// This ensures nodes are not left in a "Draining" state if the evictor
-	// controller was disabled between restarts.
 	{
 		var nodeList corev1.NodeList
 		if err := directClient.List(context.Background(), &nodeList); err != nil {

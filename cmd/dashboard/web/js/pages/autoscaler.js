@@ -128,12 +128,6 @@ async function renderStatus(targetEl) {
       ${cardHeader('Configuration')}
       <div style="padding: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
         ${modeBadge(cfg.mode)}
-        ${configBadge('Evictor', cfg.evictorEnabled, cfg.evictorDryRun)}
-        ${configBadge('Node Autoscaler', cfg.nodeAutoscalerEnabled, cfg.nodeAutoscalerDryRun)}
-        ${badge('Max Evictions: ' + (cfg.maxConcurrentEvictions || '-'), 'gray')}
-        ${badge('Util Threshold: ' + (cfg.utilizationThreshold || '-') + '%', 'gray')}
-        ${badge('Drain TTL: ' + (cfg.partialDrainTTL || '-'), 'gray')}
-        ${badge('Scale-Down Delay: ' + (cfg.scaleDownDelay || '-'), 'gray')}
       </div>
     </div>
 

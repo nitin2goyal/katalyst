@@ -20,7 +20,7 @@ rules:
   # Read/write deployments, statefulsets, replicasets, daemonsets
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "replicasets", "daemonsets"]
-    verbs: ["get", "list", "watch", "patch", "update"]
+    verbs: ["get", "list", "watch", "patch", "update", "delete"]
   # Read/write HPA
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]

@@ -225,9 +225,6 @@ export async function renderSettings() {
       commitments:    { label: 'Commitments',        desc: 'Monitors reserved instance and CUD coverage',               category: 'monitoring' },
       nodegroupMgr:   { label: 'Node Group Manager', desc: 'Adjusts node group min counts based on utilization',         category: 'non-intrusive' },
       gpu:            { label: 'GPU Optimizer',      desc: 'Optimizes GPU node scheduling and utilization',              category: 'non-intrusive' },
-      nodeAutoscaler: { label: 'Node Autoscaler',    desc: 'Scales nodes up/down based on utilization thresholds',       category: 'mildly-intrusive', hasDryRun: true },
-      evictor:        { label: 'Evictor',            desc: 'Drains underutilized nodes to consolidate workloads',        category: 'mildly-intrusive', hasDryRun: true, hasAutoApprove: true },
-      rebalancer:     { label: 'Rebalancer',         desc: 'Rebalances pods across nodes for better distribution',       category: 'mildly-intrusive', hasDryRun: true },
       rightsizer:     { label: 'Rightsizer',         desc: 'Adjusts workload CPU/memory requests to match actual usage', category: 'intrusive', hasAutoApprove: true },
       workloadScaler: { label: 'Workload Scaler',    desc: 'Scales workload replicas and configures HPAs',               category: 'intrusive' },
       aiGate:         { label: 'AI Safety Gate',     desc: 'AI review for high-impact changes (cost >$500 or >3 nodes)', category: 'safety' },
@@ -236,7 +233,6 @@ export async function renderSettings() {
     const categories = [
       { key: 'monitoring',       label: 'Monitoring',       color: 'blue',   desc: 'Read-only data collection' },
       { key: 'non-intrusive',    label: 'Non-Intrusive',    color: 'green',  desc: 'Infrastructure settings only' },
-      { key: 'mildly-intrusive', label: 'Mildly Intrusive', color: 'amber',  desc: 'May move pods between nodes' },
       { key: 'intrusive',        label: 'Intrusive',        color: 'red',    desc: 'Modifies workload specs, triggers restarts' },
       { key: 'safety',           label: 'Safety',           color: 'purple', desc: 'Safety controls' },
     ];
@@ -323,8 +319,8 @@ export async function renderSettings() {
           aaBtn.className = `btn ${newState ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle`;
           aaBtn.textContent = newState ? 'AUTO-APPROVE ON' : 'AUTO-APPROVE OFF';
           const descSpan = aaBtn.nextElementSibling;
-          const onDesc = name === 'evictor' ? 'Consolidation applied once per node' : 'Downsizing applied once per workload';
-          const offDesc = name === 'evictor' ? 'Manual approval required' : 'Manual approval required';
+          const onDesc = 'Downsizing applied once per workload';
+          const offDesc = 'Manual approval required';
           if (descSpan) descSpan.textContent = newState ? onDesc : offDesc;
           toast(`${controllerMeta[name]?.label || name} auto-approve ${newState ? 'enabled' : 'disabled'}`, newState ? 'success' : 'info');
         } catch (err) {
