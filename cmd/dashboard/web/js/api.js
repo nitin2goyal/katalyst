@@ -15,7 +15,13 @@ async function fetchWithRetry(url, opts, retries = MAX_RETRIES) {
           await new Promise(r => setTimeout(r, RETRY_DELAY * attempt));
           continue;
         }
-        throw new Error(`API ${res.status}: ${res.statusText}`);
+        // Read the response body for a detailed error message
+        let detail = res.statusText;
+        try {
+          const body = await res.json();
+          if (body.error) detail = body.error;
+        } catch (_) {}
+        throw new Error(`API ${res.status}: ${detail}`);
       }
       return res;
     } catch (err) {

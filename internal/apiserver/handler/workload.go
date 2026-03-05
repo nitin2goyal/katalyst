@@ -146,9 +146,11 @@ func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 	totalCPUReq := int64(0)
 	totalMemReq := int64(0)
 
+	activeReplicas := 0
 	for _, p := range pods {
 		ownerKind, ownerName := resolveOwner(p)
 		if p.Namespace == ns && ownerKind == kind && ownerName == name {
+			status := computePodStatus(p.Pod)
 			matchedPods = append(matchedPods, podDetail{
 				Name:          p.Name,
 				Namespace:     p.Namespace,
@@ -157,10 +159,15 @@ func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 				MemoryRequest: p.MemoryRequest,
 				CPUUsage:      p.CPUUsage,
 				MemoryUsage:   p.MemoryUsage,
-				Status:        computePodStatus(p.Pod),
+				Status:        status,
 			})
-			totalCPUReq += p.CPURequest
-			totalMemReq += p.MemoryRequest
+			// Only count Running+Pending for replica count (consistent with List handler)
+			phase := p.Pod.Status.Phase
+			if phase == corev1.PodRunning || phase == corev1.PodPending {
+				activeReplicas++
+				totalCPUReq += p.CPURequest
+				totalMemReq += p.MemoryRequest
+			}
 		}
 	}
 
@@ -168,7 +175,8 @@ func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"namespace":            ns,
 		"kind":                 kind,
 		"name":                 name,
-		"replicas":             len(matchedPods),
+		"replicas":             activeReplicas,
+		"totalPods":            len(matchedPods),
 		"totalCPURequestMilli": totalCPUReq,
 		"totalMemRequestBytes": totalMemReq,
 		"pods":                 matchedPods,
@@ -230,9 +238,13 @@ func (h *WorkloadHandler) GetScaling(w http.ResponseWriter, r *http.Request) {
 	for _, p := range pods {
 		ownerKind, ownerName := resolveOwner(p)
 		if p.Namespace == ns && ownerKind == kind && ownerName == name {
-			replicaCount++
-			totalCPUUsage += p.CPUUsage
-			totalCPUReq += p.CPURequest
+			// Only count Running+Pending pods (consistent with List handler)
+			phase := p.Pod.Status.Phase
+			if phase == corev1.PodRunning || phase == corev1.PodPending {
+				replicaCount++
+				totalCPUUsage += p.CPUUsage
+				totalCPUReq += p.CPURequest
+			}
 		}
 	}
 

@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg } from '../utils.js';
-import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader } from '../components.js';
+import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, columnToggle, attachColumnToggle } from '../components.js';
 
 // Format disk type + size as a concise string, e.g. "Hyperdisk Balanced 100G"
 function fmtDisk(type, sizeGB) {
@@ -8,6 +8,23 @@ function fmtDisk(type, sizeGB) {
   const name = (type || '').replace(/^pd-/, 'PD ').replace(/^hyperdisk-/, 'Hyperdisk ').replace(/\b\w/g, c => c.toUpperCase());
   return (name + (sizeGB ? ' ' + sizeGB + 'G' : '')).trim();
 }
+
+// All Nodes column definitions for column toggle
+const nodeColumns = [
+  { key: 'name', label: 'Name', default: true },
+  { key: 'nodeGroup', label: 'Node Group', default: true },
+  { key: 'instanceType', label: 'Instance Type', default: true },
+  { key: 'disk', label: 'Disk', default: false },
+  { key: 'diskUtil', label: 'Disk Util', default: true },
+  { key: 'cpuUtil', label: 'CPU Util', default: true },
+  { key: 'memUtil', label: 'Mem Util', default: true },
+  { key: 'cpuAlloc', label: 'CPU Alloc', default: true },
+  { key: 'memAlloc', label: 'Mem Alloc', default: true },
+  { key: 'pods', label: 'Pods', default: true },
+  { key: 'cordoned', label: 'Cordoned', default: true },
+  { key: 'drainStatus', label: 'Drain Status', default: false },
+  { key: 'costHr', label: 'Cost/hr', default: false },
+];
 
 export async function renderNodes(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -39,15 +56,15 @@ export async function renderNodes(targetEl) {
         <div class="kpi-card"><div class="label">Total Memory</div><div class="value">${fmtMem}</div></div>
         <div class="kpi-card"><div class="label">Empty Groups</div><div class="value ${emptyList.length ? 'amber' : ''}">${emptyList.length}</div></div>
       </div>
-      <div class="card">
-        ${cardHeader('Node Groups', '<button class="btn btn-gray btn-sm" onclick="window.__exportNgCSV()">Export CSV</button>')}
+      <div class="card" id="ng-card">
+        ${cardHeader('Node Groups', `<label class="toggle-label" style="margin-right:12px;font-size:13px;cursor:pointer"><input type="checkbox" id="show-empty-ng"> Show empty groups</label><button class="btn btn-gray btn-sm" onclick="window.__exportNgCSV()">Export CSV</button>`)}
         <div class="table-wrap"><table id="ng-table">
           <thead><tr><th>Name</th><th>Instance Type</th><th>Family</th><th>Disk</th><th>Count</th><th>Min</th><th>Max</th><th>Total Cores</th><th>Total Memory</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Cluster</th><th>Taints</th><th>Cost/mo</th></tr></thead>
           <tbody id="ng-body"></tbody>
         </table></div>
       </div>
-      <div class="card">
-        ${cardHeader('All Nodes', '<button class="btn btn-gray btn-sm" onclick="window.__exportNodesCSV()">Export CSV</button>')}
+      <div class="card" id="nodes-card">
+        ${cardHeader('All Nodes', columnToggle(nodeColumns) + '<button class="btn btn-gray btn-sm" onclick="window.__exportNodesCSV()" style="margin-left:8px">Export CSV</button>')}
         ${filterBar({
           placeholder: 'Search nodes...',
           filters: [
@@ -55,29 +72,48 @@ export async function renderNodes(targetEl) {
           ]
         })}
         <div class="table-wrap"><table id="node-table">
-          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>Disk</th><th>Disk Util</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Cordoned</th><th>Cost/hr</th></tr></thead>
+          <thead><tr><th>Name</th><th>Node Group</th><th>Instance Type</th><th>Disk</th><th>Disk Util</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Pods</th><th>Cordoned</th><th>Drain Status</th><th>Cost/hr</th></tr></thead>
           <tbody id="node-body"></tbody>
         </table></div>
       </div>`;
 
-    $('#ng-body').innerHTML = ngList.length ? ngList.map(ng => {
-      const isEmpty = ng.isEmpty || emptyNames.has(ng.name) || emptyNames.has(ng.id);
-      return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" onclick="location.hash='#/nodegroups/${ng.id || ''}'">
-        <td>${ng.name || ng.id || ''}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}</td>
-        <td>${ng.instanceType || ''}</td><td>${ng.instanceFamily || ''}</td>
-        <td style="font-size:0.8rem">${fmtDisk(ng.diskType, ng.diskSizeGB)}</td>
-        <td>${ng.currentCount ?? 0}</td><td>${ng.minCount ?? ''}</td><td>${ng.maxCount ?? ''}</td>
-        <td>${ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0}</td>
-        <td>${ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) + ' Gi' : '0 Gi'}</td>
-        <td><strong class="${utilClass(ng.cpuUtilPct || 0)}">${fmtPct(ng.cpuUtilPct)}</strong></td>
-        <td><strong class="${utilClass(ng.memUtilPct || 0)}">${fmtPct(ng.memUtilPct)}</strong></td>
-        <td><strong class="${utilClass(ng.cpuAllocPct || 0)}">${fmtPct(ng.cpuAllocPct)}</strong></td>
-        <td><strong class="${utilClass(ng.memAllocPct || 0)}">${fmtPct(ng.memAllocPct)}</strong></td>
-        <td>${ng.sprCluster || ''}</td>
-        <td style="font-size:0.75rem;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${Array.isArray(ng.taints) ? ng.taints.map(t=>t.key+'='+t.value+':'+t.effect).join(', ') : ''}">${Array.isArray(ng.taints) ? ng.taints.map(t=>'<span class="badge badge-red">'+t.key+':'+t.effect+'</span>').join(' ') : ''}</td>
-        <td>${fmt$(ng.monthlyCostUSD)}</td>
-      </tr>`;
-    }).join('') : '<tr><td colspan="16" style="color:var(--text-muted)">No node groups</td></tr>';
+    // ── Node Groups table with empty group filtering ──
+    function renderNgRows(showEmpty) {
+      const filtered = showEmpty ? ngList : ngList.filter(ng => {
+        return !(ng.isEmpty || emptyNames.has(ng.name) || emptyNames.has(ng.id));
+      });
+      $('#ng-body').innerHTML = filtered.length ? filtered.map(ng => {
+        const isEmpty = ng.isEmpty || emptyNames.has(ng.name) || emptyNames.has(ng.id);
+        return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" onclick="location.hash='#/nodegroups/${ng.id || ''}'">
+          <td>${ng.name || ng.id || ''}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}</td>
+          <td>${ng.instanceType || ''}</td><td>${ng.instanceFamily || ''}</td>
+          <td style="font-size:0.8rem">${fmtDisk(ng.diskType, ng.diskSizeGB)}</td>
+          <td>${ng.currentCount ?? 0}</td><td>${ng.minCount ?? ''}</td><td>${ng.maxCount ?? ''}</td>
+          <td>${ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0}</td>
+          <td>${ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) + ' Gi' : '0 Gi'}</td>
+          <td><strong class="${utilClass(ng.cpuUtilPct || 0)}">${fmtPct(ng.cpuUtilPct)}</strong></td>
+          <td><strong class="${utilClass(ng.memUtilPct || 0)}">${fmtPct(ng.memUtilPct)}</strong></td>
+          <td><strong class="${utilClass(ng.cpuAllocPct || 0)}">${fmtPct(ng.cpuAllocPct)}</strong></td>
+          <td><strong class="${utilClass(ng.memAllocPct || 0)}">${fmtPct(ng.memAllocPct)}</strong></td>
+          <td>${ng.sprCluster || ''}</td>
+          <td style="font-size:0.75rem;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${Array.isArray(ng.taints) ? ng.taints.map(t=>t.key+'='+t.value+':'+t.effect).join(', ') : ''}">${Array.isArray(ng.taints) ? ng.taints.map(t=>'<span class="badge badge-red">'+t.key+':'+t.effect+'</span>').join(' ') : ''}</td>
+          <td>${fmt$(ng.monthlyCostUSD)}</td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="16" style="color:var(--text-muted)">No node groups</td></tr>';
+    }
+
+    // Initial render without empty groups
+    renderNgRows(false);
+
+    // Empty groups checkbox toggle
+    const emptyCheckbox = $('#show-empty-ng');
+    if (emptyCheckbox) {
+      emptyCheckbox.addEventListener('change', () => {
+        renderNgRows(emptyCheckbox.checked);
+        // Re-apply sort after re-render
+        makeSortable($('#ng-table'));
+      });
+    }
 
     $('#node-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${n.name || ''}'">
       <td>${n.name || ''}</td><td>${n.nodeGroup || ''}</td><td>${n.instanceType || ''}</td>
@@ -89,12 +125,25 @@ export async function renderNodes(targetEl) {
       <td><strong class="${utilClass(n.memAllocPct || 0)}">${fmtPct(n.memAllocPct)}</strong></td>
       <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span style="color:var(--text-muted)">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
       <td>${n.unschedulable ? '<span class="badge badge-red">Yes</span>' : '<span style="color:var(--text-muted)">No</span>'}</td>
+      <td>${n.drainStatus ? `<span class="badge ${n.drainStatus === 'Drained' ? 'badge-green' : 'badge-amber'}">${n.drainStatus}</span>` : ''}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
-    </tr>`).join('') : '<tr><td colspan="12" style="color:var(--text-muted)">No nodes</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="13" style="color:var(--text-muted)">No nodes</td></tr>';
 
+    // Make NG table sortable and apply default sort on Total Cores (col index 7) descending
     makeSortable($('#ng-table'));
+    const ngTable = $('#ng-table');
+    const ngHeaders = ngTable.querySelectorAll('thead th');
+    if (ngHeaders.length > 7 && !ngHeaders[7].classList.contains('sorted-asc') && !ngHeaders[7].classList.contains('sorted-desc')) {
+      ngHeaders[7].click(); // ascending
+      ngHeaders[7].click(); // descending (highest first)
+    }
+
     makeSortable($('#node-table'));
     const pag = attachPagination($('#node-table'));
+
+    // Attach column toggle for All Nodes table
+    const nodesCard = document.getElementById('nodes-card');
+    attachColumnToggle(nodesCard, $('#node-table'), 'kopt-node-columns', nodeColumns);
 
     // Attach filter handlers
     const fb = container().querySelector('.filter-bar');

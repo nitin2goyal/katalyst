@@ -13,7 +13,7 @@ const COLUMNS = [
   { key: 'memLim',      label: 'Mem Lim',       default: false },
   { key: 'totalCPU',    label: 'Total CPU',     default: true },
   { key: 'totalCPULim', label: 'Total CPU Lim', default: true },
-  { key: 'totalMem',    label: 'Total Mem',     default: false },
+  { key: 'totalMem',    label: 'Total Mem',     default: true },
   { key: 'totalMemLim', label: 'Total Mem Lim', default: false },
   { key: 'min',         label: 'Min',           default: true },
   { key: 'max',         label: 'Max',           default: true },
@@ -130,6 +130,13 @@ export async function renderWorkloads(targetEl) {
     attachColumnToggle(cardEl, tableEl, COL_STORAGE_KEY, COLUMNS);
 
     makeSortable(tableEl);
+    // Default sort by Total Mem (descending) if no user sort state exists
+    const wlHeaders = tableEl.querySelectorAll('thead th');
+    const totalMemIdx = colIndex('totalMem');
+    if (totalMemIdx >= 0 && wlHeaders[totalMemIdx] && !wlHeaders[totalMemIdx].classList.contains('sorted-asc') && !wlHeaders[totalMemIdx].classList.contains('sorted-desc')) {
+      wlHeaders[totalMemIdx].click(); // ascending
+      wlHeaders[totalMemIdx].click(); // descending (highest first)
+    }
     const pag = attachPagination(tableEl);
 
     // Attach filter

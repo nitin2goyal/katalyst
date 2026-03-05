@@ -143,7 +143,7 @@ export async function renderActions(targetEl) {
     // Update count + pagination
     const countEl = document.getElementById('visible-count');
     if (countEl) countEl.textContent = visibleCount;
-    if (pag) pag.reset();
+    if (pag) pag.refresh();
     updatePurgeBtn();
     syncCheckboxUI();
   }

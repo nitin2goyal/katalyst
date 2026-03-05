@@ -36,6 +36,14 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 			diskType = ng.DiskType
 			diskSizeGB = ng.DiskSizeGB
 		}
+		// Build drain status for cordoned nodes
+		drainStatus := ""
+		if n.Node.Spec.Unschedulable && appCount > 0 {
+			drainStatus = fmt.Sprintf("Draining (%d app pods remaining)", appCount)
+		} else if n.Node.Spec.Unschedulable && appCount == 0 {
+			drainStatus = "Drained"
+		}
+
 		result = append(result, map[string]interface{}{
 			"name":           n.Node.Name,
 			"instanceType":   n.InstanceType,
@@ -62,6 +70,7 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 			"diskType":       diskType,
 			"diskSizeGB":     diskSizeGB,
 			"unschedulable":  n.Node.Spec.Unschedulable,
+			"drainStatus":    drainStatus,
 		})
 	}
 	writePaginatedJSON(w, r, result)
