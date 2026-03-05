@@ -474,9 +474,9 @@ func (c *Config) ValidateDetailed() error {
 		return err
 	}
 
-	// Active mode requires AI Gate to be enabled for safety
+	// Active mode without AI Gate — warn but don't block startup
 	if c.Mode == "active" && !c.AIGate.Enabled {
-		return fmt.Errorf("AI Gate must be enabled when mode is \"active\" to prevent unsafe automated changes")
+		slog.Warn("AI Gate is disabled in active mode — automated changes will not have AI safety review")
 	}
 
 	// Validate network monitor traffic estimate
