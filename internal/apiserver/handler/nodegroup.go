@@ -117,13 +117,23 @@ func (h *NodeGroupHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	var nodes []map[string]interface{}
 	for _, n := range g.Nodes {
+		appCount, sysCount := 0, 0
+		for _, pod := range n.Pods {
+			if IsSystemPod(pod) {
+				sysCount++
+			} else {
+				appCount++
+			}
+		}
 		nodes = append(nodes, map[string]interface{}{
-			"name":          n.Node.Name,
-			"instanceType":  n.InstanceType,
-			"cpuUtilPct":    n.CPUUtilization(),
-			"memUtilPct":    n.MemoryUtilization(),
-			"hourlyCostUSD": n.HourlyCostUSD,
-			"podCount":      len(n.Pods),
+			"name":           n.Node.Name,
+			"instanceType":   n.InstanceType,
+			"cpuUtilPct":     n.CPUUtilization(),
+			"memUtilPct":     n.MemoryUtilization(),
+			"hourlyCostUSD":  n.HourlyCostUSD,
+			"podCount":       len(n.Pods),
+			"appPodCount":    appCount,
+			"systemPodCount": sysCount,
 		})
 	}
 	writeJSON(w, http.StatusOK, nodes)

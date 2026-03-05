@@ -41,7 +41,7 @@ export async function renderNodeGroupDetail(params) {
       <div class="card">
         <h2>Nodes in this Group</h2>
         <div class="table-wrap"><table id="ng-nodes-table">
-          <thead><tr><th>Name</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>Pods</th><th>Cost/hr</th></tr></thead>
+          <thead><tr><th>Name</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>App Pods</th><th>Sys Pods</th><th>Total Pods</th><th>Cost/hr</th></tr></thead>
           <tbody id="ng-nodes-body"></tbody>
         </table></div>
       </div>`;
@@ -49,9 +49,11 @@ export async function renderNodeGroupDetail(params) {
     $('#ng-nodes-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${n.name || ''}'">
       <td>${n.name || ''}</td><td>${n.instanceType || ''}</td>
       <td>${utilBar(n.cpuUtilPct)}</td><td>${utilBar(n.memUtilPct)}</td>
+      <td><span class="blue">${n.appPodCount ?? ''}</span></td>
+      <td><span style="color:var(--text-muted)">${n.systemPodCount ?? ''}</span></td>
       <td>${n.podCount ?? ''}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
-    </tr>`).join('') : '<tr><td colspan="6" style="color:var(--text-muted)">No nodes in this group</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="8" style="color:var(--text-muted)">No nodes in this group</td></tr>';
 
     makeSortable($('#ng-nodes-table'));
   } catch (e) {
