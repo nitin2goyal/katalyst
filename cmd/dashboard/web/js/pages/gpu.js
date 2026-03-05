@@ -4,6 +4,7 @@ import { skeleton, makeSortable, exportCSV, cardHeader } from '../components.js'
 
 const GPU_TABS = [
   { id: 'nodes', label: 'Nodes' },
+  { id: 'scavenging', label: 'Scavenging' },
   { id: 'activity', label: 'Activity' },
 ];
 
@@ -23,6 +24,7 @@ export async function renderGPU(targetEl) {
   async function switchTab(tabId) {
     contentEl.innerHTML = skeleton(5);
     if (tabId === 'nodes') await renderNodesTab(contentEl);
+    else if (tabId === 'scavenging') await renderScavengingTab(contentEl);
     else if (tabId === 'activity') await renderActivityTab(contentEl);
   }
 
@@ -122,9 +124,11 @@ function renderConfigCard(cfg) {
     { label: 'CPU Scavenging', on: cfg.cpuScavengingEnabled },
     { label: 'Reclaim', on: cfg.reclaimEnabled },
   ];
+  const modeColor = cfg.mode === 'active' ? 'green' : cfg.mode === 'recommend' ? 'blue' : 'gray';
   return `<div class="card" style="padding:12px 16px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <strong style="margin-right:4px">Config</strong>
+      ${badge('Mode: ' + (cfg.mode || 'unknown'), modeColor)}
       ${items.map(i => badge(i.label, i.on ? 'green' : 'gray')).join('')}
       ${cfg.idleThresholdPct ? `<span style="color:var(--text-muted);font-size:0.85em">Idle &lt; ${cfg.idleThresholdPct}% for ${cfg.idleDuration || '?'}</span>` : ''}
       ${cfg.scavengingCPUThresholdMillis ? `<span style="color:var(--text-muted);font-size:0.85em">Scavenge &ge; ${cfg.scavengingCPUThresholdMillis}m</span>` : ''}
@@ -141,6 +145,75 @@ function renderNodeStatusBadges(n) {
   if (!n.hasTaint && !n.isFallback && !n.isScavenging && (n.gpuUsed ?? 0) === 0) badges.push(badge('Idle', 'amber'));
   if (badges.length === 0) badges.push(badge('Active', 'green'));
   return badges.join(' ');
+}
+
+async function renderScavengingTab(contentEl) {
+  try {
+    const resp = await api('/gpu/scavenging');
+    const pods = resp.pods || [];
+    const mode = resp.mode || 'unknown';
+    const scavEnabled = resp.scavengingEnabled;
+    const scavNodes = resp.scavengingNodeCount || 0;
+    const totalHeadroom = resp.totalHeadroomMillis || 0;
+
+    const modeColor = mode === 'active' ? 'green' : mode === 'recommend' ? 'blue' : 'gray';
+    const modeWarning = mode !== 'active' ? `<div class="card" style="padding:12px 16px;margin-bottom:16px;border-left:3px solid var(--amber)">
+      <strong style="color:var(--amber)">Mode is "${mode}"</strong> — scavenging recommendations are generated but NOT executed. Switch to <strong>Active</strong> mode (click the mode badge in the sidebar) to enable auto-execution.
+    </div>` : '';
+
+    contentEl.innerHTML = `
+      ${modeWarning}
+      <div class="kpi-grid">
+        <div class="kpi-card"><div class="label">Mode</div><div class="value">${badge(mode, modeColor)}</div></div>
+        <div class="kpi-card"><div class="label">Scavenging Nodes</div><div class="value blue">${scavNodes}</div></div>
+        <div class="kpi-card"><div class="label">CPU Pods on GPU</div><div class="value purple">${pods.length}</div></div>
+        <div class="kpi-card"><div class="label">Total Spare CPU</div><div class="value green">${totalHeadroom >= 1000 ? (totalHeadroom / 1000).toFixed(1) + ' cores' : totalHeadroom + 'm'}</div></div>
+      </div>
+      <div class="card">
+        ${cardHeader('CPU Pods on GPU Nodes', `<span style="color:var(--text-muted);font-size:0.85em">${pods.length} pods</span>`)}
+        <div class="table-wrap"><table id="scav-table">
+          <thead><tr>
+            <th>Pod</th><th>Namespace</th><th>Node</th><th>Instance</th><th>Ready</th>
+            <th>CPU Req</th><th>CPU Used</th><th>Mem Req</th><th>Status</th>
+            <th>Running For</th><th>Owner</th><th>Node Headroom</th>
+          </tr></thead>
+          <tbody id="scav-body"></tbody>
+        </table></div>
+      </div>`;
+
+    const fmtCPUm = (m) => m >= 1000 ? (m / 1000).toFixed(1) + ' cores' : m + 'm';
+    const podStatusColor = (s) => {
+      if (!s) return 'gray';
+      const lower = s.toLowerCase();
+      if (lower === 'running') return 'green';
+      if (lower === 'pending' || lower === 'containercreating') return 'blue';
+      if (lower.includes('backoff') || lower.includes('error') || lower === 'failed') return 'red';
+      return 'amber';
+    };
+
+    $('#scav-body').innerHTML = pods.length ? pods.map(p => {
+      const readyParts = (p.ready || '').split('/');
+      const readyColor = readyParts[0] === readyParts[1] ? 'green' : 'amber';
+      return `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(p.nodeName)}'">
+        <td title="${escapeHtml(p.podName)}">${escapeHtml(p.podName.length > 45 ? p.podName.substring(0, 42) + '...' : p.podName)}</td>
+        <td>${escapeHtml(p.namespace)}</td>
+        <td title="${escapeHtml(p.nodeName)}">${escapeHtml(p.nodeName.replace(/^gke-intuition-gke-intuition-gke-/, ''))}</td>
+        <td>${p.instanceType || ''}</td>
+        <td><span style="color:var(--${readyColor});font-weight:500">${p.ready || '-'}</span></td>
+        <td>${fmtCPUm(p.cpuRequestMillis || 0)}</td>
+        <td>${p.cpuUsedMillis ? fmtCPUm(p.cpuUsedMillis) : '-'}</td>
+        <td>${p.memRequestMi ? p.memRequestMi + ' Mi' : '-'}</td>
+        <td>${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
+        <td>${p.runningFor || '-'}</td>
+        <td title="${escapeHtml(p.owner || '')}">${escapeHtml((p.owner || '').replace('ReplicaSet/', 'RS/'))}</td>
+        <td>${fmtCPUm(p.nodeHeadroomMillis || 0)}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="12" style="color:var(--text-muted)">No CPU pods found on GPU nodes${mode !== 'active' ? ' (mode is not active)' : ''}</td></tr>`;
+
+    makeSortable($('#scav-table'));
+  } catch (e) {
+    contentEl.innerHTML = errorMsg('Failed to load scavenging data: ' + e.message);
+  }
 }
 
 const ACTION_COLORS = {

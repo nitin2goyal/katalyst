@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -64,6 +65,7 @@ func (h *GPUHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 			"idleDuration":                 gpuCfg.IdleDuration.String(),
 			"scavengingCPUThresholdMillis": gpuCfg.ScavengingCPUThresholdMillis,
 			"reclaimGracePeriod":           gpuCfg.ReclaimGracePeriod.String(),
+			"mode":                         h.config.Mode,
 		},
 		"total":    len(gpuNodes),
 		"page":     1,
@@ -172,6 +174,140 @@ func (h *GPUHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	start, end, resp := paginateSlice(len(gpuEvents), page, pageSize)
 	resp.Data = gpuEvents[start:end]
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetScavenging returns all CPU (non-GPU, non-system) pods running on GPU nodes,
+// along with node headroom info. This powers the dedicated scavenging dashboard tab.
+func (h *GPUHandler) GetScavenging(w http.ResponseWriter, r *http.Request) {
+	nodes := h.state.GetAllNodes()
+	allPods := h.state.GetAllPods()
+
+	// Build pod state lookup for usage metrics
+	podStateMap := make(map[string]*state.PodState)
+	for _, ps := range allPods {
+		podStateMap[ps.Namespace+"/"+ps.Name] = ps
+	}
+
+	type cpuPodOnGPU struct {
+		PodName       string  `json:"podName"`
+		Namespace     string  `json:"namespace"`
+		NodeName      string  `json:"nodeName"`
+		InstanceType  string  `json:"instanceType"`
+		CPURequestM   int64   `json:"cpuRequestMillis"`
+		MemRequestMi  int64   `json:"memRequestMi"`
+		CPUUsedM      int64   `json:"cpuUsedMillis"`
+		MemUsedMi     int64   `json:"memUsedMi"`
+		Status        string  `json:"status"`
+		Ready         string  `json:"ready"`
+		StartTime     string  `json:"startTime"`
+		RunningFor    string  `json:"runningFor"`
+		Owner         string  `json:"owner"`
+		IsScavenging  bool    `json:"isScavenging"`
+		NodeHeadroom  int64   `json:"nodeHeadroomMillis"`
+		NodeCPUCap    int64   `json:"nodeCPUCapMillis"`
+		NodeCPUReq    int64   `json:"nodeCPUReqMillis"`
+		NodeCostHr    float64 `json:"nodeCostPerHour"`
+	}
+
+	var cpuPods []cpuPodOnGPU
+	totalHeadroom := int64(0)
+	scavengingNodeCount := 0
+
+	for _, n := range nodes {
+		if !n.IsGPUNode {
+			continue
+		}
+
+		isScav := hasAnnotation(n.Node, "koptimizer.io/cpu-scavenger")
+		if isScav {
+			scavengingNodeCount++
+		}
+		headroom := n.CPUCapacity - n.CPURequested
+		if headroom < 0 {
+			headroom = 0
+		}
+		totalHeadroom += headroom
+
+		for _, pod := range n.Pods {
+			if IsSystemPod(pod) {
+				continue
+			}
+			// Skip GPU pods
+			isGPU := false
+			for _, c := range pod.Spec.Containers {
+				if gpuQty, ok := c.Resources.Requests["nvidia.com/gpu"]; ok && !gpuQty.IsZero() {
+					isGPU = true
+					break
+				}
+			}
+			if isGPU {
+				continue
+			}
+
+			cpuMilli, memBytes := state.ExtractPodRequests(pod)
+			status := computePodStatus(pod)
+			ready := computeContainerReady(pod)
+
+			startTime := ""
+			runningFor := ""
+			if pod.Status.StartTime != nil {
+				startTime = pod.Status.StartTime.Format("2006-01-02T15:04:05Z")
+				dur := time.Since(pod.Status.StartTime.Time)
+				if dur < time.Hour {
+					runningFor = fmt.Sprintf("%dm", int(dur.Minutes()))
+				} else if dur < 24*time.Hour {
+					runningFor = fmt.Sprintf("%dh%dm", int(dur.Hours()), int(dur.Minutes())%60)
+				} else {
+					runningFor = fmt.Sprintf("%dd%dh", int(dur.Hours()/24), int(dur.Hours())%24)
+				}
+			}
+
+			owner := ""
+			for _, ref := range pod.OwnerReferences {
+				owner = ref.Kind + "/" + ref.Name
+				break
+			}
+
+			entry := cpuPodOnGPU{
+				PodName:      pod.Name,
+				Namespace:    pod.Namespace,
+				NodeName:     n.Node.Name,
+				InstanceType: n.InstanceType,
+				CPURequestM:  cpuMilli,
+				MemRequestMi: memBytes / (1024 * 1024),
+				Status:       status,
+				Ready:        ready,
+				StartTime:    startTime,
+				RunningFor:   runningFor,
+				Owner:        owner,
+				IsScavenging: isScav,
+				NodeHeadroom: headroom,
+				NodeCPUCap:   n.CPUCapacity,
+				NodeCPUReq:   n.CPURequested,
+				NodeCostHr:   n.HourlyCostUSD,
+			}
+
+			if ps, ok := podStateMap[pod.Namespace+"/"+pod.Name]; ok {
+				entry.CPUUsedM = ps.CPUUsage
+				entry.MemUsedMi = ps.MemoryUsage / (1024 * 1024)
+			}
+
+			cpuPods = append(cpuPods, entry)
+		}
+	}
+
+	if cpuPods == nil {
+		cpuPods = []cpuPodOnGPU{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"pods":                cpuPods,
+		"totalCPUPods":        len(cpuPods),
+		"scavengingNodeCount": scavengingNodeCount,
+		"totalHeadroomMillis": totalHeadroom,
+		"mode":                h.config.Mode,
+		"scavengingEnabled":   h.config.GPU.CPUScavengingEnabled,
+	})
 }
 
 func hasAnnotation(node *corev1.Node, key string) bool {

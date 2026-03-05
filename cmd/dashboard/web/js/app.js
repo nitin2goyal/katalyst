@@ -68,12 +68,12 @@ async function updateModeBadge() {
   } catch (_) {}
 }
 
-// Mode badge click to toggle between recommend and enforce
+// Mode badge click to toggle between recommend and active
 document.getElementById('mode-badge')?.addEventListener('click', async () => {
   const el = $('#mode-badge');
   if (!el) return;
   const current = el.textContent.trim().toLowerCase();
-  const newMode = current === 'recommend' ? 'enforce' : 'recommend';
+  const newMode = current === 'active' ? 'recommend' : 'active';
   try {
     await apiPut('/config/mode', { mode: newMode });
     el.textContent = newMode.charAt(0).toUpperCase() + newMode.slice(1);

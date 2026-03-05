@@ -97,6 +97,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		r.Get("/gpu/utilization", gpuHandler.GetUtilization)
 		r.Get("/gpu/recommendations", gpuHandler.GetRecommendations)
 		r.Get("/gpu/activity", gpuHandler.GetActivity)
+		r.Get("/gpu/scavenging", gpuHandler.GetScavenging)
 
 		// Storage
 		r.Get("/storage/summary", storageHandler.GetSummary)
