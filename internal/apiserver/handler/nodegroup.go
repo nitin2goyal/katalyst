@@ -41,6 +41,12 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Count total GPUs across nodes in this group
+		totalGPUs := 0
+		for _, n := range g.Nodes {
+			totalGPUs += n.GPUCapacity
+		}
+
 		result = append(result, map[string]interface{}{
 			"id":             g.ID,
 			"name":           g.Name,
@@ -63,6 +69,8 @@ func (h *NodeGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			"taints":         taints,
 			"diskType":       g.DiskType,
 			"diskSizeGB":     g.DiskSizeGB,
+			"hasGPU":         totalGPUs > 0,
+			"totalGPUs":      totalGPUs,
 		})
 	}
 	if result == nil {

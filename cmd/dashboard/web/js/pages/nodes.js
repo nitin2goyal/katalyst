@@ -59,7 +59,7 @@ export async function renderNodes(targetEl) {
       <div class="card" id="ng-card">
         ${cardHeader('Node Groups', `<label class="toggle-label" style="margin-right:12px;font-size:13px;cursor:pointer"><input type="checkbox" id="show-empty-ng"> Show empty groups</label><button class="btn btn-gray btn-sm" onclick="window.__exportNgCSV()">Export CSV</button>`)}
         <div class="table-wrap"><table id="ng-table">
-          <thead><tr><th>Name</th><th>Instance Type</th><th>Family</th><th>Disk</th><th>Count</th><th>Min</th><th>Max</th><th>Total Cores</th><th>Total Memory</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Cluster</th><th>Taints</th><th>Cost/mo</th></tr></thead>
+          <thead><tr><th>Name</th><th>Instance Type</th><th>Disk</th><th>Count</th><th>Min</th><th>Max</th><th>GPUs</th><th>Total Cores</th><th>Total Memory</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Cluster</th><th>Cost/mo</th></tr></thead>
           <tbody id="ng-body"></tbody>
         </table></div>
       </div>
@@ -85,10 +85,11 @@ export async function renderNodes(targetEl) {
       $('#ng-body').innerHTML = filtered.length ? filtered.map(ng => {
         const isEmpty = ng.isEmpty || emptyNames.has(ng.name) || emptyNames.has(ng.id);
         return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" onclick="location.hash='#/nodegroups/${ng.id || ''}'">
-          <td>${ng.name || ng.id || ''}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}</td>
-          <td>${ng.instanceType || ''}</td><td>${ng.instanceFamily || ''}</td>
+          <td>${ng.name || ng.id || ''}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}${ng.hasGPU ? ' ' + badge('GPU', 'purple') : ''}</td>
+          <td>${ng.instanceType || ''}</td>
           <td style="font-size:0.8rem">${fmtDisk(ng.diskType, ng.diskSizeGB)}</td>
           <td>${ng.currentCount ?? 0}</td><td>${ng.minCount ?? ''}</td><td>${ng.maxCount ?? ''}</td>
+          <td>${ng.totalGPUs ? ng.totalGPUs : '-'}</td>
           <td>${ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0}</td>
           <td>${ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) + ' Gi' : '0 Gi'}</td>
           <td><strong class="${utilClass(ng.cpuUtilPct || 0)}">${fmtPct(ng.cpuUtilPct)}</strong></td>
@@ -96,10 +97,9 @@ export async function renderNodes(targetEl) {
           <td><strong class="${utilClass(ng.cpuAllocPct || 0)}">${fmtPct(ng.cpuAllocPct)}</strong></td>
           <td><strong class="${utilClass(ng.memAllocPct || 0)}">${fmtPct(ng.memAllocPct)}</strong></td>
           <td>${ng.sprCluster || ''}</td>
-          <td style="font-size:0.75rem;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${Array.isArray(ng.taints) ? ng.taints.map(t=>t.key+'='+t.value+':'+t.effect).join(', ') : ''}">${Array.isArray(ng.taints) ? ng.taints.map(t=>'<span class="badge badge-red">'+t.key+':'+t.effect+'</span>').join(' ') : ''}</td>
           <td>${fmt$(ng.monthlyCostUSD)}</td>
         </tr>`;
-      }).join('') : '<tr><td colspan="16" style="color:var(--text-muted)">No node groups</td></tr>';
+      }).join('') : '<tr><td colspan="15" style="color:var(--text-muted)">No node groups</td></tr>';
     }
 
     // Initial render without empty groups
@@ -151,8 +151,8 @@ export async function renderNodes(targetEl) {
 
     // CSV exports
     window.__exportNgCSV = () => {
-      exportCSV(['Name', 'Instance Type', 'Family', 'Disk Type', 'Disk Size (GB)', 'Count', 'Min', 'Max', 'Total Cores', 'Total Memory (GiB)', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'Cluster', 'Taints', 'Cost/mo'],
-        ngList.map(ng => [ng.name, ng.instanceType, ng.instanceFamily, ng.diskType || '', ng.diskSizeGB || '', ng.currentCount, ng.minCount, ng.maxCount, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), (ng.cpuAllocPct||0).toFixed(1), (ng.memAllocPct||0).toFixed(1), ng.sprCluster || '', Array.isArray(ng.taints) ? ng.taints.map(t=>t.key+'='+t.value+':'+t.effect).join('; ') : '', ng.monthlyCostUSD]),
+      exportCSV(['Name', 'Instance Type', 'Disk Type', 'Disk Size (GB)', 'Count', 'Min', 'Max', 'GPUs', 'Total Cores', 'Total Memory (GiB)', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'Cluster', 'Cost/mo'],
+        ngList.map(ng => [ng.name, ng.instanceType, ng.diskType || '', ng.diskSizeGB || '', ng.currentCount, ng.minCount, ng.maxCount, ng.totalGPUs || 0, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), (ng.cpuAllocPct||0).toFixed(1), (ng.memAllocPct||0).toFixed(1), ng.sprCluster || '', ng.monthlyCostUSD]),
         'katalyst-nodegroups.csv');
     };
     window.__exportNodesCSV = () => {
