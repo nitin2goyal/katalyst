@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cost"
@@ -35,15 +40,20 @@ func resolveOwner(p *state.PodState) (kind, name string) {
 }
 
 type WorkloadHandler struct {
-	state *state.ClusterState
+	state  *state.ClusterState
+	client client.Client
 }
 
-func NewWorkloadHandler(st *state.ClusterState) *WorkloadHandler {
-	return &WorkloadHandler{state: st}
+func NewWorkloadHandler(st *state.ClusterState, c client.Client) *WorkloadHandler {
+	return &WorkloadHandler{state: st, client: c}
 }
 
 func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 	pods := h.state.GetAllPods()
+
+	// Fetch all PDBs for PDB info in the workloads table
+	pdbMap := h.fetchPDBsByNamespace(r.Context())
+
 	// Group by owner
 	type wlInfo struct {
 		Namespace   string
@@ -55,7 +65,7 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 		TotalCPULim int64
 		TotalMemLim int64
 		Image       string
-		Pod         *corev1.Pod // first pod (for Xmx extraction)
+		Pod         *corev1.Pod // first pod (for Xmx extraction and PDB matching)
 	}
 	workloads := make(map[string]*wlInfo)
 	for _, p := range pods {
@@ -121,9 +131,56 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 			entry["autoscaler"] = as.Kind
 			entry["autoscalerName"] = as.Name
 		}
+		// Match PDBs to this workload via label selector
+		if wl.Pod != nil {
+			if pdb := matchPDB(wl.Pod, pdbMap[wl.Namespace]); pdb != nil {
+				entry["pdbName"] = pdb.Name
+				if pdb.Spec.MinAvailable != nil {
+					entry["pdbMinAvailable"] = pdb.Spec.MinAvailable.String()
+				}
+				if pdb.Spec.MaxUnavailable != nil {
+					entry["pdbMaxUnavailable"] = pdb.Spec.MaxUnavailable.String()
+				}
+				entry["pdbDisruptionsAllowed"] = pdb.Status.DisruptionsAllowed
+			}
+		}
 		result = append(result, entry)
 	}
 	writePaginatedJSON(w, r, result)
+}
+
+// fetchPDBsByNamespace fetches all PDBs and groups them by namespace.
+func (h *WorkloadHandler) fetchPDBsByNamespace(ctx context.Context) map[string][]policyv1.PodDisruptionBudget {
+	result := make(map[string][]policyv1.PodDisruptionBudget)
+	if h.client == nil {
+		return result
+	}
+	pdbList := &policyv1.PodDisruptionBudgetList{}
+	if err := h.client.List(ctx, pdbList); err != nil {
+		return result
+	}
+	for _, pdb := range pdbList.Items {
+		result[pdb.Namespace] = append(result[pdb.Namespace], pdb)
+	}
+	return result
+}
+
+// matchPDB finds the first PDB whose selector matches the pod's labels.
+func matchPDB(pod *corev1.Pod, pdbs []policyv1.PodDisruptionBudget) *policyv1.PodDisruptionBudget {
+	for i := range pdbs {
+		pdb := &pdbs[i]
+		if pdb.Spec.Selector == nil {
+			continue
+		}
+		sel, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
+		if err != nil {
+			continue
+		}
+		if sel.Matches(labels.Set(pod.Labels)) {
+			return pdb
+		}
+	}
+	return nil
 }
 
 func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {

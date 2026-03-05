@@ -3,26 +3,28 @@ import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg } from '../utils.js'
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge, columnToggle, attachColumnToggle } from '../components.js';
 
 const COLUMNS = [
-  { key: 'namespace',   label: 'Namespace',     default: false },
-  { key: 'kind',        label: 'Kind',          default: false },
-  { key: 'name',        label: 'Name',          default: true },
-  { key: 'replicas',    label: 'Replicas',      default: true },
-  { key: 'cpuReq',      label: 'CPU Req',       default: true },
-  { key: 'cpuLim',      label: 'CPU Lim',       default: true },
-  { key: 'memReq',      label: 'Mem Req',       default: false },
-  { key: 'memLim',      label: 'Mem Lim',       default: false },
-  { key: 'totalCPU',    label: 'Total CPU',     default: true },
-  { key: 'totalCPULim', label: 'Total CPU Lim', default: true },
-  { key: 'totalMem',    label: 'Total Mem',     default: true },
-  { key: 'totalMemLim', label: 'Total Mem Lim', default: false },
-  { key: 'min',         label: 'Min',           default: true },
-  { key: 'max',         label: 'Max',           default: true },
-  { key: 'autoscaler',  label: 'Autoscaler',    default: false },
-  { key: 'xmx',         label: 'Xmx',          default: false },
-  { key: 'image',       label: 'Image',         default: false },
-  { key: 'cpuEff',      label: 'CPU Eff.',      default: false },
-  { key: 'memEff',      label: 'Mem Eff.',      default: false },
-  { key: 'wasted',      label: 'Wasted',        default: false },
+  { key: 'namespace',       label: 'Namespace',        default: false },
+  { key: 'kind',            label: 'Kind',             default: false },
+  { key: 'name',            label: 'Name',             default: true },
+  { key: 'replicas',        label: 'Replicas',         default: true },
+  { key: 'cpuReq',          label: 'CPU Req',          default: true },
+  { key: 'cpuLim',          label: 'CPU Lim',          default: true },
+  { key: 'memReq',          label: 'Mem Req',          default: false },
+  { key: 'memLim',          label: 'Mem Lim',          default: false },
+  { key: 'totalCPU',        label: 'Total CPU',        default: true },
+  { key: 'totalCPULim',     label: 'Total CPU Lim',    default: true },
+  { key: 'totalMem',        label: 'Total Mem',        default: true },
+  { key: 'pdbMinAvail',     label: 'PDB MinAvail',     default: true },
+  { key: 'pdbMaxUnavail',   label: 'PDB MaxUnavail',   default: true },
+  { key: 'pdbDisruptAllow', label: 'Disruptions OK',   default: true },
+  { key: 'min',             label: 'Min',              default: true },
+  { key: 'max',             label: 'Max',              default: true },
+  { key: 'autoscaler',      label: 'Autoscaler',       default: false },
+  { key: 'xmx',             label: 'Xmx',             default: false },
+  { key: 'image',           label: 'Image',            default: false },
+  { key: 'cpuEff',          label: 'CPU Eff.',         default: false },
+  { key: 'memEff',          label: 'Mem Eff.',         default: false },
+  { key: 'wasted',          label: 'Wasted',           default: false },
 ];
 
 const COL_STORAGE_KEY = 'kopt-wl-columns';
@@ -99,6 +101,9 @@ export async function renderWorkloads(targetEl) {
     const colSpan = COLUMNS.length;
     $('#wl-body').innerHTML = wlList.length ? wlList.map(w => {
       const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
+      const pdbMinAvail = w.pdbMinAvailable != null ? w.pdbMinAvailable : '-';
+      const pdbMaxUnavail = w.pdbMaxUnavailable != null ? w.pdbMaxUnavailable : '-';
+      const pdbDisruptAllow = w.pdbDisruptionsAllowed != null ? w.pdbDisruptionsAllowed : '-';
       return `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
         <td>${w.namespace || ''}</td>
         <td>${w.kind || ''}</td>
@@ -111,7 +116,9 @@ export async function renderWorkloads(targetEl) {
         <td>${fmtCPU(w.totalCPU)}</td>
         <td>${fmtCPU(w.totalCPULim)}</td>
         <td>${fmtMem(w.totalMem)}</td>
-        <td>${fmtMem(w.totalMemLim)}</td>
+        <td>${w.pdbName ? badge(pdbMinAvail, 'blue') : '<span style="color:var(--text-muted)">-</span>'}</td>
+        <td>${w.pdbName ? badge(pdbMaxUnavail, pdbMaxUnavail === '0' ? 'red' : 'amber') : '<span style="color:var(--text-muted)">-</span>'}</td>
+        <td>${w.pdbName ? badge(String(pdbDisruptAllow), pdbDisruptAllow === 0 ? 'red' : 'green') : '<span style="color:var(--text-muted)">-</span>'}</td>
         <td>${w.minReplicas ?? '-'}</td>
         <td>${w.maxReplicas ?? '-'}</td>
         <td>${w.autoscaler ? badge(w.autoscaler, 'blue') : '-'}</td>
@@ -147,14 +154,16 @@ export async function renderWorkloads(targetEl) {
     window.__exportWlCSV = () => {
       exportCSV(
         ['Namespace', 'Kind', 'Name', 'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim',
-         'Total CPU', 'Total CPU Lim', 'Total Mem', 'Total Mem Lim',
+         'Total CPU', 'Total CPU Lim', 'Total Mem',
+         'PDB MinAvail', 'PDB MaxUnavail', 'Disruptions OK',
          'Min Replicas', 'Max Replicas', 'Autoscaler', 'Xmx',
          'Image', 'CPU Eff %', 'Mem Eff %', 'Wasted Cost'],
         wlList.map(w => {
           const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
           return [w.namespace, w.kind, w.name, w.replicas,
             fmtCPU(w.cpuRequest), fmtCPU(w.cpuLimit), fmtMem(w.memRequest), fmtMem(w.memLimit),
-            fmtCPU(w.totalCPU), fmtCPU(w.totalCPULim), fmtMem(w.totalMem), fmtMem(w.totalMemLim),
+            fmtCPU(w.totalCPU), fmtCPU(w.totalCPULim), fmtMem(w.totalMem),
+            w.pdbMinAvailable ?? '', w.pdbMaxUnavailable ?? '', w.pdbDisruptionsAllowed ?? '',
             w.minReplicas ?? '', w.maxReplicas ?? '', w.autoscaler || '', w.xmx || '',
             w.image || '',
             eff?.cpuEfficiencyPct != null ? fmtPct(eff.cpuEfficiencyPct) : '',

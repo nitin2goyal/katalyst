@@ -30,7 +30,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	nodeGroupHandler := handler.NewNodeGroupHandler(clusterState, guard)
 	costHandler := handler.NewCostHandler(clusterState, provider, k8sClient, costStore, metricsStore)
 	recHandler := handler.NewRecommendationHandler(clusterState, k8sClient, metricsStore)
-	workloadHandler := handler.NewWorkloadHandler(clusterState)
+	workloadHandler := handler.NewWorkloadHandler(clusterState, k8sClient)
 	commitmentHandler := handler.NewCommitmentHandler(provider)
 	gpuHandler := handler.NewGPUHandler(clusterState, cfg)
 	storageHandler := handler.NewStorageHandler(k8sClient, cfg)
