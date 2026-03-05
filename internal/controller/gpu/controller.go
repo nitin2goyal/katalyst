@@ -17,29 +17,31 @@ import (
 
 // Controller handles GPU optimization: detect idle GPUs, manage CPU fallback, CPU scavenging, and reclaim.
 type Controller struct {
-	client    client.Client
-	state     *state.ClusterState
-	guard     *familylock.FamilyLockGuard
-	gate      *aigate.AIGate
-	config    *config.Config
-	detector  *Detector
-	fallback  *FallbackManager
-	scavenger *Scavenger
-	reclaimer *Reclaimer
+	client        client.Client
+	state         *state.ClusterState
+	guard         *familylock.FamilyLockGuard
+	gate          *aigate.AIGate
+	config        *config.Config
+	detector      *Detector
+	fallback      *FallbackManager
+	scavenger     *Scavenger
+	reclaimer     *Reclaimer
+	redistributor *Redistributor
 }
 
 func NewController(mgr ctrl.Manager, st *state.ClusterState, guard *familylock.FamilyLockGuard, gate *aigate.AIGate, cfg *config.Config) *Controller {
 	c := mgr.GetClient()
 	return &Controller{
-		client:    c,
-		state:     st,
-		guard:     guard,
-		gate:      gate,
-		config:    cfg,
-		detector:  NewDetector(cfg, st.AuditLog),
-		fallback:  NewFallbackManager(c, cfg, st.AuditLog),
-		scavenger: NewScavenger(c, cfg, st.AuditLog),
-		reclaimer: NewReclaimer(c, cfg, st.NodeLock, st.AuditLog),
+		client:        c,
+		state:         st,
+		guard:         guard,
+		gate:          gate,
+		config:        cfg,
+		detector:      NewDetector(cfg, st.AuditLog),
+		fallback:      NewFallbackManager(c, cfg, st.AuditLog),
+		scavenger:     NewScavenger(c, cfg, st.AuditLog),
+		reclaimer:     NewReclaimer(c, cfg, st.NodeLock, st.AuditLog),
+		redistributor: NewRedistributor(c, cfg, st.NodeLock, st.AuditLog),
 	}
 }
 
@@ -83,6 +85,15 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 		recs = append(recs, scavRecs...)
 	}
 
+	// CPU pod redistribution (move CPU pods to/from GPU nodes)
+	if c.config.GPU.CPUScavengingEnabled {
+		redistRecs, err := c.redistributor.Analyze(ctx, snapshot)
+		if err != nil {
+			return nil, err
+		}
+		recs = append(recs, redistRecs...)
+	}
+
 	// GPU node reclaim recommendations (evict non-GPU pods from GPU-idle nodes)
 	if c.config.GPU.ReclaimEnabled {
 		reclaimRecs, err := c.reclaimer.Analyze(ctx, snapshot)
@@ -121,6 +132,8 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return c.scavenger.Execute(ctx, rec)
 	case "reclaim-gpu-node":
 		return c.reclaimer.Execute(ctx, rec)
+	case "redistribute-to-gpu", "evacuate-from-gpu":
+		return c.redistributor.Execute(ctx, rec)
 	default:
 		return c.fallback.Execute(ctx, rec)
 	}

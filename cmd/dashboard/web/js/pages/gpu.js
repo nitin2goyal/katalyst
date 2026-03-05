@@ -147,6 +147,7 @@ const ACTION_COLORS = {
   'enabled': 'green', 'disabled': 'amber', 'skipped': 'gray',
   'failed': 'red', 'detected': 'blue', 'recommend': 'blue',
   'complete': 'green', 'updated': 'green',
+  'redistribute': 'purple', 'evacuate': 'amber',
 };
 
 function actionBadgeColor(action) {
