@@ -13,6 +13,7 @@ import { renderNodeGroupDetail } from './pages/nodegroup-detail.js';
 import { renderWorkloadDetail } from './pages/workload-detail.js';
 import { renderSettings } from './pages/settings.js';
 import { renderInfrastructure } from './pages/infrastructure.js';
+import { renderAutoscaler } from './pages/autoscaler.js';
 
 // Backward-compat redirects for old routes
 const redirectMap = {
@@ -45,6 +46,8 @@ addRoute('/nodegroups/{id}', renderNodeGroupDetail);
 addRoute('/workloads/{ns}/{kind}/{name}', renderWorkloadDetail);
 addRoute('/infrastructure', (params) => renderInfrastructure(params));
 addRoute('/infrastructure/{tab}', (params) => renderInfrastructure(params));
+addRoute('/autoscaler', (params) => renderAutoscaler(params));
+addRoute('/autoscaler/{tab}', (params) => renderAutoscaler(params));
 addRoute('/settings', renderSettings);
 
 // Backward-compat redirects for old routes

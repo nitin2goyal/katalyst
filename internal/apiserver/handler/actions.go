@@ -26,8 +26,15 @@ var badStatusSet = map[string]bool{
 	"ErrImagePull":              true,
 	"ContainerStatusUnknown":    true,
 	"Evicted":                   true,
-	"Init:OOMKilled":            true,
 	"CreateContainerConfigError": true,
+	// Init container variants (prefixed by computePodStatus)
+	"Init:OOMKilled":                 true,
+	"Init:CrashLoopBackOff":          true,
+	"Init:Error":                     true,
+	"Init:ImagePullBackOff":          true,
+	"Init:ErrImagePull":              true,
+	"Init:ContainerStatusUnknown":    true,
+	"Init:CreateContainerConfigError": true,
 }
 
 type ActionsHandler struct {

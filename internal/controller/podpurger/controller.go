@@ -27,8 +27,15 @@ var badStatusSet = map[string]bool{
 	"ErrImagePull":               true,
 	"ContainerStatusUnknown":     true,
 	"Evicted":                    true,
-	"Init:OOMKilled":             true,
 	"CreateContainerConfigError": true,
+	// Init container variants (prefixed by computePodStatus)
+	"Init:OOMKilled":                 true,
+	"Init:CrashLoopBackOff":          true,
+	"Init:Error":                     true,
+	"Init:ImagePullBackOff":          true,
+	"Init:ErrImagePull":              true,
+	"Init:ContainerStatusUnknown":    true,
+	"Init:CreateContainerConfigError": true,
 }
 
 // systemNamespaces are skipped by the purger.
@@ -143,10 +150,10 @@ func (c *Controller) run(ctx context.Context) {
 func computePodStatus(pod *corev1.Pod) string {
 	for _, cs := range pod.Status.InitContainerStatuses {
 		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
-			return cs.State.Waiting.Reason
+			return "Init:" + cs.State.Waiting.Reason
 		}
-		if cs.State.Terminated != nil && cs.State.Terminated.Reason == "OOMKilled" {
-			return "Init:OOMKilled"
+		if cs.State.Terminated != nil && cs.State.Terminated.Reason != "" {
+			return "Init:" + cs.State.Terminated.Reason
 		}
 	}
 	for _, cs := range pod.Status.ContainerStatuses {

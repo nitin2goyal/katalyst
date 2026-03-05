@@ -5,18 +5,24 @@ import { skeleton, makeSortable, confirmDialog, toast, cardHeader, attachPaginat
 const BAD_STATUSES = [
   'CrashLoopBackOff', 'Error', 'OOMKilled', 'ImagePullBackOff', 'ErrImagePull',
   'ContainerStatusUnknown', 'Evicted', 'Failed', 'Succeeded', 'Unknown',
-  'Init:OOMKilled', 'CreateContainerConfigError',
+  'CreateContainerConfigError',
+  // Init container variants
+  'Init:OOMKilled', 'Init:CrashLoopBackOff', 'Init:Error',
+  'Init:ImagePullBackOff', 'Init:ErrImagePull', 'Init:ContainerStatusUnknown',
+  'Init:CreateContainerConfigError',
 ];
 
 function statusBadgeClass(status) {
   switch (status) {
-    case 'CrashLoopBackOff': case 'OOMKilled': case 'Init:OOMKilled':
-      return 'red';
-    case 'Error': case 'Failed':
+    case 'CrashLoopBackOff': case 'OOMKilled':
+    case 'Init:OOMKilled': case 'Init:CrashLoopBackOff':
+    case 'Error': case 'Failed': case 'Init:Error':
       return 'red';
     case 'Evicted': case 'ContainerStatusUnknown': case 'Unknown':
+    case 'Init:ContainerStatusUnknown':
       return 'amber';
     case 'ImagePullBackOff': case 'ErrImagePull': case 'CreateContainerConfigError':
+    case 'Init:ImagePullBackOff': case 'Init:ErrImagePull': case 'Init:CreateContainerConfigError':
       return 'yellow';
     case 'Succeeded':
       return 'gray';

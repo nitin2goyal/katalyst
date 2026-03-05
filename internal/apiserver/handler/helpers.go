@@ -93,14 +93,16 @@ func IsSystemPod(pod *corev1.Pod) bool {
 // computePodStatus returns a descriptive status that surfaces container-level
 // issues (CrashLoopBackOff, ImagePullBackOff, OOMKilled, etc.) instead of
 // just the pod phase which can misleadingly show "Running".
+// Init container issues are prefixed with "Init:" to match kubectl display.
 func computePodStatus(pod *corev1.Pod) string {
-	// Check init containers first
+	// Check init containers first — prefix with "Init:" to distinguish from
+	// regular container issues (matches kubectl's display convention).
 	for _, cs := range pod.Status.InitContainerStatuses {
 		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
-			return cs.State.Waiting.Reason
+			return "Init:" + cs.State.Waiting.Reason
 		}
-		if cs.State.Terminated != nil && cs.State.Terminated.Reason == "OOMKilled" {
-			return "Init:OOMKilled"
+		if cs.State.Terminated != nil && cs.State.Terminated.Reason != "" {
+			return "Init:" + cs.State.Terminated.Reason
 		}
 	}
 	// Check regular containers

@@ -42,6 +42,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	metricsHandler := handler.NewMetricsHandler(clusterState, provider, k8sClient, cfg)
 	policyHandler := handler.NewPolicyHandler(clusterState, cfg)
 	actionsHandler := handler.NewActionsHandler(clusterState, k8sClient)
+	autoscalerHandler := handler.NewAutoscalerHandler(clusterState, cfg)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Cluster
@@ -131,6 +132,10 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		// Actions
 		r.Get("/actions/bad-pods", actionsHandler.ListBadPods)
 		r.Post("/actions/delete-pods", actionsHandler.DeletePods)
+
+		// Autoscaler
+		r.Get("/autoscaler/status", autoscalerHandler.GetStatus)
+		r.Get("/autoscaler/events", autoscalerHandler.GetEvents)
 	})
 
 	return r
