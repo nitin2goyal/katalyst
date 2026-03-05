@@ -65,7 +65,9 @@ func (r *Redistributor) Analyze(ctx context.Context, snapshot *optimizer.Cluster
 
 // analyzeEvacuate finds GPU nodes that have no GPU pods but have non-system CPU pods.
 func (r *Redistributor) analyzeEvacuate(snapshot *optimizer.ClusterSnapshot) []optimizer.Recommendation {
+	logger := log.Log.WithName("gpu-redistributor").WithName("evacuate")
 	var recs []optimizer.Recommendation
+	var gpuIdleNodes int
 
 	for i := range snapshot.Nodes {
 		node := &snapshot.Nodes[i]
@@ -77,6 +79,7 @@ func (r *Redistributor) analyzeEvacuate(snapshot *optimizer.ClusterSnapshot) []o
 		if nodeHasGPUPods(node) {
 			continue
 		}
+		gpuIdleNodes++
 
 		// Find non-GPU, non-system pods on this GPU-idle node
 		for _, pod := range node.Pods {
@@ -110,13 +113,25 @@ func (r *Redistributor) analyzeEvacuate(snapshot *optimizer.ClusterSnapshot) []o
 		}
 	}
 
+	logger.Info("Evacuate analysis", "gpuIdleNodes", gpuIdleNodes, "podsToEvacuate", len(recs))
 	return recs
+}
+
+// gpuNodeHeadroom tracks available CPU and memory on a scavenging GPU node.
+type gpuNodeHeadroom struct {
+	nodeName string
+	cpuFree  int64 // millicores
+	memFree  int64 // bytes
 }
 
 // analyzeAttract finds CPU pods on CPU nodes that could be moved to scavenging GPU nodes with active GPU workloads.
 func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []optimizer.Recommendation {
-	// Compute total available headroom on scavenging-labeled GPU nodes
-	var totalHeadroomMillis int64
+	logger := log.Log.WithName("gpu-redistributor").WithName("attract")
+
+	// Build per-node headroom for scavenging-labeled GPU nodes
+	var gpuNodes []gpuNodeHeadroom
+	var totalCPUHeadroom, totalMemHeadroom int64
+
 	for i := range snapshot.Nodes {
 		node := &snapshot.Nodes[i]
 		if !node.IsGPUNode {
@@ -128,13 +143,26 @@ func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []op
 		if _, isScavenger := node.Node.Labels[GPUScavengerLabel]; !isScavenger {
 			continue
 		}
-		headroom := node.CPUCapacity - node.CPURequested
-		if headroom > 0 {
-			totalHeadroomMillis += headroom
+		cpuFree := node.CPUCapacity - node.CPURequested
+		memFree := node.MemoryCapacity - node.MemoryRequested
+		if cpuFree > 0 && memFree > 0 {
+			gpuNodes = append(gpuNodes, gpuNodeHeadroom{
+				nodeName: node.Node.Name,
+				cpuFree:  cpuFree,
+				memFree:  memFree,
+			})
+			totalCPUHeadroom += cpuFree
+			totalMemHeadroom += memFree
 		}
 	}
 
-	if totalHeadroomMillis <= 0 {
+	logger.Info("GPU scavenging headroom",
+		"scavengingNodes", len(gpuNodes),
+		"totalCPUHeadroomMillis", totalCPUHeadroom,
+		"totalMemHeadroomMB", totalMemHeadroom/(1024*1024))
+
+	if len(gpuNodes) == 0 {
+		logger.Info("No GPU nodes with available headroom, skipping attract")
 		return nil
 	}
 
@@ -143,8 +171,10 @@ func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []op
 		pod      *corev1.Pod
 		nodeName string
 		cpuReq   int64
+		memReq   int64
 	}
 	var candidates []candidate
+	var skippedNonIntuition, skippedSystem, skippedGPU, skippedNoCPU int
 
 	for i := range snapshot.Nodes {
 		node := &snapshot.Nodes[i]
@@ -154,24 +184,40 @@ func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []op
 
 		for _, pod := range node.Pods {
 			if pod.Namespace != intuitionNamespace {
+				skippedNonIntuition++
 				continue
 			}
 			if shouldSkipEviction(pod) {
+				skippedSystem++
 				continue
 			}
 			if isGPUPod(pod) {
+				skippedGPU++
 				continue
 			}
 			cpuReq := podCPUMillis(pod)
 			if cpuReq <= 0 {
+				skippedNoCPU++
 				continue
 			}
 			candidates = append(candidates, candidate{
 				pod:      pod,
 				nodeName: node.Node.Name,
 				cpuReq:   cpuReq,
+				memReq:   podMemoryBytes(pod),
 			})
 		}
+	}
+
+	logger.Info("Attract candidates from CPU nodes",
+		"eligible", len(candidates),
+		"skippedNonIntuition", skippedNonIntuition,
+		"skippedSystem", skippedSystem,
+		"skippedGPU", skippedGPU,
+		"skippedNoCPU", skippedNoCPU)
+
+	if len(candidates) == 0 {
+		return nil
 	}
 
 	// Sort by CPU request descending — move big pods first for maximum savings
@@ -180,13 +226,25 @@ func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []op
 	})
 
 	var recs []optimizer.Recommendation
-	remainingHeadroom := totalHeadroomMillis
+	var skippedNoFit int
 
 	for _, c := range candidates {
 		if len(recs) >= maxRedistributePerCycle {
 			break
 		}
-		if c.cpuReq > remainingHeadroom {
+
+		// Find a GPU node that can fit this pod by both CPU and memory.
+		// Pick the node with most CPU free (simulates LeastRequested scoring).
+		bestIdx := -1
+		for j, gn := range gpuNodes {
+			if c.cpuReq <= gn.cpuFree && c.memReq <= gn.memFree {
+				if bestIdx == -1 || gn.cpuFree > gpuNodes[bestIdx].cpuFree {
+					bestIdx = j
+				}
+			}
+		}
+		if bestIdx == -1 {
+			skippedNoFit++
 			continue
 		}
 
@@ -198,20 +256,31 @@ func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []op
 			TargetKind:     "Pod",
 			TargetName:     c.pod.Name,
 			TargetNamespace: c.pod.Namespace,
-			Summary: fmt.Sprintf("Redistribute CPU pod %s/%s from %s to GPU node (%dm CPU, %dm headroom left)",
-				c.pod.Namespace, c.pod.Name, c.nodeName, c.cpuReq, remainingHeadroom),
+			Summary: fmt.Sprintf("Redistribute CPU pod %s/%s from %s to GPU node %s (%dm CPU, %dMB mem)",
+				c.pod.Namespace, c.pod.Name, c.nodeName, gpuNodes[bestIdx].nodeName,
+				c.cpuReq, c.memReq/(1024*1024)),
 			Details: map[string]string{
-				"action":           "redistribute-to-gpu",
-				"podName":          c.pod.Name,
-				"namespace":        c.pod.Namespace,
-				"sourceNode":       c.nodeName,
-				"cpuMillis":        fmt.Sprintf("%d", c.cpuReq),
-				"headroomRemaining": fmt.Sprintf("%d", remainingHeadroom-c.cpuReq),
+				"action":     "redistribute-to-gpu",
+				"podName":    c.pod.Name,
+				"namespace":  c.pod.Namespace,
+				"sourceNode": c.nodeName,
+				"targetNode": gpuNodes[bestIdx].nodeName,
+				"cpuMillis":  fmt.Sprintf("%d", c.cpuReq),
+				"memBytes":   fmt.Sprintf("%d", c.memReq),
 			},
 		}
 		recs = append(recs, rec)
-		remainingHeadroom -= c.cpuReq
+
+		// Deduct from the selected GPU node
+		gpuNodes[bestIdx].cpuFree -= c.cpuReq
+		gpuNodes[bestIdx].memFree -= c.memReq
 	}
+
+	if skippedNoFit > 0 {
+		logger.Info("Some candidates skipped — no GPU node with enough CPU+memory headroom",
+			"skippedNoFit", skippedNoFit)
+	}
+	logger.Info("Attract recommendations generated", "count", len(recs))
 
 	return recs
 }
@@ -477,6 +546,17 @@ func podCPUMillis(pod *corev1.Pod) int64 {
 	for _, c := range pod.Spec.Containers {
 		if cpu, ok := c.Resources.Requests[corev1.ResourceCPU]; ok {
 			total += cpu.MilliValue()
+		}
+	}
+	return total
+}
+
+// podMemoryBytes returns total memory request in bytes for a pod.
+func podMemoryBytes(pod *corev1.Pod) int64 {
+	var total int64
+	for _, c := range pod.Spec.Containers {
+		if mem, ok := c.Resources.Requests[corev1.ResourceMemory]; ok {
+			total += mem.Value()
 		}
 	}
 	return total
