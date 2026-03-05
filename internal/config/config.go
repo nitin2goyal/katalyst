@@ -229,17 +229,6 @@ func DefaultConfig() *Config {
 			Enabled:        true,
 			UpdateInterval: 5 * time.Minute,
 		},
-		NodeAutoscaler: NodeAutoscalerConfig{
-			Enabled:              false,
-			DryRun:               true, // safe default
-			NodeTemplatesEnabled: true,
-			ScanInterval:       30 * time.Second,
-			ScaleUpThreshold:   98.0,
-			ScaleDownThreshold: 50.0,
-			ScaleDownDelay:     10 * time.Minute,
-			MaxScaleUpNodes:    5,
-			MaxScaleDownNodes:  2,
-		},
 		NodeGroupMgr: NodeGroupMgrConfig{
 			Enabled: true,
 		},
@@ -265,28 +254,10 @@ func DefaultConfig() *Config {
 			ConfidenceFullDays: 7,
 			ExcludeNamespaces:  []string{"kube-system", "monitoring"},
 		},
-		Evictor: EvictorConfig{
-			Enabled:                false,
-			DryRun:                 true, // safe default: recommend-only until explicitly enabled
-			UtilizationThreshold:   40.0,
-			ConsolidationInterval:  5 * time.Minute,
-			MaxConcurrentEvictions: 3,
-			DrainTimeout:           5 * time.Minute,
-			PartialDrainTTL:        30 * time.Minute,
-		},
 		PodPurger: PodPurgerConfig{
 			Enabled:      false,
 			PollInterval: 5 * time.Minute,
 			MinPodAge:    30 * time.Minute,
-		},
-		Rebalancer: RebalancerConfig{
-			Enabled:               false,
-			DryRun:                true, // safe default
-			Schedule:              "0 3 * * SUN",
-			ImbalanceThresholdPct: 40.0,
-			TargetUtilizationPct:  95.0,
-			ConsolidationInterval: 60 * time.Second,
-			MaxEvacuatePerCycle:   2,
 		},
 		GPU: GPUConfig{
 			Enabled:                      true,
@@ -304,8 +275,6 @@ func DefaultConfig() *Config {
 			MaxSpotPct:              70.0,
 			FallbackToOnDemand:      true,
 			DiversityMinTypes:       3,
-			InterruptionHandling:    false,
-			DrainGracePeriodSeconds: 30,
 			MaxCostOverODPercent:    90,
 		},
 		Hibernation: HibernationConfig{
@@ -359,11 +328,6 @@ func DefaultConfig() *Config {
 	cfg.NodeGroupMgr.MinAdjustment.ObservationPeriod = 48 * time.Hour
 	cfg.NodeGroupMgr.EmptyGroupDetection.Enabled = true
 	cfg.NodeGroupMgr.EmptyGroupDetection.EmptyPeriod = 14 * 24 * time.Hour
-
-	// Rebalancer BusyRedistribution defaults
-	cfg.Rebalancer.BusyRedistribution.Enabled = true
-	cfg.Rebalancer.BusyRedistribution.OverloadedThresholdPct = 99.0
-	cfg.Rebalancer.BusyRedistribution.TargetUtilizationPct = 95.0
 
 	cfg.applyEnvOverrides()
 	return cfg
@@ -446,11 +410,6 @@ func (c *Config) Validate() error {
 
 	if c.Region == "" {
 		return fmt.Errorf("region is required: set in config file or REGION env var")
-	}
-
-	if c.NodeAutoscaler.ScaleUpThreshold <= c.NodeAutoscaler.ScaleDownThreshold {
-		return fmt.Errorf("scaleUpThreshold (%.1f) must be greater than scaleDownThreshold (%.1f)",
-			c.NodeAutoscaler.ScaleUpThreshold, c.NodeAutoscaler.ScaleDownThreshold)
 	}
 
 	if c.Rightsizer.OOMBumpMultiplier < 1.0 {

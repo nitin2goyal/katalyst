@@ -26,15 +26,6 @@ config:
     enabled: true
     updateInterval: "5m"
 
-  nodeAutoscaler:
-    enabled: false
-    scanInterval: "30s"
-    scaleUpThreshold: 80
-    scaleDownThreshold: 30
-    scaleDownDelay: "10m"
-    maxScaleUpNodes: 5
-    maxScaleDownNodes: 2
-
   nodegroupManager:
     enabled: true
     minAdjustment:
@@ -69,21 +60,6 @@ config:
       - kube-system
       - monitoring
 
-  evictor:
-    enabled: false
-    utilizationThreshold: 40
-    consolidationInterval: "5m"
-    maxConcurrentEvictions: 2
-    dryRun: false
-
-  rebalancer:
-    enabled: false
-    schedule: "0 3 * * SUN"
-    busyRedistribution:
-      enabled: true
-      overloadedThresholdPct: 90
-      targetUtilizationPct: 70
-
   gpu:
     enabled: true
     idleThresholdPct: 5
@@ -97,7 +73,6 @@ config:
     maxSpotPercentage: 70
     fallbackToOnDemand: true
     diversityMinTypes: 3
-    interruptionHandling: false
     maxCostOverODPercent: 90
 
   hibernation:

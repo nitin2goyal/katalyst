@@ -68,30 +68,12 @@ func (h *PolicyHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var policies []policy
 
-	if h.cfg.Rebalancer.Enabled {
-		policies = append(policies, policy{
-			Name:        "High Availability",
-			Description: "Spread workloads across AZs via rebalancer",
-			Type:        "topology-spread",
-			Target:      "*/*",
-			Enabled:     true,
-		})
-	}
 	if h.cfg.GPU.Enabled {
 		policies = append(policies, policy{
 			Name:        "GPU Affinity",
 			Description: "Schedule GPU workloads only on GPU nodes",
 			Type:        "node-affinity",
 			Target:      "gpu/*",
-			Enabled:     true,
-		})
-	}
-	if h.cfg.Evictor.Enabled {
-		policies = append(policies, policy{
-			Name:        "Node Consolidation",
-			Description: "Evict pods from underutilized nodes for bin-packing",
-			Type:        "bin-packing",
-			Target:      "*/*",
 			Enabled:     true,
 		})
 	}

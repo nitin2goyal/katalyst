@@ -12,6 +12,8 @@ import (
 )
 
 // AutoscalerHandler provides the autoscaler status dashboard endpoints.
+// Node lifecycle (cordon/drain/scale) is managed by GKE autoscaler;
+// this handler provides observability into node state only.
 type AutoscalerHandler struct {
 	state  *state.ClusterState
 	config *config.Config
@@ -22,27 +24,9 @@ func NewAutoscalerHandler(st *state.ClusterState, cfg *config.Config) *Autoscale
 	return &AutoscalerHandler{state: st, config: cfg}
 }
 
-// GetStatus returns autoscaler config summary, node counts, and per-node analysis
-// with removal blockers.
+// GetStatus returns node counts and per-node analysis (observability only).
 func (h *AutoscalerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	nodes := h.state.GetAllNodes()
-
-	// Config summary
-	configSummary := map[string]interface{}{
-		"mode":                   h.config.Mode,
-		"evictorEnabled":         h.config.Evictor.Enabled,
-		"evictorDryRun":          h.config.Evictor.DryRun,
-		"evictorAutoApprove":     h.config.Evictor.AutoApprove,
-		"nodeAutoscalerEnabled":  h.config.NodeAutoscaler.Enabled,
-		"nodeAutoscalerDryRun":   h.config.NodeAutoscaler.DryRun,
-		"utilizationThreshold":   h.config.Evictor.UtilizationThreshold,
-		"maxConcurrentEvictions": h.config.Evictor.MaxConcurrentEvictions,
-		"partialDrainTTL":        h.config.Evictor.PartialDrainTTL.String(),
-		"drainTimeout":           h.config.Evictor.DrainTimeout.String(),
-		"scaleDownThreshold":     h.config.NodeAutoscaler.ScaleDownThreshold,
-		"scaleDownDelay":         h.config.NodeAutoscaler.ScaleDownDelay.String(),
-		"maxScaleDownNodes":      h.config.NodeAutoscaler.MaxScaleDownNodes,
-	}
 
 	// Count summary and build node analysis
 	totalNodes := len(nodes)
@@ -50,34 +34,18 @@ func (h *AutoscalerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	cordonedNodes := 0
 	cordonedByUs := 0
 	cordonedExternal := 0
-	underutilizedNodes := 0
-	blockedNodes := 0
-
-	// Count nodes currently cordoned by us (for max concurrent check)
-	currentCordonedByUs := 0
-	for _, n := range nodes {
-		if n.Node.Spec.Unschedulable {
-			if _, ours := n.Node.Annotations["koptimizer.io/cordoned-by"]; ours {
-				currentCordonedByUs++
-			}
-		}
-	}
 
 	var analysis []map[string]interface{}
 
 	for _, n := range nodes {
 		isEmpty := n.IsEmpty()
 		isCordoned := n.Node.Spec.Unschedulable
-		isUnderutilized := n.IsUnderutilized(h.config.Evictor.UtilizationThreshold)
 
 		if isEmpty {
 			emptyNodes++
 		}
 		if isCordoned {
 			cordonedNodes++
-		}
-		if isUnderutilized && !isCordoned {
-			underutilizedNodes++
 		}
 
 		// Determine cordon source
@@ -96,29 +64,19 @@ func (h *AutoscalerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Only include nodes that are interesting: empty, cordoned, or underutilized
-		if !isEmpty && !isCordoned && !isUnderutilized {
+		// Only include nodes that are interesting: empty or cordoned
+		if !isEmpty && !isCordoned {
 			continue
 		}
 
-		// Count pod types and check evictability
+		// Count pod types
 		appPods, dsPods := 0, 0
-		hasNonEvictable := false
 		for _, pod := range n.Pods {
 			if IsSystemPod(pod) {
 				dsPods++
 			} else {
 				appPods++
-				if !isEvictablePod(pod) {
-					hasNonEvictable = true
-				}
 			}
-		}
-
-		// Compute removal blockers
-		blockers := h.computeBlockers(n, isEmpty, hasNonEvictable, currentCordonedByUs)
-		if len(blockers) > 0 {
-			blockedNodes++
 		}
 
 		entry := map[string]interface{}{
@@ -129,7 +87,6 @@ func (h *AutoscalerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 			"isCordoned":        isCordoned,
 			"cordonedBy":        cordonedBy,
 			"cordonedAt":        cordonedAt,
-			"isUnderutilized":   isUnderutilized,
 			"appPodCount":       appPods,
 			"daemonSetPodCount": dsPods,
 			"cpuAllocPct":       n.CPURequestUtilization(),
@@ -137,18 +94,12 @@ func (h *AutoscalerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 			"cpuUtilPct":        n.CPUUtilization(),
 			"memUtilPct":        n.MemoryUtilization(),
 			"hourlyCostUSD":     n.HourlyCostUSD,
-			"removalBlockers":   blockers,
 		}
 		analysis = append(analysis, entry)
 	}
 
-	// Sort analysis: blocked first, then by hourly cost descending
+	// Sort analysis by hourly cost descending
 	sort.Slice(analysis, func(i, j int) bool {
-		bi := len(analysis[i]["removalBlockers"].([]string))
-		bj := len(analysis[j]["removalBlockers"].([]string))
-		if bi != bj {
-			return bi > bj
-		}
 		ci := analysis[i]["hourlyCostUSD"].(float64)
 		cj := analysis[j]["hourlyCostUSD"].(float64)
 		return ci > cj
@@ -159,70 +110,19 @@ func (h *AutoscalerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"config": configSummary,
+		"config": map[string]interface{}{
+			"mode":    h.config.Mode,
+			"message": "Node lifecycle managed by GKE cluster autoscaler",
+		},
 		"summary": map[string]interface{}{
-			"totalNodes":         totalNodes,
-			"emptyNodes":         emptyNodes,
-			"cordonedNodes":      cordonedNodes,
-			"cordonedByUs":       cordonedByUs,
-			"cordonedExternal":   cordonedExternal,
-			"underutilizedNodes": underutilizedNodes,
-			"blockedNodes":       blockedNodes,
+			"totalNodes":       totalNodes,
+			"emptyNodes":       emptyNodes,
+			"cordonedNodes":    cordonedNodes,
+			"cordonedByUs":     cordonedByUs,
+			"cordonedExternal": cordonedExternal,
 		},
 		"nodes": analysis,
 	})
-}
-
-// computeBlockers returns human-readable reasons why this node can't be auto-removed.
-func (h *AutoscalerHandler) computeBlockers(
-	n *state.NodeState,
-	isEmpty bool,
-	hasNonEvictable bool,
-	currentCordonedByUs int,
-) []string {
-	var blockers []string
-
-	// Config-level blockers
-	if !h.config.Evictor.Enabled {
-		blockers = append(blockers, "Evictor disabled")
-	} else if h.config.Evictor.DryRun {
-		blockers = append(blockers, "Evictor in dry-run")
-	}
-
-	if !h.config.NodeAutoscaler.Enabled {
-		blockers = append(blockers, "Node autoscaler disabled")
-	} else if h.config.NodeAutoscaler.DryRun {
-		blockers = append(blockers, "Node autoscaler in dry-run")
-	}
-
-	if h.config.Mode == "recommend" || h.config.Mode == "monitor" {
-		blockers = append(blockers, "Mode is "+h.config.Mode+" (not active)")
-	}
-
-	// Operational blockers (only relevant for non-cordoned nodes)
-	if !n.Node.Spec.Unschedulable {
-		if currentCordonedByUs >= h.config.Evictor.MaxConcurrentEvictions {
-			blockers = append(blockers, "Max concurrent evictions reached")
-		}
-
-		if !isEmpty && !n.IsUnderutilized(h.config.Evictor.UtilizationThreshold) {
-			blockers = append(blockers, "Utilization above threshold")
-		}
-
-		if hasNonEvictable {
-			blockers = append(blockers, "Has non-evictable pods (local storage/standalone)")
-		}
-	}
-
-	// Annotation-based exclusions
-	if v, ok := n.Node.Annotations["koptimizer.io/exclude"]; ok && v == "true" {
-		blockers = append(blockers, "Excluded via annotation")
-	}
-	if v, ok := n.Node.Annotations["cluster-autoscaler.kubernetes.io/scale-down-disabled"]; ok && v == "true" {
-		blockers = append(blockers, "Scale-down disabled via annotation")
-	}
-
-	return blockers
 }
 
 // isEvictablePod checks if a pod can be safely evicted for node drain.

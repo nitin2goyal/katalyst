@@ -31,26 +31,17 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"clusterName":   h.config.ClusterName,
 		"controllers": map[string]bool{
 			"costMonitor":    h.config.CostMonitor.Enabled,
-			"nodeAutoscaler": h.config.NodeAutoscaler.Enabled,
 			"nodegroupMgr":   h.config.NodeGroupMgr.Enabled,
 			"rightsizer":     h.config.Rightsizer.Enabled,
 			"workloadScaler": h.config.WorkloadScaler.Enabled,
-			"evictor":        h.config.Evictor.Enabled,
-			"rebalancer":     h.config.Rebalancer.Enabled,
 			"gpu":            h.config.GPU.Enabled,
 			"gpuReclaim":     h.config.GPU.ReclaimEnabled,
 			"commitments":    h.config.Commitments.Enabled,
 			"aiGate":         h.config.AIGate.Enabled,
 			"podPurger":      h.config.PodPurger.Enabled,
 		},
-		"dryRun": map[string]bool{
-			"nodeAutoscaler": h.config.NodeAutoscaler.DryRun,
-			"evictor":        h.config.Evictor.DryRun,
-			"rebalancer":     h.config.Rebalancer.DryRun,
-		},
 		"autoApprove": map[string]bool{
 			"rightsizer": h.config.Rightsizer.AutoApprove,
-			"evictor":    h.config.Evictor.AutoApprove,
 		},
 	})
 }
@@ -122,18 +113,12 @@ func (h *ConfigHandler) SetController(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "costMonitor":
 		h.config.CostMonitor.Enabled = req.Enabled
-	case "nodeAutoscaler":
-		h.config.NodeAutoscaler.Enabled = req.Enabled
 	case "nodegroupMgr":
 		h.config.NodeGroupMgr.Enabled = req.Enabled
 	case "rightsizer":
 		h.config.Rightsizer.Enabled = req.Enabled
 	case "workloadScaler":
 		h.config.WorkloadScaler.Enabled = req.Enabled
-	case "evictor":
-		h.config.Evictor.Enabled = req.Enabled
-	case "rebalancer":
-		h.config.Rebalancer.Enabled = req.Enabled
 	case "gpu":
 		h.config.GPU.Enabled = req.Enabled
 	case "gpuReclaim":
@@ -175,8 +160,6 @@ func (h *ConfigHandler) SetAutoApprove(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "rightsizer":
 		h.config.Rightsizer.AutoApprove = req.AutoApprove
-	case "evictor":
-		h.config.Evictor.AutoApprove = req.AutoApprove
 	default:
 		h.mu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "controller does not support autoApprove: " + name})
@@ -186,39 +169,4 @@ func (h *ConfigHandler) SetAutoApprove(w http.ResponseWriter, r *http.Request) {
 
 	h.settings.SaveAutoApprove(name, req.AutoApprove)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "autoApprove": req.AutoApprove})
-}
-
-func (h *ConfigHandler) SetControllerDryRun(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-
-	var req struct {
-		DryRun bool `json:"dryRun"`
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
-		return
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-		return
-	}
-
-	h.mu.Lock()
-	switch name {
-	case "nodeAutoscaler":
-		h.config.NodeAutoscaler.DryRun = req.DryRun
-	case "evictor":
-		h.config.Evictor.DryRun = req.DryRun
-	case "rebalancer":
-		h.config.Rebalancer.DryRun = req.DryRun
-	default:
-		h.mu.Unlock()
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "controller does not support dryRun: " + name})
-		return
-	}
-	h.mu.Unlock()
-
-	h.settings.SaveControllerDryRun(name, req.DryRun)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "dryRun": req.DryRun})
 }

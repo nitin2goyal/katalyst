@@ -92,12 +92,9 @@ func (h *ClusterHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		"mode":   h.config.Mode,
 		"controllers": map[string]string{
 			"costMonitor":    boolToStatus(h.config.CostMonitor.Enabled),
-			"nodeAutoscaler": boolToStatus(h.config.NodeAutoscaler.Enabled),
 			"nodegroupMgr":   boolToStatus(h.config.NodeGroupMgr.Enabled),
 			"rightsizer":     boolToStatus(h.config.Rightsizer.Enabled),
 			"workloadScaler": boolToStatus(h.config.WorkloadScaler.Enabled),
-			"evictor":        boolToStatus(h.config.Evictor.Enabled),
-			"rebalancer":     boolToStatus(h.config.Rebalancer.Enabled),
 			"gpu":            boolToStatus(h.config.GPU.Enabled),
 			"commitments":    boolToStatus(h.config.Commitments.Enabled),
 			"aiGate":         boolToStatus(h.config.AIGate.Enabled),

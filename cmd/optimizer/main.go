@@ -28,15 +28,11 @@ import (
 	"github.com/koptimizer/koptimizer/internal/controller/alerts"
 	"github.com/koptimizer/koptimizer/internal/controller/commitments"
 	"github.com/koptimizer/koptimizer/internal/controller/costmonitor"
-	"github.com/koptimizer/koptimizer/internal/controller/evictor"
 	"github.com/koptimizer/koptimizer/internal/controller/gpu"
 	"github.com/koptimizer/koptimizer/internal/controller/hibernation"
 	"github.com/koptimizer/koptimizer/internal/controller/network"
 	"github.com/koptimizer/koptimizer/internal/controller/podpurger"
-	"github.com/koptimizer/koptimizer/internal/controller/nodeautoscaler"
-	"github.com/koptimizer/koptimizer/internal/controller/nodetemplates"
 	"github.com/koptimizer/koptimizer/internal/controller/nodegroupmgr"
-	"github.com/koptimizer/koptimizer/internal/controller/rebalancer"
 	"github.com/koptimizer/koptimizer/internal/controller/rightsizer"
 	"github.com/koptimizer/koptimizer/internal/controller/spot"
 	"github.com/koptimizer/koptimizer/internal/controller/storage"
@@ -127,18 +123,12 @@ func main() {
 			switch name {
 			case "costMonitor":
 				cfg.CostMonitor.Enabled = enabled
-			case "nodeAutoscaler":
-				cfg.NodeAutoscaler.Enabled = enabled
 			case "nodegroupMgr":
 				cfg.NodeGroupMgr.Enabled = enabled
 			case "rightsizer":
 				cfg.Rightsizer.Enabled = enabled
 			case "workloadScaler":
 				cfg.WorkloadScaler.Enabled = enabled
-			case "evictor":
-				cfg.Evictor.Enabled = enabled
-			case "rebalancer":
-				cfg.Rebalancer.Enabled = enabled
 			case "gpu":
 				cfg.GPU.Enabled = enabled
 			case "commitments":
@@ -151,26 +141,11 @@ func main() {
 		}
 		setupLog.Info("Restoring persisted controller states", "count", len(ctrlStates))
 	}
-	if dryRunStates := settingsStore.LoadControllerDryRunStates(); dryRunStates != nil {
-		for name, dryRun := range dryRunStates {
-			switch name {
-			case "nodeAutoscaler":
-				cfg.NodeAutoscaler.DryRun = dryRun
-			case "evictor":
-				cfg.Evictor.DryRun = dryRun
-			case "rebalancer":
-				cfg.Rebalancer.DryRun = dryRun
-			}
-		}
-		setupLog.Info("Restoring persisted controller dry-run states", "count", len(dryRunStates))
-	}
 	if autoApproveStates := settingsStore.LoadAutoApproveStates(); autoApproveStates != nil {
 		for name, autoApprove := range autoApproveStates {
 			switch name {
 			case "rightsizer":
 				cfg.Rightsizer.AutoApprove = autoApprove
-			case "evictor":
-				cfg.Evictor.AutoApprove = autoApprove
 			}
 		}
 		setupLog.Info("Restoring persisted auto-approve states", "count", len(autoApproveStates))
@@ -346,13 +321,6 @@ func main() {
 		}
 	}
 
-	if cfg.NodeAutoscaler.Enabled {
-		if err := nodeautoscaler.NewController(mgr, provider, clusterState, guard, gate, cfg).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create controller", "controller", "NodeAutoscaler")
-			os.Exit(1)
-		}
-	}
-
 	if cfg.NodeGroupMgr.Enabled {
 		if err := nodegroupmgr.NewController(mgr, provider, clusterState, guard, gate, cfg).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Unable to create controller", "controller", "NodeGroupMgr")
@@ -374,25 +342,11 @@ func main() {
 		}
 	}
 
-	if cfg.Evictor.Enabled {
-		if err := evictor.NewController(mgr, provider, clusterState, guard, gate, cfg).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create controller", "controller", "Evictor")
-			os.Exit(1)
-		}
-	}
-
 	// Pod purger — always registered so it can be toggled at runtime via API.
 	// The run() loop checks config.PodPurger.Enabled each tick.
 	if err := podpurger.NewController(mgr, clusterState, cfg).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create controller", "controller", "PodPurger")
 		os.Exit(1)
-	}
-
-	if cfg.Rebalancer.Enabled {
-		if err := rebalancer.NewController(mgr, provider, clusterState, guard, gate, cfg).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create controller", "controller", "Rebalancer")
-			os.Exit(1)
-		}
 	}
 
 	if cfg.GPU.Enabled {
@@ -426,14 +380,6 @@ func main() {
 	if cfg.NetworkMonitor.Enabled {
 		if err := network.NewController(mgr, provider, clusterState, cfg).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Unable to create controller", "controller", "NetworkMonitor")
-			os.Exit(1)
-		}
-	}
-
-	// Node templates — always enabled when node autoscaler is enabled
-	if cfg.NodeAutoscaler.Enabled {
-		if err := nodetemplates.NewController(mgr, provider, clusterState, cfg).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create controller", "controller", "NodeTemplates")
 			os.Exit(1)
 		}
 	}

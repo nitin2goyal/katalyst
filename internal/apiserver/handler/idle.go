@@ -31,11 +31,8 @@ func (h *IdleResourceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	nodes := h.state.GetAllNodes()
 	pods := h.state.GetAllPods()
 
-	// Use evictor threshold as idle threshold, falling back to 30%
-	idleThreshold := h.cfg.Evictor.UtilizationThreshold
-	if idleThreshold == 0 {
-		idleThreshold = 30.0
-	}
+	// Idle threshold for flagging underutilized resources
+	idleThreshold := 30.0
 
 	// Idle nodes: both CPU and memory below threshold
 	type idleNode struct {
