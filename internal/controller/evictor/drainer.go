@@ -144,68 +144,115 @@ func (d *Drainer) DrainNode(ctx context.Context, nodeName string) error {
 		}
 	}
 
-	// Evict pods (skip DaemonSet pods and mirror pods)
-	var evicted, failed int
-	var evictErrs []error
+	// Collect evictable pods (skip DaemonSet, system, terminated).
+	var evictable []*corev1.Pod
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-
 		if shouldSkipPod(pod) {
 			continue
 		}
-
-		if !d.checkPDBSafeWithCache(pod, pdbByNamespace[pod.Namespace]) {
-			logger.Info("Skipping pod protected by PDB", "pod", pod.Name, "namespace", pod.Namespace)
-			failed++
-			evictErrs = append(evictErrs, fmt.Errorf("pod %s/%s protected by PDB (0 disruptions allowed)", pod.Namespace, pod.Name))
-			continue
-		}
-
-		if err := d.evictPod(drainCtx, pod); err != nil {
-			logger.Error(err, "Failed to evict pod", "pod", pod.Name, "namespace", pod.Namespace)
-			failed++
-			evictErrs = append(evictErrs, fmt.Errorf("pod %s/%s: %w", pod.Namespace, pod.Name, err))
-		} else {
-			logger.V(1).Info("Evicted pod", "pod", pod.Name, "namespace", pod.Namespace)
-			intmetrics.EvictionsTotal.Inc()
-			evicted++
-		}
-
-		// Refresh node lock to prevent stale expiry during long drain operations
-		if d.lockRefresh != nil {
-			d.lockRefresh(nodeName, "evictor")
-		}
+		evictable = append(evictable, pod)
 	}
 
-	// No pods needed eviction — drain is trivially successful.
-	if evicted == 0 && failed == 0 {
+	// No evictable pods — drain is trivially successful.
+	if len(evictable) == 0 {
 		intmetrics.NodesConsolidated.Inc()
 		logger.Info("Drained node (no evictable pods)", "node", nodeName)
 		return nil
 	}
 
+	// Multi-pass eviction: evict non-PDB-blocked pods first, then retry
+	// PDB-blocked ones. After evicting pods from a deployment, the controller
+	// creates replacements on other nodes. Once those become healthy, the PDB
+	// budget refreshes (disruptionsAllowed goes from 0 to 1) and the
+	// previously-blocked pods become evictable. Without retry, partial drains
+	// always fail on single-replica deployments with PDBs.
+	const maxPasses = 3
+	var totalEvicted, totalFailed int
+	var evictErrs []error
+	remaining := evictable
+
+	for pass := 0; pass < maxPasses; pass++ {
+		if len(remaining) == 0 {
+			break
+		}
+
+		// On retry passes, wait for PDB budgets to refresh and re-fetch PDBs.
+		if pass > 0 {
+			logger.Info("Retrying PDB-blocked pods after eviction pass",
+				"pass", pass+1, "remaining", len(remaining))
+			select {
+			case <-drainCtx.Done():
+				totalFailed += len(remaining)
+				evictErrs = append(evictErrs, fmt.Errorf("drain timeout during PDB retry"))
+				remaining = nil
+				break
+			case <-time.After(10 * time.Second):
+			}
+			// Re-fetch PDBs to get updated disruption budgets
+			for ns := range pdbByNamespace {
+				pdbList := &policyv1.PodDisruptionBudgetList{}
+				if err := d.client.List(drainCtx, pdbList, client.InNamespace(ns)); err == nil {
+					pdbByNamespace[ns] = pdbList
+				}
+			}
+		}
+
+		var pdbBlocked []*corev1.Pod
+		passEvicted := 0
+		for _, pod := range remaining {
+			if !d.checkPDBSafeWithCache(pod, pdbByNamespace[pod.Namespace]) {
+				pdbBlocked = append(pdbBlocked, pod)
+				continue
+			}
+			if err := d.evictPod(drainCtx, pod); err != nil {
+				logger.Error(err, "Failed to evict pod", "pod", pod.Name, "namespace", pod.Namespace)
+				totalFailed++
+				evictErrs = append(evictErrs, fmt.Errorf("pod %s/%s: %w", pod.Namespace, pod.Name, err))
+			} else {
+				logger.V(1).Info("Evicted pod", "pod", pod.Name, "namespace", pod.Namespace)
+				intmetrics.EvictionsTotal.Inc()
+				totalEvicted++
+				passEvicted++
+			}
+			if d.lockRefresh != nil {
+				d.lockRefresh(nodeName, "evictor")
+			}
+		}
+
+		// If nothing was evicted this pass, PDB budgets won't change — stop retrying.
+		if passEvicted == 0 && len(pdbBlocked) > 0 {
+			for _, pod := range pdbBlocked {
+				totalFailed++
+				evictErrs = append(evictErrs, fmt.Errorf("pod %s/%s protected by PDB (0 disruptions allowed)", pod.Namespace, pod.Name))
+			}
+			break
+		}
+		remaining = pdbBlocked
+	}
+
 	// All evictions failed — uncordon the node so it remains usable.
-	if evicted == 0 && failed > 0 {
+	if totalEvicted == 0 && totalFailed > 0 {
 		if uncordErr := d.uncordonNode(ctx, nodeName); uncordErr != nil {
 			logger.Error(uncordErr, "Failed to uncordon node after total eviction failure", "node", nodeName)
 		}
-		return fmt.Errorf("draining node %s: all %d evictions failed: %w", nodeName, failed, errors.Join(evictErrs...))
+		return fmt.Errorf("draining node %s: all %d evictions failed: %w", nodeName, totalFailed, errors.Join(evictErrs...))
 	}
 
 	// Partial failure — uncordon the node immediately. Never leave a node
 	// cordoned in limbo; the evicted pods will be rescheduled and we can
 	// retry the drain on the next cycle.
-	if failed > 0 {
+	if totalFailed > 0 {
 		logger.Info("Partial drain failure, uncordoning node to avoid limbo state",
-			"node", nodeName, "evicted", evicted, "failed", failed)
+			"node", nodeName, "evicted", totalEvicted, "failed", totalFailed)
 		if uncordErr := d.uncordonNode(ctx, nodeName); uncordErr != nil {
 			logger.Error(uncordErr, "Failed to uncordon node after partial drain", "node", nodeName)
 		}
-		return fmt.Errorf("draining node %s: %d/%d evictions failed (node uncordoned): %w", nodeName, failed, evicted+failed, errors.Join(evictErrs...))
+		return fmt.Errorf("draining node %s: %d/%d evictions failed (node uncordoned): %w", nodeName, totalFailed, totalEvicted+totalFailed, errors.Join(evictErrs...))
 	}
 
 	intmetrics.NodesConsolidated.Inc()
-	logger.Info("Drained node", "node", nodeName, "evicted", evicted)
+	logger.Info("Drained node", "node", nodeName, "evicted", totalEvicted)
 	return nil
 }
 
