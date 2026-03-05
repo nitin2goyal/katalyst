@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -210,7 +213,9 @@ func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []op
 	return recs
 }
 
-// Execute evicts a pod for redistribution (either evacuate or attract).
+// Execute moves a pod using maxUnavailable=0 strategy: surge the owning
+// Deployment by 1 replica, wait for the new pod to become Ready, then evict
+// the old pod and scale back down. This ensures zero downtime during migration.
 func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendation) error {
 	logger := log.FromContext(ctx).WithName("gpu-redistributor")
 	action := rec.Details["action"]
@@ -261,11 +266,53 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 		return nil
 	}
 
-	// Evict the pod
+	// Find owning Deployment for surge-then-evict (maxUnavailable=0)
+	deploy, originalReplicas, err := r.findOwningDeployment(ctx, pod)
+	if err != nil || deploy == nil {
+		// No Deployment owner (DaemonSet, standalone pod, etc.) — skip, don't risk downtime
+		r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
+			fmt.Sprintf("pod %s/%s has no Deployment owner, skipping (maxUnavailable=0)", namespace, podName))
+		return nil
+	}
+
+	// Step 1: Surge — scale up Deployment by 1
+	surgedReplicas := originalReplicas + 1
+	if err := r.scaleDeployment(ctx, deploy, surgedReplicas); err != nil {
+		r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
+			fmt.Sprintf("failed to surge %s: %v", deploy.Name, err))
+		return nil
+	}
+	logger.Info("Surged Deployment for safe migration",
+		"deployment", deploy.Name, "namespace", namespace,
+		"from", originalReplicas, "to", surgedReplicas)
+
+	// Step 2: Wait for the new replica to become Ready (up to 2 minutes)
+	ready, err := r.waitForReady(ctx, deploy, surgedReplicas, 2*time.Minute)
+	if !ready || err != nil {
+		// Rollback: scale back down
+		logger.Error(err, "New replica not ready in time, rolling back surge",
+			"deployment", deploy.Name)
+		_ = r.scaleDeployment(ctx, deploy, originalReplicas)
+		r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
+			fmt.Sprintf("surge timeout for %s/%s, rolled back", namespace, deploy.Name))
+		return nil
+	}
+
+	// Step 3: Evict the old pod
 	if err := evictPod(ctx, r.client, pod); err != nil {
-		logger.Error(err, "Failed to evict pod for redistribution",
-			"pod", podName, "namespace", namespace, "node", nodeName, "action", action)
+		logger.Error(err, "Failed to evict pod after surge, rolling back",
+			"pod", podName, "namespace", namespace)
+		_ = r.scaleDeployment(ctx, deploy, originalReplicas)
 		return err
+	}
+
+	// Step 4: Scale back to original replica count
+	// The eviction removed one pod, and we had surgedReplicas running.
+	// After eviction: surgedReplicas-1 = originalReplicas pods remain.
+	// Scale back to originalReplicas so the controller doesn't recreate.
+	if err := r.scaleDeployment(ctx, deploy, originalReplicas); err != nil {
+		logger.Error(err, "Failed to scale back after eviction (will self-correct)",
+			"deployment", deploy.Name, "target", originalReplicas)
 	}
 
 	intmetrics.EvictionsTotal.Inc()
@@ -275,12 +322,93 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 		auditAction = "gpu-redistribute-evacuate"
 	}
 	r.auditLog.Record(auditAction, nodeName, "gpu-redistributor",
-		fmt.Sprintf("evicted %s/%s from %s (%s)", namespace, podName, nodeName, action))
+		fmt.Sprintf("safely migrated %s/%s from %s (surged %s %d→%d→%d)",
+			namespace, podName, nodeName, deploy.Name, originalReplicas, surgedReplicas, originalReplicas))
 
-	logger.Info("Redistributed CPU pod",
-		"pod", podName, "namespace", namespace, "node", nodeName, "action", action)
+	logger.Info("Safely redistributed CPU pod (maxUnavailable=0)",
+		"pod", podName, "namespace", namespace, "node", nodeName,
+		"action", action, "deployment", deploy.Name)
 
 	return nil
+}
+
+// findOwningDeployment traverses pod → ReplicaSet → Deployment ownership chain.
+func (r *Redistributor) findOwningDeployment(ctx context.Context, pod *corev1.Pod) (*appsv1.Deployment, int32, error) {
+	// Find owning ReplicaSet
+	var rsName string
+	for _, ref := range pod.OwnerReferences {
+		if ref.Kind == "ReplicaSet" {
+			rsName = ref.Name
+			break
+		}
+	}
+	if rsName == "" {
+		return nil, 0, nil
+	}
+
+	rs := &appsv1.ReplicaSet{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: rsName, Namespace: pod.Namespace}, rs); err != nil {
+		return nil, 0, fmt.Errorf("getting ReplicaSet %s: %w", rsName, err)
+	}
+
+	// Find owning Deployment
+	var deployName string
+	for _, ref := range rs.OwnerReferences {
+		if ref.Kind == "Deployment" {
+			deployName = ref.Name
+			break
+		}
+	}
+	if deployName == "" {
+		return nil, 0, nil
+	}
+
+	deploy := &appsv1.Deployment{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: deployName, Namespace: pod.Namespace}, deploy); err != nil {
+		return nil, 0, fmt.Errorf("getting Deployment %s: %w", deployName, err)
+	}
+
+	replicas := int32(1)
+	if deploy.Spec.Replicas != nil {
+		replicas = *deploy.Spec.Replicas
+	}
+
+	return deploy, replicas, nil
+}
+
+// scaleDeployment sets the replica count on a Deployment.
+func (r *Redistributor) scaleDeployment(ctx context.Context, deploy *appsv1.Deployment, replicas int32) error {
+	fresh := &appsv1.Deployment{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, fresh); err != nil {
+		return err
+	}
+	fresh.Spec.Replicas = &replicas
+	return r.client.Update(ctx, fresh)
+}
+
+// waitForReady polls until the Deployment has the desired number of ready replicas.
+func (r *Redistributor) waitForReady(ctx context.Context, deploy *appsv1.Deployment, desired int32, timeout time.Duration) (bool, error) {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				return false, fmt.Errorf("timeout waiting for %s to reach %d ready replicas", deploy.Name, desired)
+			}
+			fresh := &appsv1.Deployment{}
+			if err := r.client.Get(ctx, types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, fresh); err != nil {
+				continue
+			}
+			if fresh.Status.ReadyReplicas >= desired {
+				return true, nil
+			}
+		}
+	}
 }
 
 // podCPUMillis returns total CPU request in millicores for a pod.
