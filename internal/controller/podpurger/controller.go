@@ -27,6 +27,7 @@ var badStatusSet = map[string]bool{
 	"ErrImagePull":               true,
 	"ContainerStatusUnknown":     true,
 	"Evicted":                    true,
+	"Completed":                  true,
 	"CreateContainerConfigError": true,
 	// Init container variants (prefixed by computePodStatus)
 	"Init:OOMKilled":                 true,
