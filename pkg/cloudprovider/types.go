@@ -130,6 +130,13 @@ type FallbackPricer interface {
 	EstimatePriceFromCapacity(instanceType, region string, cpuMilli int64, memBytes int64) float64
 }
 
+// GPUInstanceDetector identifies GPU instance types by machine type name.
+// Used as a fallback when the NVIDIA device plugin isn't reporting GPU resources
+// on nodes that are known GPU hardware (e.g., GCP g2-standard-8 with L4 GPUs).
+type GPUInstanceDetector interface {
+	DetectGPUByInstanceType(instanceType string) (gpuCount int, gpuModel string)
+}
+
 type Commitment struct {
 	ID              string
 	Type            string  // "reserved-instance", "savings-plan", "cud", "reservation"

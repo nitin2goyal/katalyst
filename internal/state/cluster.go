@@ -390,6 +390,17 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		instanceType, _ := s.provider.GetNodeInstanceType(ctx, node)
 		family, _ := familylock.ExtractFamily(instanceType)
 
+		// Fallback GPU detection: if the NVIDIA device plugin isn't reporting
+		// nvidia.com/gpu on nodes that are known GPU hardware (e.g., GCP g2-standard-8),
+		// use the cloud provider's instance type knowledge.
+		if gpuCap == 0 && instanceType != "" {
+			if detector, ok := s.provider.(cloudprovider.GPUInstanceDetector); ok {
+				if gpuCount, _ := detector.DetectGPUByInstanceType(instanceType); gpuCount > 0 {
+					gpuCap = gpuCount
+				}
+			}
+		}
+
 		ns := &NodeState{
 			Node:           node,
 			Pods:           podsByNode[node.Name],

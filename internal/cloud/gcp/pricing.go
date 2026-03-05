@@ -153,6 +153,16 @@ var gpuMachineTypes = map[string]gpuMachineSpec{
 	"g2-standard-96": {gpuCount: 8, gpuModel: "nvidia-l4"},
 }
 
+// DetectGPUByInstanceType implements cloudprovider.GPUInstanceDetector.
+// Returns GPU count and model for known GPU machine types, even when the
+// NVIDIA device plugin hasn't reported nvidia.com/gpu on the node.
+func (p *Provider) DetectGPUByInstanceType(instanceType string) (int, string) {
+	if spec, ok := gpuMachineTypes[instanceType]; ok {
+		return spec.gpuCount, spec.gpuModel
+	}
+	return 0, ""
+}
+
 // gceMachineType represents a machine type from the Compute Engine API.
 type gceMachineType struct {
 	Name                   string `json:"name"`
