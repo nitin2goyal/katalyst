@@ -14,6 +14,7 @@ import (
 
 	"github.com/koptimizer/koptimizer/internal/config"
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
+	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cost"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
@@ -23,12 +24,13 @@ import (
 // scavenging labels active GPU nodes so that low-priority pods with the right
 // tolerations and nodeAffinity can use leftover CPU.
 type Scavenger struct {
-	client client.Client
-	config *config.Config
+	client   client.Client
+	config   *config.Config
+	auditLog *state.AuditLog
 }
 
-func NewScavenger(c client.Client, cfg *config.Config) *Scavenger {
-	return &Scavenger{client: c, config: cfg}
+func NewScavenger(c client.Client, cfg *config.Config, auditLog *state.AuditLog) *Scavenger {
+	return &Scavenger{client: c, config: cfg, auditLog: auditLog}
 }
 
 // DetectScavengeable analyzes GPU nodes and generates recommendations for
@@ -245,6 +247,8 @@ func (s *Scavenger) enableScavenging(ctx context.Context, node *corev1.Node, hea
 		"node", node.Name,
 		"headroomMillis", headroomMillis,
 	)
+	s.auditLog.Record("gpu-scavenge-enabled", node.Name, "gpu-scavenger",
+		fmt.Sprintf("CPU scavenging enabled, headroom %sm", headroomMillis))
 	return nil
 }
 
@@ -279,6 +283,8 @@ func (s *Scavenger) disableScavenging(ctx context.Context, node *corev1.Node, lo
 	}
 
 	logger.Info("Disabled CPU scavenging on GPU node", "node", node.Name)
+	s.auditLog.Record("gpu-scavenge-disabled", node.Name, "gpu-scavenger",
+		"CPU scavenging disabled, insufficient headroom")
 	return nil
 }
 
@@ -302,5 +308,7 @@ func (s *Scavenger) updateScavenging(ctx context.Context, node *corev1.Node, hea
 		"node", node.Name,
 		"headroomMillis", headroomMillis,
 	)
+	s.auditLog.Record("gpu-scavenge-updated", node.Name, "gpu-scavenger",
+		fmt.Sprintf("headroom updated to %sm", headroomMillis))
 	return nil
 }

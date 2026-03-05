@@ -12,6 +12,7 @@ import (
 
 	"github.com/koptimizer/koptimizer/internal/config"
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
+	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
@@ -47,12 +48,13 @@ const (
 // When GPU nodes are idle, it removes the GPU taint so CPU workloads can use them.
 // When GPU demand returns, it re-taints and evicts low-priority CPU pods.
 type FallbackManager struct {
-	client client.Client
-	config *config.Config
+	client   client.Client
+	config   *config.Config
+	auditLog *state.AuditLog
 }
 
-func NewFallbackManager(c client.Client, cfg *config.Config) *FallbackManager {
-	return &FallbackManager{client: c, config: cfg}
+func NewFallbackManager(c client.Client, cfg *config.Config, auditLog *state.AuditLog) *FallbackManager {
+	return &FallbackManager{client: c, config: cfg, auditLog: auditLog}
 }
 
 // Analyze checks GPU nodes and generates recommendations for fallback management.
@@ -167,6 +169,8 @@ func (f *FallbackManager) Analyze(ctx context.Context, snapshot *optimizer.Clust
 					// Not enough capacity - mark as non-auto-executable
 					rec.AutoExecutable = false
 					rec.Summary = fmt.Sprintf("GPU demand returned on %s but insufficient CPU capacity to absorb displaced pods (%dm needed, %dm available)", node.Node.Name, cpuPodsOnNode, availableCPU)
+					f.auditLog.Record("gpu-fallback-skipped", node.Node.Name, "gpu-fallback",
+						fmt.Sprintf("insufficient capacity to reclaim: %dm needed, %dm available", cpuPodsOnNode, availableCPU))
 				}
 
 				recs = append(recs, rec)
@@ -328,6 +332,9 @@ func (f *FallbackManager) enableCPUFallback(ctx context.Context, node *corev1.No
 		"reservePct", CPUHeadroomReservePct,
 	)
 
+	f.auditLog.Record("gpu-fallback-enabled", node.Name, "gpu-fallback",
+		fmt.Sprintf("CPU fallback enabled, headroom %dm, reserve %d%%", headroomMillis, CPUHeadroomReservePct))
+
 	return nil
 }
 
@@ -354,6 +361,9 @@ func (f *FallbackManager) disableCPUFallback(ctx context.Context, node *corev1.N
 	if err := f.client.Update(ctx, node); err != nil {
 		return fmt.Errorf("disabling CPU fallback on %s: %w", node.Name, err)
 	}
+
+	f.auditLog.Record("gpu-fallback-disabled", node.Name, "gpu-fallback",
+		"GPU demand returned, taint restored")
 
 	return nil
 }

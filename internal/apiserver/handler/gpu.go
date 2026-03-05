@@ -3,17 +3,22 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/cost"
 )
 
 type GPUHandler struct {
-	state *state.ClusterState
+	state  *state.ClusterState
+	config *config.Config
 }
 
-func NewGPUHandler(st *state.ClusterState) *GPUHandler {
-	return &GPUHandler{state: st}
+func NewGPUHandler(st *state.ClusterState, cfg *config.Config) *GPUHandler {
+	return &GPUHandler{state: st, config: cfg}
 }
 
 func (h *GPUHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
@@ -21,7 +26,7 @@ func (h *GPUHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	var gpuNodes []map[string]interface{}
 	for _, n := range nodes {
 		if n.IsGPUNode {
-			gpuNodes = append(gpuNodes, map[string]interface{}{
+			entry := map[string]interface{}{
 				"name":          n.Node.Name,
 				"instanceType":  n.InstanceType,
 				"gpuCount":      n.GPUCapacity,
@@ -29,13 +34,42 @@ func (h *GPUHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 				"cpuUtilPct":    n.CPUUtilization(),
 				"memUtilPct":    n.MemoryUtilization(),
 				"hourlyCostUSD": n.HourlyCostUSD,
-			})
+				"isFallback":    hasAnnotation(n.Node, "koptimizer.io/gpu-fallback"),
+				"isScavenging":  hasAnnotation(n.Node, "koptimizer.io/cpu-scavenger"),
+				"hasTaint":      hasNoScheduleTaint(n.Node, "nvidia.com/gpu"),
+			}
+			if v, ok := n.Node.Annotations["koptimizer.io/scavenger-cpu-millis"]; ok {
+				entry["cpuHeadroomMillis"] = v
+			}
+			if v, ok := n.Node.Annotations["koptimizer.io/cpu-headroom-millis"]; ok {
+				entry["cpuHeadroomMillis"] = v
+			}
+			gpuNodes = append(gpuNodes, entry)
 		}
 	}
 	if gpuNodes == nil {
 		gpuNodes = []map[string]interface{}{}
 	}
-	writePaginatedJSON(w, r, gpuNodes)
+
+	// Embed config summary
+	gpuCfg := h.config.GPU
+	result := map[string]interface{}{
+		"nodes": gpuNodes,
+		"config": map[string]interface{}{
+			"enabled":                      gpuCfg.Enabled,
+			"cpuFallbackEnabled":           gpuCfg.CPUFallbackEnabled,
+			"cpuScavengingEnabled":         gpuCfg.CPUScavengingEnabled,
+			"reclaimEnabled":               gpuCfg.ReclaimEnabled,
+			"idleThresholdPct":             gpuCfg.IdleThresholdPct,
+			"idleDuration":                 gpuCfg.IdleDuration.String(),
+			"scavengingCPUThresholdMillis": gpuCfg.ScavengingCPUThresholdMillis,
+			"reclaimGracePeriod":           gpuCfg.ReclaimGracePeriod.String(),
+		},
+		"total":    len(gpuNodes),
+		"page":     1,
+		"pageSize": len(gpuNodes),
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *GPUHandler) GetUtilization(w http.ResponseWriter, r *http.Request) {
@@ -118,4 +152,41 @@ func (h *GPUHandler) GetRecommendations(w http.ResponseWriter, r *http.Request) 
 		recommendations = []map[string]interface{}{}
 	}
 	writePaginatedJSON(w, r, recommendations)
+}
+
+// GetActivity returns GPU-related audit events (actions prefixed with "gpu-" or "reclaim-gpu-").
+func (h *GPUHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
+	allEvents := h.state.AuditLog.GetAll()
+
+	var gpuEvents []state.AuditEvent
+	for _, ev := range allEvents {
+		if strings.HasPrefix(ev.Action, "gpu-") || strings.HasPrefix(ev.Action, "reclaim-gpu-") {
+			gpuEvents = append(gpuEvents, ev)
+		}
+	}
+	if gpuEvents == nil {
+		gpuEvents = []state.AuditEvent{}
+	}
+
+	page, pageSize := parsePagination(r)
+	start, end, resp := paginateSlice(len(gpuEvents), page, pageSize)
+	resp.Data = gpuEvents[start:end]
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func hasAnnotation(node *corev1.Node, key string) bool {
+	if node.Annotations == nil {
+		return false
+	}
+	_, ok := node.Annotations[key]
+	return ok
+}
+
+func hasNoScheduleTaint(node *corev1.Node, key string) bool {
+	for _, t := range node.Spec.Taints {
+		if t.Key == key && t.Effect == corev1.TaintEffectNoSchedule {
+			return true
+		}
+	}
+	return false
 }

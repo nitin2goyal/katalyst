@@ -32,7 +32,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	recHandler := handler.NewRecommendationHandler(clusterState, k8sClient, metricsStore)
 	workloadHandler := handler.NewWorkloadHandler(clusterState)
 	commitmentHandler := handler.NewCommitmentHandler(provider)
-	gpuHandler := handler.NewGPUHandler(clusterState)
+	gpuHandler := handler.NewGPUHandler(clusterState, cfg)
 	storageHandler := handler.NewStorageHandler(k8sClient, cfg)
 	networkHandler := handler.NewNetworkHandler(clusterState, cfg)
 	configHandler := handler.NewConfigHandler(cfg, settingsStore)
@@ -96,6 +96,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		r.Get("/gpu/nodes", gpuHandler.GetNodes)
 		r.Get("/gpu/utilization", gpuHandler.GetUtilization)
 		r.Get("/gpu/recommendations", gpuHandler.GetRecommendations)
+		r.Get("/gpu/activity", gpuHandler.GetActivity)
 
 		// Storage
 		r.Get("/storage/summary", storageHandler.GetSummary)

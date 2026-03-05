@@ -10,19 +10,22 @@ import (
 
 	"github.com/koptimizer/koptimizer/internal/config"
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
+	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
 // Detector identifies idle and underutilized GPU nodes.
 type Detector struct {
 	config    *config.Config
+	auditLog  *state.AuditLog
 	mu        sync.Mutex
 	idleSince map[string]time.Time // nodeName -> when it became idle
 }
 
-func NewDetector(cfg *config.Config) *Detector {
+func NewDetector(cfg *config.Config, auditLog *state.AuditLog) *Detector {
 	return &Detector{
 		config:    cfg,
+		auditLog:  auditLog,
 		idleSince: make(map[string]time.Time),
 	}
 }
@@ -48,12 +51,20 @@ func (d *Detector) DetectIdle(ctx context.Context, snapshot *optimizer.ClusterSn
 		if gpuIdle || gpuUnderutilized {
 			// Track how long it's been idle
 			d.mu.Lock()
+			firstDetection := false
 			if _, ok := d.idleSince[node.Node.Name]; !ok {
 				d.idleSince[node.Node.Name] = time.Now()
+				firstDetection = true
 			}
 
 			idleDuration := time.Since(d.idleSince[node.Node.Name])
 			d.mu.Unlock()
+
+			if firstDetection {
+				d.auditLog.Record("gpu-idle-detected", node.Node.Name, "gpu-detector",
+					fmt.Sprintf("GPU node idle (GPUs: %d, used: %d), grace period started", node.GPUs, node.GPUsUsed))
+			}
+
 			if idleDuration >= d.config.GPU.IdleDuration {
 				idleCount++
 				monthlyCost := node.HourlyCostUSD * 730
@@ -100,6 +111,8 @@ func (d *Detector) DetectIdle(ctx context.Context, snapshot *optimizer.ClusterSn
 					},
 					CreatedAt: time.Now(),
 				})
+				d.auditLog.Record("gpu-idle-recommend", node.Node.Name, "gpu-detector",
+					fmt.Sprintf("idle %s, recommending CPU fallback (GPUs: %d, cost $%.0f/mo)", idleDuration.Round(time.Minute), node.GPUs, monthlyCost))
 			}
 		} else {
 			// GPU is active, reset idle timer

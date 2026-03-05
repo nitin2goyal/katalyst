@@ -36,9 +36,9 @@ func NewController(mgr ctrl.Manager, st *state.ClusterState, guard *familylock.F
 		guard:     guard,
 		gate:      gate,
 		config:    cfg,
-		detector:  NewDetector(cfg),
-		fallback:  NewFallbackManager(c, cfg),
-		scavenger: NewScavenger(c, cfg),
+		detector:  NewDetector(cfg, st.AuditLog),
+		fallback:  NewFallbackManager(c, cfg, st.AuditLog),
+		scavenger: NewScavenger(c, cfg, st.AuditLog),
 		reclaimer: NewReclaimer(c, cfg, st.NodeLock, st.AuditLog),
 	}
 }
