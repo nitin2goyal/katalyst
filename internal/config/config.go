@@ -304,7 +304,7 @@ func DefaultConfig() *Config {
 			MaxSpotPct:              70.0,
 			FallbackToOnDemand:      true,
 			DiversityMinTypes:       3,
-			InterruptionHandling:    true,
+			InterruptionHandling:    false,
 			DrainGracePeriodSeconds: 30,
 			MaxCostOverODPercent:    90,
 		},

@@ -97,7 +97,7 @@ config:
     maxSpotPercentage: 70
     fallbackToOnDemand: true
     diversityMinTypes: 3
-    interruptionHandling: true
+    interruptionHandling: false
     maxCostOverODPercent: 90
 
   hibernation:

@@ -275,6 +275,33 @@ func main() {
 	clusterState := state.NewClusterState(mgr.GetClient(), provider, metricsCollector, sqlDBRef, dbWriter, metricsStore, directClient)
 	clusterState.SetRESTConfig(mgr.GetConfig())
 
+	// One-shot cleanup: uncordon any nodes previously cordoned by koptimizer.
+	// This ensures nodes are not left in a "Draining" state if the evictor
+	// controller was disabled between restarts.
+	{
+		var nodeList corev1.NodeList
+		if err := directClient.List(context.Background(), &nodeList); err != nil {
+			setupLog.Error(err, "Failed to list nodes for startup uncordon cleanup")
+		} else {
+			for i := range nodeList.Items {
+				node := &nodeList.Items[i]
+				if _, ours := node.Annotations["koptimizer.io/cordoned-by"]; !ours {
+					continue
+				}
+				setupLog.Info("Startup cleanup: uncordoning node previously cordoned by koptimizer",
+					"node", node.Name,
+					"cordonedAt", node.Annotations["koptimizer.io/cordoned-at"],
+				)
+				node.Spec.Unschedulable = false
+				delete(node.Annotations, "koptimizer.io/cordoned-by")
+				delete(node.Annotations, "koptimizer.io/cordoned-at")
+				if err := directClient.Update(context.Background(), node); err != nil {
+					setupLog.Error(err, "Failed to uncordon node during startup cleanup", "node", node.Name)
+				}
+			}
+		}
+	}
+
 	// Initialize cost store (nil-safe)
 	costStore := store.NewCostStore(sqlDBRef)
 
