@@ -42,6 +42,8 @@ const (
 	GPUScavengerHeadroom = "koptimizer.io/scavenger-cpu-millis"
 	// GPUScavengerPriority is the PriorityClass name for scavenger pods.
 	GPUScavengerPriority = "koptimizer-scavenger"
+	// GPUScavengerSavedTaints stores original NoExecute taints removed during scavenging.
+	GPUScavengerSavedTaints = "koptimizer.io/scavenger-saved-taints"
 )
 
 // FallbackManager manages GPU-to-CPU fallback scheduling.

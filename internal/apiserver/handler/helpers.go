@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -94,15 +95,28 @@ func IsSystemPod(pod *corev1.Pod) bool {
 // issues (CrashLoopBackOff, ImagePullBackOff, OOMKilled, etc.) instead of
 // just the pod phase which can misleadingly show "Running".
 // Init container issues are prefixed with "Init:" to match kubectl display.
+// Successfully completed init containers (exit code 0) are skipped — they
+// are the normal state for pods that have finished initialization.
 func computePodStatus(pod *corev1.Pod) string {
-	// Check init containers first — prefix with "Init:" to distinguish from
-	// regular container issues (matches kubectl's display convention).
-	for _, cs := range pod.Status.InitContainerStatuses {
+	// Check init containers — only report stuck or failed ones.
+	// Completed init containers (Terminated with ExitCode 0) are normal.
+	for i, cs := range pod.Status.InitContainerStatuses {
 		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
 			return "Init:" + cs.State.Waiting.Reason
 		}
-		if cs.State.Terminated != nil && cs.State.Terminated.Reason != "" {
-			return "Init:" + cs.State.Terminated.Reason
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode == 0 {
+			continue // successfully completed — normal
+		}
+		if cs.State.Terminated != nil {
+			reason := cs.State.Terminated.Reason
+			if reason == "" {
+				reason = "Error"
+			}
+			return "Init:" + reason
+		}
+		// Init container still running — pod is initializing
+		if cs.State.Running != nil {
+			return fmt.Sprintf("Init:%d/%d", i, len(pod.Spec.InitContainers))
 		}
 	}
 	// Check regular containers
@@ -120,4 +134,16 @@ func computePodStatus(pod *corev1.Pod) string {
 		return "Unknown"
 	}
 	return phase
+}
+
+// computeContainerReady returns ready/total container counts (e.g., "1/2").
+func computeContainerReady(pod *corev1.Pod) string {
+	total := len(pod.Spec.Containers)
+	ready := 0
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Ready {
+			ready++
+		}
+	}
+	return fmt.Sprintf("%d/%d", ready, total)
 }

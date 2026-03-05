@@ -2,6 +2,7 @@ package gpu
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -227,15 +228,28 @@ func (s *Scavenger) enableScavenging(ctx context.Context, node *corev1.Node, hea
 		fresh.Annotations[GPUScavengerAnnotation] = "true"
 		fresh.Annotations[GPUScavengerHeadroom] = headroomMillis
 
-		// Remove GPU NoSchedule taint so ANY pod can schedule (auto-overflow)
+		// Remove GPU NoSchedule taint so ANY pod can schedule (auto-overflow).
+		// Also remove NoExecute taints (e.g., spr-cluster) that block CPU pods,
+		// saving them so they can be restored when scavenging is disabled.
 		var newTaints []corev1.Taint
+		var savedTaints []corev1.Taint
 		for _, t := range fresh.Spec.Taints {
 			if t.Key == GPUFallbackTaint && t.Effect == corev1.TaintEffectNoSchedule {
+				continue
+			}
+			if t.Effect == corev1.TaintEffectNoExecute && t.Key != "node.kubernetes.io/not-ready" && t.Key != "node.kubernetes.io/unreachable" {
+				savedTaints = append(savedTaints, t)
 				continue
 			}
 			newTaints = append(newTaints, t)
 		}
 		fresh.Spec.Taints = newTaints
+
+		// Persist removed taints so disableScavenging can restore them
+		if len(savedTaints) > 0 {
+			data, _ := json.Marshal(savedTaints)
+			fresh.Annotations[GPUScavengerSavedTaints] = string(data)
+		}
 
 		return s.client.Update(ctx, fresh)
 	})
@@ -274,6 +288,26 @@ func (s *Scavenger) disableScavenging(ctx context.Context, node *corev1.Node, lo
 			fresh.Spec.Taints = append(fresh.Spec.Taints, corev1.Taint{
 				Key: GPUFallbackTaint, Value: "present", Effect: corev1.TaintEffectNoSchedule,
 			})
+		}
+
+		// Restore NoExecute taints that were saved during enableScavenging
+		if saved, ok := fresh.Annotations[GPUScavengerSavedTaints]; ok {
+			var restoredTaints []corev1.Taint
+			if err := json.Unmarshal([]byte(saved), &restoredTaints); err == nil {
+				for _, rt := range restoredTaints {
+					alreadyExists := false
+					for _, t := range fresh.Spec.Taints {
+						if t.Key == rt.Key && t.Effect == rt.Effect {
+							alreadyExists = true
+							break
+						}
+					}
+					if !alreadyExists {
+						fresh.Spec.Taints = append(fresh.Spec.Taints, rt)
+					}
+				}
+			}
+			delete(fresh.Annotations, GPUScavengerSavedTaints)
 		}
 
 		return s.client.Update(ctx, fresh)

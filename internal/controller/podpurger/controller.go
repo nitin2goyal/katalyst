@@ -148,12 +148,23 @@ func (c *Controller) run(ctx context.Context) {
 // computePodStatus derives the effective status string for a pod.
 // Mirrors handler/helpers.go computePodStatus.
 func computePodStatus(pod *corev1.Pod) string {
-	for _, cs := range pod.Status.InitContainerStatuses {
+	// Check init containers — skip successfully completed ones (exit code 0).
+	for i, cs := range pod.Status.InitContainerStatuses {
 		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
 			return "Init:" + cs.State.Waiting.Reason
 		}
-		if cs.State.Terminated != nil && cs.State.Terminated.Reason != "" {
-			return "Init:" + cs.State.Terminated.Reason
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode == 0 {
+			continue
+		}
+		if cs.State.Terminated != nil {
+			reason := cs.State.Terminated.Reason
+			if reason == "" {
+				reason = "Error"
+			}
+			return "Init:" + reason
+		}
+		if cs.State.Running != nil {
+			return fmt.Sprintf("Init:%d/%d", i, len(pod.Spec.InitContainers))
 		}
 	}
 	for _, cs := range pod.Status.ContainerStatuses {

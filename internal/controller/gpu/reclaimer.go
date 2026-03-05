@@ -2,6 +2,7 @@ package gpu
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -262,6 +263,26 @@ func (r *Reclaimer) Execute(ctx context.Context, rec optimizer.Recommendation) e
 		delete(fresh.Annotations, GPUScavengerAnnotation)
 		delete(fresh.Annotations, GPUScavengerHeadroom)
 		delete(fresh.Labels, GPUScavengerLabel)
+
+		// Restore NoExecute taints saved during scavenging
+		if saved, ok := fresh.Annotations[GPUScavengerSavedTaints]; ok {
+			var restoredTaints []corev1.Taint
+			if err := json.Unmarshal([]byte(saved), &restoredTaints); err == nil {
+				for _, rt := range restoredTaints {
+					alreadyExists := false
+					for _, t := range fresh.Spec.Taints {
+						if t.Key == rt.Key && t.Effect == rt.Effect {
+							alreadyExists = true
+							break
+						}
+					}
+					if !alreadyExists {
+						fresh.Spec.Taints = append(fresh.Spec.Taints, rt)
+					}
+				}
+			}
+			delete(fresh.Annotations, GPUScavengerSavedTaints)
+		}
 
 		// Mark as reclaimed
 		if fresh.Annotations == nil {

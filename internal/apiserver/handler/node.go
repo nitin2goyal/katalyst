@@ -139,6 +139,7 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"cpuRequest": fmt.Sprintf("%dm", cpuMilli),
 			"memRequest": formatMemory(memBytes),
 			"status":     status,
+			"ready":      computeContainerReady(pod),
 			"isSystem":   isSys,
 		}
 		// Include actual utilization and disk usage from metrics-server

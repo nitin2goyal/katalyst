@@ -57,7 +57,7 @@ export async function renderNodeDetail(params) {
       <div class="card">
         <h2>Pods on this Node</h2>
         <div class="table-wrap"><table id="node-pods-table">
-          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>CPU Req</th><th>CPU Used</th><th>CPU %</th><th>Mem Req</th><th>Mem Used</th><th>Mem %</th><th>Disk</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>Ready</th><th>CPU Req</th><th>CPU Used</th><th>CPU %</th><th>Mem Req</th><th>Mem Used</th><th>Mem %</th><th>Disk</th><th>Status</th></tr></thead>
           <tbody id="node-pods-body"></tbody>
         </table></div>
       </div>`;
@@ -175,9 +175,11 @@ export async function renderNodeDetail(params) {
       // Utilization % relative to pod's own request
       const cpuPct = cpuUsedM != null && cpuReqM > 0 ? (cpuUsedM / cpuReqM * 100) : null;
       const memPctVal = memUsedB != null && memReqB > 0 ? (memUsedB / memReqB * 100) : null;
+      const readyColor = p.ready && p.ready.split('/')[0] === p.ready.split('/')[1] ? 'green' : 'amber';
       return `<tr>
       <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
       <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
+      <td>${p.ready ? `<span style="color:var(--${readyColor});font-weight:500">${p.ready}</span>` : '-'}</td>
       <td>${fmtCPUm(cpuReqM)}</td>
       <td>${cpuUsedM != null ? fmtCPUm(cpuUsedM) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${cpuPct != null ? utilBar(cpuPct) : '<span style="color:var(--text-muted)">-</span>'}</td>
@@ -187,7 +189,7 @@ export async function renderNodeDetail(params) {
       <td>${p.diskUsage ? fmtMem(p.diskUsage) : '-'}</td>
       <td title="${podStatusReason(p.status)}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
     </tr>`;
-    }).join('') : '<tr><td colspan="11" style="color:var(--text-muted)">No pods found</td></tr>';
+    }).join('') : '<tr><td colspan="12" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
 
   } catch (e) {
