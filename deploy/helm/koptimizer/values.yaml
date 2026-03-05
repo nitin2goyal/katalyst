@@ -27,7 +27,7 @@ config:
     updateInterval: "5m"
 
   nodeAutoscaler:
-    enabled: true
+    enabled: false
     scanInterval: "30s"
     scaleUpThreshold: 80
     scaleDownThreshold: 30
@@ -46,7 +46,7 @@ config:
       emptyPeriod: "336h"  # 14 days
 
   rightsizer:
-    enabled: true
+    enabled: false
     autoApprove: true
     lookbackWindow: "168h"  # 7 days
     cpuTargetUtilPct: 70
@@ -58,7 +58,7 @@ config:
       - kube-system
 
   workloadScaler:
-    enabled: true
+    enabled: false
     verticalEnabled: true
     horizontalEnabled: true
     surgeDetection: true
@@ -70,14 +70,14 @@ config:
       - monitoring
 
   evictor:
-    enabled: true
+    enabled: false
     utilizationThreshold: 40
     consolidationInterval: "5m"
     maxConcurrentEvictions: 2
     dryRun: false
 
   rebalancer:
-    enabled: true
+    enabled: false
     schedule: "0 3 * * SUN"
     busyRedistribution:
       enabled: true

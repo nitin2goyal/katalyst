@@ -230,7 +230,7 @@ func DefaultConfig() *Config {
 			UpdateInterval: 5 * time.Minute,
 		},
 		NodeAutoscaler: NodeAutoscalerConfig{
-			Enabled:              true,
+			Enabled:              false,
 			DryRun:               true, // safe default
 			NodeTemplatesEnabled: true,
 			ScanInterval:       30 * time.Second,
@@ -244,7 +244,7 @@ func DefaultConfig() *Config {
 			Enabled: true,
 		},
 		Rightsizer: RightsizingConfig{
-			Enabled:             true,
+			Enabled:             false,
 			LookbackWindow:      7 * 24 * time.Hour,
 			CPUTargetUtilPct:    95.0,
 			MemoryTargetUtilPct: 95.0,
@@ -255,7 +255,7 @@ func DefaultConfig() *Config {
 			ExcludeNamespaces:   []string{"kube-system"},
 		},
 		WorkloadScaler: WorkloadScalerConfig{
-			Enabled:            true,
+			Enabled:            false,
 			VerticalEnabled:    true,
 			HorizontalEnabled:  true,
 			SurgeDetection:     true,
@@ -266,7 +266,7 @@ func DefaultConfig() *Config {
 			ExcludeNamespaces:  []string{"kube-system", "monitoring"},
 		},
 		Evictor: EvictorConfig{
-			Enabled:                true,
+			Enabled:                false,
 			DryRun:                 true, // safe default: recommend-only until explicitly enabled
 			UtilizationThreshold:   40.0,
 			ConsolidationInterval:  5 * time.Minute,
@@ -280,7 +280,7 @@ func DefaultConfig() *Config {
 			MinPodAge:    30 * time.Minute,
 		},
 		Rebalancer: RebalancerConfig{
-			Enabled:               true,
+			Enabled:               false,
 			DryRun:                true, // safe default
 			Schedule:              "0 3 * * SUN",
 			ImbalanceThresholdPct: 40.0,
