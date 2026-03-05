@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/koptimizer/koptimizer/internal/config"
 	"github.com/koptimizer/koptimizer/internal/state"
@@ -13,15 +15,16 @@ import (
 
 // AutoscalerHandler provides the autoscaler status dashboard endpoints.
 // Node lifecycle (cordon/drain/scale) is managed by GKE autoscaler;
-// this handler provides observability into node state only.
+// this handler provides observability into node state and GKE events.
 type AutoscalerHandler struct {
 	state  *state.ClusterState
 	config *config.Config
+	client client.Client
 }
 
 // NewAutoscalerHandler creates a new AutoscalerHandler.
-func NewAutoscalerHandler(st *state.ClusterState, cfg *config.Config) *AutoscalerHandler {
-	return &AutoscalerHandler{state: st, config: cfg}
+func NewAutoscalerHandler(st *state.ClusterState, cfg *config.Config, c client.Client) *AutoscalerHandler {
+	return &AutoscalerHandler{state: st, config: cfg, client: c}
 }
 
 // GetStatus returns node counts and per-node analysis (observability only).
@@ -147,12 +150,77 @@ func isEvictablePod(pod *corev1.Pod) bool {
 	return true
 }
 
-// GetEvents returns autoscaler-related events from the audit log, sorted by time desc.
+// gkeAutoscalerReasons maps GKE cluster-autoscaler event reasons to readable actions.
+var gkeAutoscalerReasons = map[string]string{
+	"ScaleDown":            "scale-down",
+	"ScaleDownEmpty":       "scale-down-empty",
+	"ScaleDownUnneeded":    "scale-down-unneeded",
+	"ScaleUp":              "scale-up",
+	"ScaledUpGroup":        "scale-up-group",
+	"TriggeredScaleUp":     "triggered-scale-up",
+	"NotTriggerScaleUp":    "scale-up-not-needed",
+	"ScaleDownFailed":      "scale-down-failed",
+	"ScaleDownUnready":     "scale-down-unready",
+	"DeleteUnneeded":       "delete-unneeded",
+	"DeleteUnregistered":   "delete-unregistered",
+	"ScaleDownDeferral":    "scale-down-deferred",
+}
+
+// GetEvents returns autoscaler-related events: GKE cluster-autoscaler k8s events + KOptimizer audit.
 func (h *AutoscalerHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
+	var merged []map[string]interface{}
+
+	// Fetch GKE cluster-autoscaler events from the Kubernetes API
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	var eventList corev1.EventList
+	if err := h.client.List(ctx, &eventList); err == nil {
+		for i := range eventList.Items {
+			ev := &eventList.Items[i]
+
+			// Filter: only cluster-autoscaler events
+			if ev.Source.Component != "cluster-autoscaler" {
+				continue
+			}
+
+			action := ev.Reason
+			if mapped, ok := gkeAutoscalerReasons[ev.Reason]; ok {
+				action = mapped
+			}
+
+			// Use last timestamp, fall back to first timestamp
+			ts := ev.LastTimestamp.Time
+			if ts.IsZero() {
+				ts = ev.FirstTimestamp.Time
+			}
+			if ts.IsZero() {
+				ts = ev.CreationTimestamp.Time
+			}
+
+			target := ""
+			if ev.InvolvedObject.Kind == "Node" {
+				target = ev.InvolvedObject.Name
+			} else if ev.InvolvedObject.Kind == "Pod" {
+				target = ev.InvolvedObject.Namespace + "/" + ev.InvolvedObject.Name
+			} else {
+				target = ev.InvolvedObject.Name
+			}
+
+			merged = append(merged, map[string]interface{}{
+				"timestamp": ts.Format(time.RFC3339),
+				"source":    "GKE",
+				"action":    action,
+				"target":    target,
+				"user":      "cluster-autoscaler",
+				"details":   ev.Message,
+			})
+		}
+	}
+
+	// Also include KOptimizer's own autoscaler-related audit events
 	autoscalerActions := map[string]bool{
 		"scale-nodegroup":       true,
-		"scale-up":              true,
-		"scale-down":            true,
 		"drain-node":            true,
 		"drain-failed":          true,
 		"drain-complete":        true,
@@ -160,18 +228,9 @@ func (h *AutoscalerHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		"uncordon-node":         true,
 		"auto-uncordon":         true,
 		"auto-uncordon-partial": true,
-		"dry-run-drain":         true,
-		"dry-run-scale":         true,
-		"dry-run-cordon":        true,
-		"evictor-recommend":     true,
-		"evictor-drain":         true,
-		"evictor-dry-run":       true,
-		"consolidation-check":   true,
 	}
 
 	allAudit := h.state.AuditLog.GetAll()
-	var merged []map[string]interface{}
-
 	for _, e := range allAudit {
 		if !autoscalerActions[e.Action] {
 			continue

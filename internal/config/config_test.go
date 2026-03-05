@@ -10,8 +10,8 @@ import (
 func TestDefaultConfig_ReturnsExpectedDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Mode != "recommend" {
-		t.Errorf("Mode = %q, want %q", cfg.Mode, "recommend")
+	if cfg.Mode != "active" {
+		t.Errorf("Mode = %q, want %q", cfg.Mode, "active")
 	}
 	if cfg.ReconcileInterval != 60*time.Second {
 		t.Errorf("ReconcileInterval = %v, want %v", cfg.ReconcileInterval, 60*time.Second)

@@ -42,7 +42,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	metricsHandler := handler.NewMetricsHandler(clusterState, provider, k8sClient, cfg)
 	policyHandler := handler.NewPolicyHandler(clusterState, cfg)
 	actionsHandler := handler.NewActionsHandler(clusterState, k8sClient)
-	autoscalerHandler := handler.NewAutoscalerHandler(clusterState, cfg)
+	autoscalerHandler := handler.NewAutoscalerHandler(clusterState, cfg, k8sClient)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Cluster

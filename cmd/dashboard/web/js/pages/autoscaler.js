@@ -176,9 +176,11 @@ async function renderStatus(targetEl) {
 // --- Events Tab ---
 
 function actionBadgeClass(action) {
+  if (action.includes('failed') || action.includes('unready')) return 'red';
+  if (action.includes('scale-down') || action.includes('delete-unneeded') || action.includes('delete-unregistered')) return 'green';
+  if (action.includes('scale-up') || action.includes('triggered-scale-up')) return 'blue';
   if (action.includes('drain') && !action.includes('failed')) return 'green';
-  if (action.includes('scale-down') || action.includes('scale-nodegroup')) return 'green';
-  if (action.includes('failed')) return 'red';
+  if (action.includes('not-needed') || action.includes('deferred')) return 'gray';
   if (action.includes('uncordon')) return 'amber';
   if (action.includes('dry-run')) return 'purple';
   if (action.includes('cordon')) return 'blue';

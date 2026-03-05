@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -213,9 +216,10 @@ func (r *Redistributor) analyzeAttract(snapshot *optimizer.ClusterSnapshot) []op
 	return recs
 }
 
-// Execute moves a pod using maxUnavailable=0 strategy: surge the owning
-// Deployment by 1 replica, wait for the new pod to become Ready, then evict
-// the old pod and scale back down. This ensures zero downtime during migration.
+// Execute moves a pod to/from GPU nodes.
+//   - Attract (redistribute-to-gpu): direct eviction from CPU node — Deployment controller
+//     recreates the pod, scheduler places it on GPU node (untainted, high spare capacity).
+//   - Evacuate (evacuate-from-gpu): surge-then-evict for zero downtime on GPU nodes.
 func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendation) error {
 	logger := log.FromContext(ctx).WithName("gpu-redistributor")
 	action := rec.Details["action"]
@@ -266,39 +270,60 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 		return nil
 	}
 
-	// Find owning Deployment for surge-then-evict (maxUnavailable=0)
+	// Attract: direct eviction from CPU node (fast, Deployment controller recreates).
+	// The scheduler will place the new pod on a GPU node because untainted GPU nodes
+	// have high spare capacity (LeastRequestedPriority scoring favors them).
+	if action == "redistribute-to-gpu" {
+		return r.executeDirectEviction(ctx, logger, pod, nodeName, action)
+	}
+
+	// Evacuate: surge-then-evict for zero-downtime migration off GPU nodes.
+	return r.executeSurgeThenEvict(ctx, logger, pod, nodeName, action)
+}
+
+// executeDirectEviction evicts a pod directly. Used for attract (CPU→GPU) and Job pods.
+func (r *Redistributor) executeDirectEviction(ctx context.Context, logger logr.Logger, pod *corev1.Pod, nodeName, action string) error {
+	podName := pod.Name
+	namespace := pod.Namespace
+
+	if err := evictPod(ctx, r.client, pod); err != nil {
+		r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
+			fmt.Sprintf("failed to evict %s/%s: %v", namespace, podName, err))
+		return nil
+	}
+	intmetrics.EvictionsTotal.Inc()
+
+	auditAction := "gpu-redistribute-to-gpu"
+	if action == "evacuate-from-gpu" {
+		auditAction = "gpu-redistribute-evacuate"
+	}
+	r.auditLog.Record(auditAction, nodeName, "gpu-redistributor",
+		fmt.Sprintf("evicted %s/%s from %s", namespace, podName, nodeName))
+	logger.Info("Redistributed pod via direct eviction",
+		"pod", podName, "namespace", namespace, "node", nodeName, "action", action)
+	return nil
+}
+
+// executeSurgeThenEvict uses maxUnavailable=0 strategy for safe migration.
+func (r *Redistributor) executeSurgeThenEvict(ctx context.Context, logger logr.Logger, pod *corev1.Pod, nodeName, action string) error {
+	podName := pod.Name
+	namespace := pod.Namespace
+
+	// Find owning Deployment
 	deploy, originalReplicas, err := r.findOwningDeployment(ctx, pod)
 	if err != nil || deploy == nil {
 		// No Deployment owner — check if it's a Job/CronJob pod (safe to evict directly)
-		isJobPod := false
 		for _, ref := range pod.OwnerReferences {
 			if ref.Kind == "Job" {
-				isJobPod = true
-				break
+				return r.executeDirectEviction(ctx, logger, pod, nodeName, action)
 			}
 		}
-		if !isJobPod {
-			r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
-				fmt.Sprintf("pod %s/%s has no Deployment/Job owner, skipping", namespace, podName))
-			return nil
-		}
-		// Job pods: evict directly — the Job controller will reschedule
-		if err := evictPod(ctx, r.client, pod); err != nil {
-			return err
-		}
-		intmetrics.EvictionsTotal.Inc()
-		auditAction := "gpu-redistribute-to-gpu"
-		if action == "evacuate-from-gpu" {
-			auditAction = "gpu-redistribute-evacuate"
-		}
-		r.auditLog.Record(auditAction, nodeName, "gpu-redistributor",
-			fmt.Sprintf("evicted Job pod %s/%s from %s", namespace, podName, nodeName))
-		logger.Info("Redistributed Job pod via direct eviction",
-			"pod", podName, "namespace", namespace, "node", nodeName, "action", action)
+		r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
+			fmt.Sprintf("pod %s/%s has no Deployment/Job owner, skipping", namespace, podName))
 		return nil
 	}
 
-	// Deployment-owned pods: surge-then-evict (maxUnavailable=0)
+	// Surge the Deployment by 1 replica
 	surgedReplicas := originalReplicas + 1
 	if err := r.scaleDeployment(ctx, deploy, surgedReplicas); err != nil {
 		r.auditLog.Record("gpu-redistribute-skipped", nodeName, "gpu-redistributor",
@@ -309,7 +334,7 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 		"deployment", deploy.Name, "namespace", namespace,
 		"from", originalReplicas, "to", surgedReplicas)
 
-	ready, err := r.waitForReady(ctx, deploy, surgedReplicas, 2*time.Minute)
+	ready, err := r.waitForReady(ctx, deploy, surgedReplicas, 5*time.Minute)
 	if !ready || err != nil {
 		logger.Error(err, "New replica not ready in time, rolling back surge",
 			"deployment", deploy.Name)
@@ -333,10 +358,7 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 
 	intmetrics.EvictionsTotal.Inc()
 
-	auditAction := "gpu-redistribute-to-gpu"
-	if action == "evacuate-from-gpu" {
-		auditAction = "gpu-redistribute-evacuate"
-	}
+	auditAction := "gpu-redistribute-evacuate"
 	r.auditLog.Record(auditAction, nodeName, "gpu-redistributor",
 		fmt.Sprintf("safely migrated %s/%s from %s (surged %s %d→%d→%d)",
 			namespace, podName, nodeName, deploy.Name, originalReplicas, surgedReplicas, originalReplicas))
@@ -392,20 +414,42 @@ func (r *Redistributor) findOwningDeployment(ctx context.Context, pod *corev1.Po
 	return deploy, replicas, nil
 }
 
-// scaleDeployment sets the replica count on a Deployment.
+// scaleDeployment sets the replica count on a Deployment with retry on conflict.
 func (r *Redistributor) scaleDeployment(ctx context.Context, deploy *appsv1.Deployment, replicas int32) error {
-	fresh := &appsv1.Deployment{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, fresh); err != nil {
-		return err
+	for attempt := 0; attempt < 3; attempt++ {
+		fresh := &appsv1.Deployment{}
+		if err := r.client.Get(ctx, types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, fresh); err != nil {
+			return err
+		}
+		fresh.Spec.Replicas = &replicas
+		err := r.client.Update(ctx, fresh)
+		if err == nil {
+			return nil
+		}
+		// Retry on conflict ("the object has been modified"), fail on other errors
+		if !isConflictError(err) {
+			return err
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	fresh.Spec.Replicas = &replicas
-	return r.client.Update(ctx, fresh)
+	return fmt.Errorf("conflict after 3 retries scaling %s to %d replicas", deploy.Name, replicas)
+}
+
+// isConflictError checks if the error is an optimistic locking conflict.
+func isConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apierrors.IsConflict(err) {
+		return true
+	}
+	return strings.Contains(err.Error(), "the object has been modified")
 }
 
 // waitForReady polls until the Deployment has the desired number of ready replicas.
 func (r *Redistributor) waitForReady(ctx context.Context, deploy *appsv1.Deployment, desired int32, timeout time.Duration) (bool, error) {
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
 	for {

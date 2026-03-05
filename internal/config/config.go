@@ -178,7 +178,7 @@ type DatabaseConfig struct {
 // Cloud provider and region can be set via CLOUD_PROVIDER and REGION env vars.
 func DefaultConfig() *Config {
 	cfg := &Config{
-		Mode:          "recommend",
+		Mode:          "active",
 		CloudProvider: "gcp",
 		Region:        "asia-south1",
 		ClusterName:   "apps-gke",
@@ -191,7 +191,7 @@ func DefaultConfig() *Config {
 			Enabled: true,
 		},
 		Rightsizer: RightsizingConfig{
-			Enabled:             false,
+			Enabled:             true,
 			LookbackWindow:      7 * 24 * time.Hour,
 			CPUTargetUtilPct:    95.0,
 			MemoryTargetUtilPct: 95.0,
@@ -213,7 +213,7 @@ func DefaultConfig() *Config {
 			ExcludeNamespaces:  []string{"kube-system", "monitoring"},
 		},
 		PodPurger: PodPurgerConfig{
-			Enabled:      false,
+			Enabled:      true,
 			PollInterval: 5 * time.Minute,
 			MinPodAge:    30 * time.Minute,
 		},
