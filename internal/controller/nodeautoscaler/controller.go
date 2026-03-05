@@ -190,6 +190,13 @@ func (c *Controller) executeScale(ctx context.Context, rec optimizer.Recommendat
 			if n.NodeGroup != nodeGroupID {
 				continue
 			}
+			// Skip already-cordoned nodes — they're pending removal by the
+			// cloud autoscaler. Re-draining them wastes drain attempts and
+			// refreshes the cordon timestamp (preventing TTL cleanup), while
+			// burning MaxConcurrentEvictions quota and blocking new drains.
+			if n.Node.Spec.Unschedulable {
+				continue
+			}
 			// Use request-based utilization (not usage) to match the
 			// scheduler's view. The pre-drain check evaluates placement
 			// using requests, so filtering by usage here would select

@@ -54,6 +54,12 @@ func (d *Downscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 		// picture of how many nodes can actually be consolidated.
 		underutilizedCount := 0
 		for _, n := range nodes {
+			// Skip cordoned nodes — they're already pending removal.
+			// Counting them as underutilized inflates the scale-down
+			// target and leads to re-draining already-empty nodes.
+			if n.Node.Spec.Unschedulable {
+				continue
+			}
 			cpuReqPct := float64(0)
 			if n.CPUCapacity > 0 {
 				cpuReqPct = float64(n.CPURequested) / float64(n.CPUCapacity) * 100
