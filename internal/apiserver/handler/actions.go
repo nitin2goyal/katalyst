@@ -103,7 +103,7 @@ var protectedNamespaces = map[string]bool{
 	"kube-node-lease": true,
 }
 
-const maxDeleteBatch = 100
+const maxDeleteBatch = 1000
 
 func (h *ActionsHandler) DeletePods(w http.ResponseWriter, r *http.Request) {
 	var req deletePodsRequest

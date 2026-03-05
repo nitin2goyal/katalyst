@@ -220,13 +220,26 @@ export async function renderActions(targetEl) {
         document.body.appendChild(overlay);
 
         try {
-          const result = await apiPost('/actions/delete-pods', {
-            pods: selected.map(p => ({ name: p.name, namespace: p.namespace })),
-          });
+          // Batch into chunks of 500 to stay within server limits
+          const allPods = selected.map(p => ({ name: p.name, namespace: p.namespace }));
+          const BATCH = 500;
+          let totalDeleted = 0;
+          let allErrors = [];
+          for (let i = 0; i < allPods.length; i += BATCH) {
+            const batch = allPods.slice(i, i + BATCH);
+            const progressEl = overlay.querySelector('#purge-progress');
+            if (progressEl && allPods.length > BATCH) {
+              progressEl.textContent = `Batch ${Math.floor(i / BATCH) + 1} of ${Math.ceil(allPods.length / BATCH)}...`;
+            }
+            const res = await apiPost('/actions/delete-pods', { pods: batch });
+            totalDeleted += res.deleted || 0;
+            if (res.errors) allErrors = allErrors.concat(res.errors);
+          }
           overlay.remove();
 
-          const errCount = (result.errors || []).length;
-          const deleted = result.deleted || 0;
+          const errCount = allErrors.length;
+          const deleted = totalDeleted;
+          const result = { errors: allErrors };
 
           const resultOverlay = document.createElement('div');
           resultOverlay.className = 'modal-overlay';
