@@ -185,6 +185,33 @@ func ExtractPodRequests(pod *corev1.Pod) (cpuMilli int64, memBytes int64) {
 	return
 }
 
+// isPodStuckPending returns true if a Pending pod is in a terminal waiting
+// state that won't resolve on its own (e.g., ImagePullBackOff, ErrImagePull).
+// These pods reserve resource requests but will never actually run, so counting
+// them inflates node utilization and blocks scale-down decisions.
+func IsPodStuckPending(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodPending {
+		return false
+	}
+	stuckReasons := map[string]bool{
+		"ImagePullBackOff":           true,
+		"ErrImagePull":               true,
+		"CreateContainerConfigError": true,
+		"InvalidImageName":           true,
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Waiting != nil && stuckReasons[cs.State.Waiting.Reason] {
+			return true
+		}
+	}
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if cs.State.Waiting != nil && stuckReasons[cs.State.Waiting.Reason] {
+			return true
+		}
+	}
+	return false
+}
+
 // QuantityToMilliCPU converts a resource.Quantity to millicores.
 func QuantityToMilliCPU(q resource.Quantity) int64 {
 	return q.MilliValue()

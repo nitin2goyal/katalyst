@@ -383,6 +383,12 @@ func (c *Controller) preDrainFeasibilityCheck(ctx context.Context, snapshot *opt
 		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
+		// Skip stuck-pending pods (ImagePullBackOff, ErrImagePull, etc.) —
+		// they reserve requests but use zero resources. Including them causes
+		// capacity checks to fail for pods that will never actually run.
+		if state.IsPodStuckPending(pod) {
+			continue
+		}
 		isDaemonSet := false
 		for _, ref := range pod.OwnerReferences {
 			if ref.Kind == "DaemonSet" {

@@ -408,11 +408,14 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		}
 
 		// Calculate requests and GPU allocation from pods.
-		// Only count Running pods for resource accounting — completed/failed
-		// Job pods still have spec.nodeName set and would inflate CPURequested.
+		// Only count Running pods and viable Pending pods — skip completed/failed
+		// Job pods and Pending pods stuck in terminal states (ImagePullBackOff,
+		// ErrImagePull, etc.) that will never actually run. Counting stuck pods
+		// inflates CPURequested to ~100% on nodes that are actually nearly idle,
+		// preventing the downscaler from ever selecting them.
 		gpuResource := corev1.ResourceName("nvidia.com/gpu")
 		for _, pod := range ns.Pods {
-			if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodPending {
+			if pod.Status.Phase == corev1.PodRunning || (pod.Status.Phase == corev1.PodPending && !IsPodStuckPending(pod)) {
 				cpuReq, memReq := ExtractPodRequests(pod)
 				ns.CPURequested += cpuReq
 				ns.MemoryRequested += memReq
