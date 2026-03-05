@@ -72,20 +72,26 @@ func (d *Downscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 			continue
 		}
 
-		// Don't scale below min
+		// Don't scale below min. Use CurrentCount (actual running nodes)
+		// instead of DesiredCount for accurate calculation. DesiredCount may
+		// be stale (e.g. GKE desired=35 but current=46).
+		currentCount := ng.CurrentCount
+		if currentCount == 0 {
+			currentCount = ng.DesiredCount // fallback
+		}
 		nodesToRemove := underutilizedCount
 		if nodesToRemove > d.config.NodeAutoscaler.MaxScaleDownNodes {
 			nodesToRemove = d.config.NodeAutoscaler.MaxScaleDownNodes
 		}
-		newDesired := ng.DesiredCount - nodesToRemove
+		newDesired := currentCount - nodesToRemove
 		if newDesired < ng.MinCount {
 			newDesired = ng.MinCount
 		}
-		if newDesired >= ng.DesiredCount {
+		if newDesired >= currentCount {
 			continue
 		}
 
-		scalePct := float64(ng.DesiredCount-newDesired) / float64(ng.DesiredCount) * 100
+		scalePct := float64(currentCount-newDesired) / float64(currentCount) * 100
 		requiresAIGate := scalePct > d.config.AIGate.ScaleThresholdPct
 
 		// Estimate savings using average hourly cost across all nodes in the group
@@ -94,7 +100,7 @@ func (d *Downscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 			totalHourlyCost += n.HourlyCostUSD
 		}
 		hourlySavingsPerNode := totalHourlyCost / float64(len(nodes))
-		monthlySavings := hourlySavingsPerNode * cost.HoursPerMonth * float64(ng.DesiredCount-newDesired)
+		monthlySavings := hourlySavingsPerNode * cost.HoursPerMonth * float64(currentCount-newDesired)
 
 		recs = append(recs, optimizer.Recommendation{
 			ID:             fmt.Sprintf("scaledown-%s-%d", ng.ID, time.Now().Unix()),
@@ -104,11 +110,11 @@ func (d *Downscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 			RequiresAIGate: requiresAIGate,
 			TargetKind:     "NodeGroup",
 			TargetName:     ng.Name,
-			Summary:        fmt.Sprintf("Scale down node group %s from %d to %d nodes (%d underutilized)", ng.Name, ng.DesiredCount, newDesired, underutilizedCount),
+			Summary:        fmt.Sprintf("Scale down node group %s from %d to %d nodes (%d underutilized)", ng.Name, currentCount, newDesired, underutilizedCount),
 			ActionSteps: []string{
 				fmt.Sprintf("Cordon underutilized nodes in %s", ng.Name),
 				"Drain pods respecting PDBs",
-				fmt.Sprintf("Decrease desired count from %d to %d", ng.DesiredCount, newDesired),
+				fmt.Sprintf("Decrease node count from %d to %d", currentCount, newDesired),
 			},
 			EstimatedSaving: optimizer.SavingEstimate{
 				MonthlySavingsUSD: monthlySavings,
@@ -117,7 +123,7 @@ func (d *Downscaler) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 			},
 			EstimatedImpact: optimizer.ImpactEstimate{
 				MonthlyCostChangeUSD: -monthlySavings,
-				NodesAffected:        ng.DesiredCount - newDesired,
+				NodesAffected:        currentCount - newDesired,
 				RiskLevel:            "medium",
 			},
 			Details: map[string]string{

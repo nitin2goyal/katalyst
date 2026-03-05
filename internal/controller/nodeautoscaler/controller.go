@@ -362,10 +362,18 @@ func (c *Controller) preDrainFeasibilityCheck(ctx context.Context, snapshot *opt
 		return fmt.Errorf("node %s not found in snapshot", nodeName)
 	}
 
-	// Filter to evictable pods (non-DaemonSet, non-system).
+	// Filter to evictable pods: skip DaemonSet, system, and terminated pods.
+	// Terminated pods (Succeeded/Failed) don't consume resources but remain
+	// in the pod list. Including them causes the capacity check to fail
+	// because they carry huge request specs (e.g. 16Gi) that can't fit
+	// elsewhere, even though Kubernetes doesn't count them against the node.
 	var evictablePods []*corev1.Pod
 	for _, pod := range targetNodeInfo.Pods {
 		if pod == nil {
+			continue
+		}
+		// Skip terminated pods — they don't consume resources
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
 		isDaemonSet := false

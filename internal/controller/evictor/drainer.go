@@ -129,6 +129,21 @@ func (d *Drainer) DrainNode(ctx context.Context, nodeName string) error {
 		}
 	}
 
+	// Delete terminated pods first. Succeeded/Failed pods don't consume
+	// resources but linger on the node. GKE autoscaler won't remove a node
+	// that has any pods — even terminated ones. Cleaning them up before
+	// eviction ensures the node is truly empty after a successful drain.
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			if err := d.client.Delete(drainCtx, pod); err != nil {
+				logger.V(1).Info("Failed to delete terminated pod", "pod", pod.Name, "namespace", pod.Namespace, "phase", pod.Status.Phase, "error", err)
+			} else {
+				logger.V(1).Info("Deleted terminated pod", "pod", pod.Name, "namespace", pod.Namespace, "phase", pod.Status.Phase)
+			}
+		}
+	}
+
 	// Evict pods (skip DaemonSet pods and mirror pods)
 	var evicted, failed int
 	var evictErrs []error
