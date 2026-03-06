@@ -89,9 +89,10 @@ func TestRecommender_CPUOverProv_GeneratesRec(t *testing.T) {
 
 	gi := int64(1024 * 1024 * 1024)
 
+	// CPU request must be >= 1000m for rightsizing to kick in
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("web-1", "default", "Deployment", "web", 1000, 8*gi),
-		CPURequestMilli: 1000,
+		PodInfo:         makePodInfo("web-1", "default", "Deployment", "web", 2000, 8*gi),
+		CPURequestMilli: 2000,
 		MemRequestBytes: 8 * gi,
 		CPUP50:          100,
 		CPUP95:          200,
@@ -360,9 +361,9 @@ func TestRecommender_MinKeepRatioClamped(t *testing.T) {
 	}
 }
 
-func TestRecommender_CPUFloor10m(t *testing.T) {
-	// Very low usage → CPU clamped to 10m minimum
-	// Uses 4Gi memory to exceed the 2Gi minimum for rightsizing
+func TestRecommender_BelowMinCPU_NoRec(t *testing.T) {
+	// Pods with CPU request below 1000m are skipped entirely — the savings
+	// from rightsizing small workloads aren't worth the disruption.
 	cfg := defaultTestConfig()
 	cfg.Rightsizer.MinKeepRatio = 0.01
 	recommender := NewRecommender(cfg)
@@ -392,14 +393,8 @@ func TestRecommender_CPUFloor10m(t *testing.T) {
 
 	recs := recommender.Recommend(analysis)
 
-	if len(recs) != 1 {
-		t.Fatalf("expected 1 recommendation, got %d", len(recs))
-	}
-
-	rec := recs[0]
-	// CPU: max(2*1.2=2, 100*0.01=1) = 2 → clamped to 10m
-	if rec.Details["suggestedCPURequest"] != "10m" {
-		t.Errorf("suggestedCPURequest = %q, want %q (floor)", rec.Details["suggestedCPURequest"], "10m")
+	if len(recs) != 0 {
+		t.Fatalf("expected 0 recommendations for sub-1CPU pod, got %d", len(recs))
 	}
 }
 
@@ -444,8 +439,8 @@ func TestRecommender_SavingsEstimate(t *testing.T) {
 	gi := int64(1024 * 1024 * 1024)
 
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("svc-1", "prod", "Deployment", "svc", 1000, 8*gi),
-		CPURequestMilli: 1000,
+		PodInfo:         makePodInfo("svc-1", "prod", "Deployment", "svc", 2000, 8*gi),
+		CPURequestMilli: 2000,
 		MemRequestBytes: 8 * gi,
 		CPUP50:          100,
 		CPUP95:          200,
@@ -485,9 +480,9 @@ func TestRecommender_TargetFieldsPopulated(t *testing.T) {
 	gi := int64(1024 * 1024 * 1024)
 
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("svc-pod", "staging", "StatefulSet", "my-svc", 1000, 4*gi),
-		CPURequestMilli: 1000,
-		MemRequestBytes: 4 * gi,
+		PodInfo:         makePodInfo("svc-pod", "staging", "StatefulSet", "my-svc", 4000, 16*gi),
+		CPURequestMilli: 4000,
+		MemRequestBytes: 16 * gi,
 		CPUP50:          100,
 		CPUP95:          200,
 		CPUP99:          250,

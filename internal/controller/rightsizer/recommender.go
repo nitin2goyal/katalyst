@@ -83,6 +83,13 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		cpuFloor = 10
 	}
 
+	// Never downsize below 1 CPU (1000m). For pods already under 1 CPU,
+	// this clamp makes suggestedCPU >= CPURequestMilli, so no rec is
+	// generated (the "never increase CPU" check below catches it).
+	if cpuFloor < 1000 {
+		cpuFloor = 1000
+	}
+
 	suggestedCPU := cpuFloor
 
 	// Never increase CPU

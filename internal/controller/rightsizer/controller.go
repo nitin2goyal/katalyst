@@ -3,6 +3,7 @@ package rightsizer
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type Controller struct {
 
 	mu        sync.Mutex
 	downsized map[string]time.Time // tracks workloads already downsized with TTL
+	execTimes []time.Time          // sliding window for rate limiting executions
 }
 
 func NewController(mgr ctrl.Manager, st *state.ClusterState, gate *aigate.AIGate, cfg *config.Config, metricsStore *metrics.Store) *Controller {
@@ -154,9 +156,17 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
+	// Rate limit: max 5 rightsizing operations per minute to avoid
+	// flooding the cluster with concurrent rolling restarts.
+	if !c.canExecute() {
+		return nil
+	}
+
 	if err := c.executeWithGate(ctx, rec); err != nil {
 		return err
 	}
+
+	c.recordExecution()
 
 	// Record successful downsize with timestamp for TTL-based expiry.
 	c.mu.Lock()
@@ -290,6 +300,13 @@ func (c *Controller) run(ctx context.Context) {
 				c.state.Breaker.RecordFailure(c.Name())
 				continue
 			}
+
+			// Sort by estimated savings descending so the rate limiter
+			// picks the highest-impact rightsizings first.
+			sort.Slice(recs, func(i, j int) bool {
+				return recs[i].EstimatedSaving.MonthlySavingsUSD > recs[j].EstimatedSaving.MonthlySavingsUSD
+			})
+
 			for _, rec := range recs {
 				// Push to notification channels (with cooldown dedup)
 				c.notifier.Notify(ctx, rec)
@@ -305,6 +322,31 @@ func (c *Controller) run(ctx context.Context) {
 			return
 		}
 	}
+}
+
+const maxRightsizePerMinute = 5
+
+// canExecute checks whether we're within the rate limit of 5 rightsizing
+// operations per minute. Uses a sliding window over recent execution times.
+func (c *Controller) canExecute() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cutoff := time.Now().Add(-time.Minute)
+	valid := c.execTimes[:0]
+	for _, t := range c.execTimes {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+	c.execTimes = valid
+	return len(c.execTimes) < maxRightsizePerMinute
+}
+
+// recordExecution records a successful rightsizing execution for rate limiting.
+func (c *Controller) recordExecution() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.execTimes = append(c.execTimes, time.Now())
 }
 
 // cleanupDownsized removes entries older than 24h to prevent memory leaks.
