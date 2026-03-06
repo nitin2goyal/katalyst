@@ -227,7 +227,7 @@ async function renderEvents(targetEl) {
               <td>${badge(e.action, actionBadgeClass(e.action))}</td>
               <td>${e.target ? `<a href="#/nodes/${escapeHtml(e.target)}">${escapeHtml(e.target)}</a>` : '-'}</td>
               <td>${escapeHtml(e.user || '-')}</td>
-              <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(e.details || '')}">${escapeHtml(e.details || '-')}</td>
+              <td class="expandable-cell" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Click to expand">${escapeHtml(e.details || '-')}</td>
             </tr>`).join('')}
           </tbody>
         </table></div>`
@@ -238,5 +238,23 @@ async function renderEvents(targetEl) {
     const table = $('#events-table');
     makeSortable(table);
     attachPagination(table);
+    // Click to expand/collapse details cells
+    table.addEventListener('click', (e) => {
+      const cell = e.target.closest('.expandable-cell');
+      if (!cell) return;
+      const isExpanded = cell.style.whiteSpace === 'normal';
+      if (isExpanded) {
+        cell.style.whiteSpace = 'nowrap';
+        cell.style.overflow = 'hidden';
+        cell.style.textOverflow = 'ellipsis';
+        cell.title = 'Click to expand';
+      } else {
+        cell.style.whiteSpace = 'normal';
+        cell.style.overflow = 'visible';
+        cell.style.textOverflow = 'unset';
+        cell.style.wordBreak = 'break-word';
+        cell.title = 'Click to collapse';
+      }
+    });
   }
 }

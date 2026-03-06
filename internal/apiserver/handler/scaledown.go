@@ -180,16 +180,20 @@ func (h *ScaleDownBlockersHandler) getScaleDownFailedEvents(ctx context.Context)
 		if ev.InvolvedObject.Kind == "Node" {
 			nodeName = ev.InvolvedObject.Name
 		}
+		// Try to extract node name from the message if not on the InvolvedObject
+		if nodeName == "" {
+			nodeName = extractNodeFromMessage(ev.Message)
+		}
 
 		// Parse pod names from the error message
 		blockedBy := parseBlockingPods(ev.Message)
 
 		result = append(result, map[string]interface{}{
-			"timestamp":  ts.Format(time.RFC3339),
-			"nodeName":   nodeName,
-			"message":    ev.Message,
-			"count":      ev.Count,
-			"blockedBy":  blockedBy,
+			"timestamp": ts.Format(time.RFC3339),
+			"nodeName":  nodeName,
+			"message":   ev.Message,
+			"count":     ev.Count,
+			"blockedBy": blockedBy,
 		})
 	}
 
@@ -205,28 +209,31 @@ func (h *ScaleDownBlockersHandler) getScaleDownFailedEvents(ctx context.Context)
 }
 
 // parseBlockingPods extracts pod references from ScaleDownFailed messages.
-// Example: "failed to evict pod spr-apps/sch-ms-tier1-deployment-88b86cc5f-kpjrg within allowed timeout
-// (last error: Cannot evict pod as it would violate the pod's disruption budget.)"
+// Handles multiple message formats:
+//   - "failed to evict pod spr-apps/pod-name within allowed timeout (last error: ...)"
+//   - "failed to delete pod for ScaleDown"
+//   - "[failed to evict pod ns/pod within allowed timeout (...)]"
 func parseBlockingPods(message string) []map[string]string {
 	var pods []map[string]string
+
+	// Pattern 1: "failed to evict pod <ns/pod>"
 	parts := strings.Split(message, "failed to evict pod ")
-	for _, part := range parts[1:] { // skip the first part (before any "failed to evict pod")
-		// Extract "namespace/podname" up to the next space or " within"
+	for _, part := range parts[1:] {
 		ref := part
 		if idx := strings.Index(ref, " within"); idx > 0 {
 			ref = ref[:idx]
 		} else if idx := strings.IndexByte(ref, ' '); idx > 0 {
 			ref = ref[:idx]
 		}
-		ref = strings.TrimRight(ref, ",")
+		ref = strings.TrimRight(ref, ",.])")
 
 		reason := "PDB violation"
 		if strings.Contains(part, "eviction subresource does not support") {
 			reason = "eviction API not supported"
-		} else if strings.Contains(part, "disruption budget") {
-			reason = "PDB violation"
 		} else if strings.Contains(part, "has more than one PodDisruptionBudget") {
 			reason = "multiple PDBs"
+		} else if strings.Contains(part, "disruption budget") {
+			reason = "PDB violation"
 		}
 
 		ns, name := "", ref
@@ -234,14 +241,70 @@ func parseBlockingPods(message string) []map[string]string {
 			ns = ref[:idx]
 			name = ref[idx+1:]
 		}
-
-		pods = append(pods, map[string]string{
-			"namespace": ns,
-			"pod":       name,
-			"reason":    reason,
-		})
+		if name != "" {
+			pods = append(pods, map[string]string{
+				"namespace": ns,
+				"pod":       name,
+				"reason":    reason,
+			})
+		}
 	}
+
+	// Pattern 2: "failed to delete pod <ns/pod> for ScaleDown"
+	deleteParts := strings.Split(message, "failed to delete pod ")
+	for _, part := range deleteParts[1:] {
+		ref := part
+		if idx := strings.Index(ref, " for "); idx > 0 {
+			ref = ref[:idx]
+		} else if idx := strings.IndexByte(ref, ' '); idx > 0 {
+			ref = ref[:idx]
+		}
+		ref = strings.TrimRight(ref, ",.])")
+
+		ns, name := "", ref
+		if idx := strings.IndexByte(ref, '/'); idx >= 0 {
+			ns = ref[:idx]
+			name = ref[idx+1:]
+		}
+		if name != "" {
+			pods = append(pods, map[string]string{
+				"namespace": ns,
+				"pod":       name,
+				"reason":    "delete failed",
+			})
+		}
+	}
+
 	return pods
+}
+
+// extractNodeFromMessage tries to extract a node name from autoscaler event messages.
+// Common patterns:
+//   - "Failed to drain node /gke-apps-gke-apps-gke-generic-node-5-061f26bc-f6d9, ..."
+//   - "failed to drain and delete node: Failed to drain node /gke-apps-..."
+func extractNodeFromMessage(message string) string {
+	// Look for "node /node-name" or "node: /node-name"
+	for _, prefix := range []string{"drain node /", "delete node /", "node /", "Node /"} {
+		idx := strings.Index(message, prefix)
+		if idx < 0 {
+			continue
+		}
+		start := idx + len(prefix)
+		rest := message[start:]
+		// Node name ends at comma, space, or end of string
+		end := len(rest)
+		for i, ch := range rest {
+			if ch == ',' || ch == ' ' || ch == '.' {
+				end = i
+				break
+			}
+		}
+		name := rest[:end]
+		if name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 // getSingleReplicaWithPDB finds deployments with 1 replica that are matched by a blocking PDB.

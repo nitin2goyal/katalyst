@@ -110,29 +110,6 @@ async function renderOverview(targetEl) {
       ${severityBadge(s.affectedNodes || 0, 'Affected Nodes', 'red')}
     </div>
 
-    ${nodeList.length > 0 ? `
-    <div class="card">
-      ${cardHeader('Nodes Failing Scale-Down (' + nodeList.length + ')')}
-      <div class="table-wrap"><table id="node-blockers-table">
-        <thead><tr>
-          <th>Node</th>
-          <th>Failed Events</th>
-          <th>Blocking Pods</th>
-          <th>Last Seen</th>
-        </tr></thead>
-        <tbody>
-          ${nodeList.map(n => `<tr>
-            <td><a href="#/nodes/${escapeHtml(n.node)}">${escapeHtml(shortNodeName(n.node))}</a></td>
-            <td>${n.events}</td>
-            <td style="max-width:500px">${n.pods.map(p =>
-              `${badge(p.reason, p.reason === 'PDB violation' ? 'red' : 'amber')} <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(p.namespace)}/${escapeHtml(p.pod)}</span>`
-            ).join('<br>')}</td>
-            <td title="${escapeHtml(n.lastSeen)}">${timeAgo(n.lastSeen)}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div>` : ''}
-
     ${topNamespaces.length > 0 ? `
     <div class="card">
       ${cardHeader('Blocking PDBs by Namespace')}
@@ -148,6 +125,31 @@ async function renderOverview(targetEl) {
           </div>
         `).join('')}
       </div>
+    </div>` : ''}
+
+    ${nodeList.length > 0 ? `
+    <div class="card">
+      ${cardHeader('Nodes Failing Scale-Down (' + nodeList.length + ')')}
+      <div class="table-wrap"><table id="node-blockers-table">
+        <thead><tr>
+          <th>Node</th>
+          <th>Failed Events</th>
+          <th>Blocking Pods</th>
+          <th>Last Seen</th>
+        </tr></thead>
+        <tbody>
+          ${nodeList.map(n => `<tr>
+            <td>${n.node ? `<a href="#/nodes/${escapeHtml(n.node)}">${escapeHtml(shortNodeName(n.node))}</a>` : badge('unknown', 'gray')}</td>
+            <td>${n.events}</td>
+            <td style="max-width:500px">${n.pods.length > 0
+              ? n.pods.map(p =>
+                `${badge(p.reason, podReasonColor(p.reason))} <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(p.namespace)}/${escapeHtml(p.pod)}</span>`
+              ).join('<br>')
+              : '<span style="color:var(--text-muted)">-</span>'}</td>
+            <td title="${escapeHtml(n.lastSeen)}">${timeAgo(n.lastSeen)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
     </div>` : ''}
   `;
 
@@ -256,12 +258,14 @@ async function renderEvents(targetEl) {
           <tbody>
             ${events.map(e => `<tr>
               <td title="${escapeHtml(e.timestamp)}">${timeAgo(e.timestamp)}</td>
-              <td>${e.nodeName ? `<a href="#/nodes/${escapeHtml(e.nodeName)}">${escapeHtml(shortNodeName(e.nodeName))}</a>` : '-'}</td>
+              <td>${e.nodeName ? `<a href="#/nodes/${escapeHtml(e.nodeName)}">${escapeHtml(shortNodeName(e.nodeName))}</a>` : badge('N/A', 'gray')}</td>
               <td>${e.count || 1}</td>
-              <td>${(e.blockedBy || []).map(p =>
-                `<div style="margin:2px 0">${badge(p.reason, p.reason === 'PDB violation' ? 'red' : 'amber')} <span style="font-size:12px">${escapeHtml(p.namespace)}/${escapeHtml(p.pod)}</span></div>`
-              ).join('')}</td>
-              <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(e.message || '')}">${escapeHtml(e.message || '-')}</td>
+              <td>${(e.blockedBy || []).length > 0
+                ? (e.blockedBy || []).map(p =>
+                  `<div style="margin:2px 0">${badge(p.reason, podReasonColor(p.reason))} <span style="font-size:12px">${escapeHtml(p.namespace)}/${escapeHtml(p.pod)}</span></div>`
+                ).join('')
+                : `<span style="color:var(--text-muted);font-size:12px">${escapeHtml(truncate(e.message || '-', 80))}</span>`}</td>
+              <td class="expandable-cell" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Click to expand">${escapeHtml(e.message || '-')}</td>
             </tr>`).join('')}
           </tbody>
         </table></div>`}
@@ -271,6 +275,7 @@ async function renderEvents(targetEl) {
     const table = $('#events-table');
     makeSortable(table);
     attachPagination(table);
+    attachExpandableCells(table);
   }
 }
 
@@ -432,10 +437,42 @@ function unevictableReasonBadge(reason) {
 }
 
 function shortNodeName(name) {
-  // Shorten long GKE node names: keep last 2 segments
   const parts = name.split('-');
   if (parts.length > 4) {
     return '...' + parts.slice(-3).join('-');
   }
   return name;
+}
+
+function podReasonColor(reason) {
+  if (reason === 'PDB violation') return 'red';
+  if (reason === 'multiple PDBs') return 'red';
+  if (reason === 'delete failed') return 'amber';
+  if (reason === 'eviction API not supported') return 'amber';
+  return 'yellow';
+}
+
+function truncate(str, len) {
+  if (!str || str.length <= len) return str || '';
+  return str.slice(0, len) + '...';
+}
+
+function attachExpandableCells(table) {
+  table.addEventListener('click', (e) => {
+    const cell = e.target.closest('.expandable-cell');
+    if (!cell) return;
+    const isExpanded = cell.style.whiteSpace === 'normal';
+    if (isExpanded) {
+      cell.style.whiteSpace = 'nowrap';
+      cell.style.overflow = 'hidden';
+      cell.style.textOverflow = 'ellipsis';
+      cell.title = 'Click to expand';
+    } else {
+      cell.style.whiteSpace = 'normal';
+      cell.style.overflow = 'visible';
+      cell.style.textOverflow = 'unset';
+      cell.style.wordBreak = 'break-word';
+      cell.title = 'Click to collapse';
+    }
+  });
 }
