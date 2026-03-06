@@ -325,9 +325,12 @@ async function renderEvents(targetEl) {
             const result = await apiPost('/scaledown/delete-pdbs', {
               pdbs: relevantPDBs.map(p => ({ name: p.name, namespace: p.namespace }))
             });
-            const msg = `Deleted ${result.deleted} PDB${result.deleted !== 1 ? 's' : ''}` +
-              (result.errors?.length ? `, ${result.errors.length} failed` : '');
-            toast(msg, result.errors?.length ? 'warning' : 'success');
+            let msg = `Deleted ${result.deleted} PDB${result.deleted !== 1 ? 's' : ''}`;
+            if (result.errors?.length) {
+              const firstErr = result.errors[0].error || 'unknown';
+              msg += `, ${result.errors.length} failed: ${firstErr}`;
+            }
+            toast(msg, result.errors?.length ? (result.deleted > 0 ? 'warning' : 'error') : 'success');
             // Refresh the tab
             setTimeout(() => renderEvents(targetEl), 1000);
           } catch (err) {

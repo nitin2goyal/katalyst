@@ -37,10 +37,10 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["patch", "update"]
-  # Read PDBs
+  # Read/delete PDBs (delete needed for scale-down blocker remediation)
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "delete"]
   # KOptimizer CRDs
   - apiGroups: ["koptimizer.io"]
     resources: ["optimizerconfigs", "recommendations", "costreports", "commitmentreports"]
