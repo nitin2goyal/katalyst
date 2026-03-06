@@ -16,7 +16,7 @@ serviceAccount:
 
 # KOptimizer configuration
 config:
-  mode: "recommend"  # monitor | recommend | active
+  mode: "active"  # monitor | recommend | active
   cloudProvider: ""  # aws | gcp | azure (required)
   region: ""         # e.g., us-east-1, europe-west1, eastus (required)
   clusterName: ""
