@@ -103,17 +103,10 @@ func main() {
 	}
 
 	// Create settings store and load persisted overrides into config.
-	// This runs before ValidateDetailed so runtime settings from the
-	// previous pod lifetime take precedence over the config file.
+	// Mode and PodPurger.Enabled are NOT restored — they always start
+	// with the config defaults (active mode, purger enabled) on redeploy.
+	// The UI can still toggle them at runtime.
 	settingsStore := store.NewSettingsStore(sqlDBRef)
-	if mode := settingsStore.LoadMode(); mode != "" {
-		setupLog.Info("Restoring persisted mode", "mode", mode)
-		cfg.Mode = mode
-	}
-	if enabled, found := settingsStore.LoadPodPurgerEnabled(); found {
-		setupLog.Info("Restoring persisted pod purger state", "enabled", enabled)
-		cfg.PodPurger.Enabled = enabled
-	}
 	if channels := settingsStore.LoadChannels(); channels != nil {
 		setupLog.Info("Restoring persisted notification channels", "count", len(channels))
 		cfg.Alerts.Channels = channels
@@ -136,7 +129,8 @@ func main() {
 			case "aiGate":
 				cfg.AIGate.Enabled = enabled
 			case "podPurger":
-				cfg.PodPurger.Enabled = enabled
+				// Skip — podPurger always starts with config default (enabled)
+				// to avoid persisted "disabled" state surviving redeploys.
 			}
 		}
 		setupLog.Info("Restoring persisted controller states", "count", len(ctrlStates))
