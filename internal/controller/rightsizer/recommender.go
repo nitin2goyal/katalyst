@@ -122,6 +122,14 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		return nil
 	}
 
+	// Skip if memory reduction is less than 2 GiB — the disruption from
+	// restarting pods isn't worth a small memory savings.
+	const minMemDelta = 2 * 1024 * 1024 * 1024 // 2 GiB
+	memDelta := analysis.MemRequestBytes - suggestedMem
+	if memDelta > 0 && memDelta < minMemDelta {
+		return nil
+	}
+
 	cpuSavings := estimateCPUSavings(analysis.CPURequestMilli, suggestedCPU, r.config.CloudProvider)
 	memSavings := estimateMemorySavings(analysis.MemRequestBytes, suggestedMem, r.config.CloudProvider)
 	perPodSavings := cpuSavings + memSavings
