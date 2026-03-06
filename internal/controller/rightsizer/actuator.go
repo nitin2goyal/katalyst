@@ -273,10 +273,14 @@ func (a *Actuator) patchDeployment(ctx context.Context, namespace, name, resourc
 		return fmt.Errorf("getting deployment %s/%s: %w", namespace, name, err)
 	}
 
+	// Record original values before patching so the UI can show drift.
+	recordOriginalResources(deploy.Annotations, deploy.Spec.Template.Spec.Containers, resourceType)
+
 	patchData := buildResourcePatch(deploy.Spec.Template.Spec.Containers, resourceType, value)
 	if patchData == nil {
 		return nil
 	}
+	addOriginalAnnotations(patchData, deploy.Annotations)
 
 	patch, err := json.Marshal(patchData)
 	if err != nil {
@@ -292,10 +296,13 @@ func (a *Actuator) patchStatefulSet(ctx context.Context, namespace, name, resour
 		return fmt.Errorf("getting statefulset %s/%s: %w", namespace, name, err)
 	}
 
+	recordOriginalResources(sts.Annotations, sts.Spec.Template.Spec.Containers, resourceType)
+
 	patchData := buildResourcePatch(sts.Spec.Template.Spec.Containers, resourceType, value)
 	if patchData == nil {
 		return nil
 	}
+	addOriginalAnnotations(patchData, sts.Annotations)
 
 	patch, err := json.Marshal(patchData)
 	if err != nil {
@@ -381,10 +388,13 @@ func (a *Actuator) patchDeploymentCombined(ctx context.Context, namespace, name,
 		return fmt.Errorf("getting deployment %s/%s: %w", namespace, name, err)
 	}
 
+	recordOriginalResources(deploy.Annotations, deploy.Spec.Template.Spec.Containers, "cpu+memory")
+
 	patchData := buildCombinedResourcePatch(deploy.Spec.Template.Spec.Containers, cpuValue, memValue)
 	if patchData == nil {
 		return nil
 	}
+	addOriginalAnnotations(patchData, deploy.Annotations)
 
 	patch, err := json.Marshal(patchData)
 	if err != nil {
@@ -400,10 +410,13 @@ func (a *Actuator) patchStatefulSetCombined(ctx context.Context, namespace, name
 		return fmt.Errorf("getting statefulset %s/%s: %w", namespace, name, err)
 	}
 
+	recordOriginalResources(sts.Annotations, sts.Spec.Template.Spec.Containers, "cpu+memory")
+
 	patchData := buildCombinedResourcePatch(sts.Spec.Template.Spec.Containers, cpuValue, memValue)
 	if patchData == nil {
 		return nil
 	}
+	addOriginalAnnotations(patchData, sts.Annotations)
 
 	patch, err := json.Marshal(patchData)
 	if err != nil {
@@ -465,6 +478,63 @@ func buildCombinedResourcePatch(containers []corev1.Container, cpuValue, memValu
 			},
 		},
 	}
+}
+
+const (
+	annOriginalCPU = "koptimizer.io/original-cpu-request"
+	annOriginalMem = "koptimizer.io/original-mem-request"
+)
+
+// recordOriginalResources stores the current resource requests as annotations
+// so the UI can show what the original (helm) values were before rightsizer
+// modified them. Only sets the annotation if it doesn't already exist, so
+// the first pre-rightsizer value is preserved across multiple optimizations.
+func recordOriginalResources(annotations map[string]string, containers []corev1.Container, resourceType string) {
+	if len(containers) == 0 {
+		return
+	}
+	c := containers[0]
+	if resourceType == "cpu" || resourceType == "cpu+memory" {
+		if _, exists := annotations[annOriginalCPU]; !exists {
+			if req := c.Resources.Requests.Cpu(); req != nil {
+				if annotations == nil {
+					return // annotations map is nil — will be set via patch
+				}
+				annotations[annOriginalCPU] = req.String()
+			}
+		}
+	}
+	if resourceType == "memory" || resourceType == "cpu+memory" {
+		if _, exists := annotations[annOriginalMem]; !exists {
+			if req := c.Resources.Requests.Memory(); req != nil {
+				if annotations == nil {
+					return
+				}
+				annotations[annOriginalMem] = req.String()
+			}
+		}
+	}
+}
+
+// addOriginalAnnotations merges the original-resource annotations into the
+// strategic merge patch so they are applied atomically with the resource change.
+func addOriginalAnnotations(patchData map[string]interface{}, annotations map[string]string) {
+	annPatch := map[string]string{}
+	if v, ok := annotations[annOriginalCPU]; ok {
+		annPatch[annOriginalCPU] = v
+	}
+	if v, ok := annotations[annOriginalMem]; ok {
+		annPatch[annOriginalMem] = v
+	}
+	if len(annPatch) == 0 {
+		return
+	}
+	// Merge into existing patch: metadata.annotations
+	if patchData["metadata"] == nil {
+		patchData["metadata"] = map[string]interface{}{}
+	}
+	meta := patchData["metadata"].(map[string]interface{})
+	meta["annotations"] = annPatch
 }
 
 func buildResourcePatch(containers []corev1.Container, resourceType, value string) map[string]interface{} {

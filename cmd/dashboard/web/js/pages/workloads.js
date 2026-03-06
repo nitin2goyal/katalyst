@@ -7,6 +7,7 @@ const COLUMNS = [
   { key: 'namespace',       label: 'Namespace',        default: false },
   { key: 'kind',            label: 'Kind',             default: false },
   { key: 'name',            label: 'Name',             default: true },
+  { key: 'rightsized',      label: 'Rightsized',       default: true },
   { key: 'replicas',        label: 'Replicas',         default: true },
   { key: 'cpuReq',          label: 'CPU Req',          default: true },
   { key: 'cpuLim',          label: 'CPU Lim',          default: true },
@@ -100,19 +101,27 @@ export async function renderWorkloads(targetEl) {
     };
 
     const colSpan = COLUMNS.length;
+    const fmtWithOrig = (current, original, fmtFn) => {
+      const cur = fmtFn(current);
+      if (!original) return cur;
+      return `${cur} <span style="font-size:10px;color:var(--text-muted)" title="Original: ${esc(original)}">(was ${esc(original)})</span>`;
+    };
+
     $('#wl-body').innerHTML = wlList.length ? wlList.map(w => {
       const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
       const pdbMinAvail = w.pdbMinAvailable != null ? w.pdbMinAvailable : '-';
       const pdbMaxUnavail = w.pdbMaxUnavailable != null ? w.pdbMaxUnavailable : '-';
       const pdbDisruptAllow = w.pdbDisruptionsAllowed != null ? w.pdbDisruptionsAllowed : '-';
+      const isRightsized = w.rightsized === true;
       return `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
         <td>${esc(w.namespace || '')}</td>
         <td>${esc(w.kind || '')}</td>
         <td>${esc(w.name || '')}</td>
+        <td>${isRightsized ? badge('Yes', 'purple') : '<span style="color:var(--text-muted)">-</span>'}</td>
         <td>${w.replicas ?? ''}</td>
-        <td>${fmtCPU(w.cpuRequest)}</td>
+        <td>${isRightsized && w.originalCPURequest ? fmtWithOrig(w.cpuRequest, w.originalCPURequest, fmtCPU) : fmtCPU(w.cpuRequest)}</td>
         <td>${fmtCPU(w.cpuLimit)}</td>
-        <td>${fmtMem(w.memRequest)}</td>
+        <td>${isRightsized && w.originalMemRequest ? fmtWithOrig(w.memRequest, w.originalMemRequest, fmtMem) : fmtMem(w.memRequest)}</td>
         <td>${fmtMem(w.memLimit)}</td>
         <td>${fmtCPU(w.totalCPU)}</td>
         <td>${fmtCPU(w.totalCPULim)}</td>
@@ -154,14 +163,17 @@ export async function renderWorkloads(targetEl) {
     // CSV export (includes all columns regardless of visibility)
     window.__exportWlCSV = () => {
       exportCSV(
-        ['Namespace', 'Kind', 'Name', 'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim',
+        ['Namespace', 'Kind', 'Name', 'Rightsized', 'Original CPU', 'Original Mem',
+         'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim',
          'Total CPU', 'Total CPU Lim', 'Total Mem',
          'PDB MinAvail', 'PDB MaxUnavail', 'Disruptions OK',
          'Min Replicas', 'Max Replicas', 'Autoscaler', 'Xmx',
          'Image', 'CPU Eff %', 'Mem Eff %', 'Wasted Cost'],
         wlList.map(w => {
           const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
-          return [w.namespace, w.kind, w.name, w.replicas,
+          return [w.namespace, w.kind, w.name,
+            w.rightsized ? 'Yes' : '', w.originalCPURequest || '', w.originalMemRequest || '',
+            w.replicas,
             fmtCPU(w.cpuRequest), fmtCPU(w.cpuLimit), fmtMem(w.memRequest), fmtMem(w.memLimit),
             fmtCPU(w.totalCPU), fmtCPU(w.totalCPULim), fmtMem(w.totalMem),
             w.pdbMinAvailable ?? '', w.pdbMaxUnavailable ?? '', w.pdbDisruptionsAllowed ?? '',

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,6 +54,9 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch all PDBs for PDB info in the workloads table
 	pdbMap := h.fetchPDBsByNamespace(r.Context())
+
+	// Fetch deployment/statefulset annotations for rightsizer original values
+	deployAnnotations := h.fetchWorkloadAnnotations(r.Context())
 
 	// Group by owner
 	type wlInfo struct {
@@ -144,9 +148,61 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 				entry["pdbDisruptionsAllowed"] = pdb.Status.DisruptionsAllowed
 			}
 		}
+		// Check for rightsizer original values (from deployment/statefulset annotations)
+		annKey := wl.Namespace + "/" + wl.Kind + "/" + wl.Name
+		if ann, ok := deployAnnotations[annKey]; ok {
+			if v, exists := ann["koptimizer.io/original-cpu-request"]; exists {
+				entry["originalCPURequest"] = v
+				entry["rightsized"] = true
+			}
+			if v, exists := ann["koptimizer.io/original-mem-request"]; exists {
+				entry["originalMemRequest"] = v
+				entry["rightsized"] = true
+			}
+		}
 		result = append(result, entry)
 	}
 	writePaginatedJSON(w, r, result)
+}
+
+// fetchWorkloadAnnotations fetches Deployment and StatefulSet annotations
+// keyed by "namespace/Kind/name" for rightsizer original-value lookup.
+func (h *WorkloadHandler) fetchWorkloadAnnotations(ctx context.Context) map[string]map[string]string {
+	result := make(map[string]map[string]string)
+	if h.client == nil {
+		return result
+	}
+	// Deployments
+	var deploys appsv1.DeploymentList
+	if err := h.client.List(ctx, &deploys); err == nil {
+		for _, d := range deploys.Items {
+			if d.Annotations == nil {
+				continue
+			}
+			_, hasCPU := d.Annotations["koptimizer.io/original-cpu-request"]
+			_, hasMem := d.Annotations["koptimizer.io/original-mem-request"]
+			if hasCPU || hasMem {
+				key := d.Namespace + "/Deployment/" + d.Name
+				result[key] = d.Annotations
+			}
+		}
+	}
+	// StatefulSets
+	var stsList appsv1.StatefulSetList
+	if err := h.client.List(ctx, &stsList); err == nil {
+		for _, s := range stsList.Items {
+			if s.Annotations == nil {
+				continue
+			}
+			_, hasCPU := s.Annotations["koptimizer.io/original-cpu-request"]
+			_, hasMem := s.Annotations["koptimizer.io/original-mem-request"]
+			if hasCPU || hasMem {
+				key := s.Namespace + "/StatefulSet/" + s.Name
+				result[key] = s.Annotations
+			}
+		}
+	}
+	return result
 }
 
 // fetchPDBsByNamespace fetches all PDBs and groups them by namespace.
