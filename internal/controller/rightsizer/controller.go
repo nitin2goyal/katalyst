@@ -34,7 +34,7 @@ type Controller struct {
 	notifier     *Notifier
 
 	mu        sync.Mutex
-	downsized map[string]bool // tracks workloads already downsized (once-only)
+	downsized map[string]time.Time // tracks workloads already downsized with TTL
 }
 
 func NewController(mgr ctrl.Manager, st *state.ClusterState, gate *aigate.AIGate, cfg *config.Config, metricsStore *metrics.Store) *Controller {
@@ -50,7 +50,7 @@ func NewController(mgr ctrl.Manager, st *state.ClusterState, gate *aigate.AIGate
 		actuator:     NewActuator(c, cfg),
 		oomTracker:   NewOOMTracker(c, cfg),
 		notifier:     NewNotifier(cfg, st.AuditLog),
-		downsized:    make(map[string]bool),
+		downsized:    make(map[string]time.Time),
 	}
 }
 
@@ -145,12 +145,12 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
-	// Once-only: skip if this workload was already downsized.
+	// Cooldown: skip if this workload was downsized within the last 24h.
 	workloadKey := rec.TargetNamespace + "/" + rec.TargetKind + "/" + rec.TargetName
 	c.mu.Lock()
-	already := c.downsized[workloadKey]
+	downsizedAt, already := c.downsized[workloadKey]
 	c.mu.Unlock()
-	if already {
+	if already && time.Since(downsizedAt) < 24*time.Hour {
 		return nil
 	}
 
@@ -158,9 +158,9 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return err
 	}
 
-	// Record successful downsize — won't be downsized again this lifecycle.
+	// Record successful downsize with timestamp for TTL-based expiry.
 	c.mu.Lock()
-	c.downsized[workloadKey] = true
+	c.downsized[workloadKey] = time.Now()
 	c.mu.Unlock()
 	return nil
 }
@@ -269,9 +269,15 @@ func (c *Controller) run(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("rightsizer")
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
+	cleanupTicker := time.NewTicker(1 * time.Hour)
+	defer cleanupTicker.Stop()
 
 	for {
 		select {
+		case <-cleanupTicker.C:
+			c.cleanupDownsized()
+			c.oomTracker.Cleanup()
+			c.notifier.Cleanup()
 		case <-ticker.C:
 			if c.state.Breaker.IsTripped(c.Name()) {
 				logger.V(1).Info("Circuit breaker tripped, skipping execution cycle")
@@ -297,6 +303,18 @@ func (c *Controller) run(ctx context.Context) {
 			}
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+// cleanupDownsized removes entries older than 24h to prevent memory leaks.
+func (c *Controller) cleanupDownsized() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for k, t := range c.downsized {
+		if t.Before(cutoff) {
+			delete(c.downsized, k)
 		}
 	}
 }

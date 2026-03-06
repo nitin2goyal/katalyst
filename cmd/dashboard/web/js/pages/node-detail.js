@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, utilBar, badge, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, utilBar, badge, errorMsg, GiB, parseCPUm, parseMemB, fmtCPUm, fmtMemB, podStatusColor } from '../utils.js';
 import { skeleton, breadcrumbs, makeSortable } from '../components.js';
 import { makeBarChart } from '../charts.js';
 
@@ -35,7 +35,7 @@ export async function renderNodeDetail(params) {
         <div class="table-wrap"><table>
           <thead><tr><th>Device</th><th>Type</th><th>Size</th><th>IOPS</th><th>Throughput</th><th>Encrypted</th></tr></thead>
           <tbody>${disks.map(d => `<tr>
-            <td><code style="font-size:12px;background:var(--bg);padding:2px 6px;border-radius:4px">${d.name || ''}</code></td>
+            <td><code class="code-inline">${d.name || ''}</code></td>
             <td>${badge(d.type || 'unknown', d.type === 'io2' ? 'purple' : 'blue')}</td>
             <td><strong>${d.sizeGiB || 0} GiB</strong></td>
             <td>${d.iops ? d.iops.toLocaleString() : '-'}</td>
@@ -85,9 +85,9 @@ export async function renderNodeDetail(params) {
     const memUsedBytes = parseFloat(node.memUsed) || 0;
     const memReqBytes = parseFloat(node.memRequested) || 0;
     const memCapBytes = parseFloat(node.memCapacity) || 1;
-    const memUtilGB = memUsedBytes / 1073741824;
-    const memAllocGB = Math.max(0, memReqBytes - memUsedBytes) / 1073741824;
-    const memFreeGB = Math.max(0, memCapBytes - memReqBytes) / 1073741824;
+    const memUtilGB = memUsedBytes / GiB;
+    const memAllocGB = Math.max(0, memReqBytes - memUsedBytes) / GiB;
+    const memFreeGB = Math.max(0, memCapBytes - memReqBytes) / GiB;
     makeBarChart('node-mem-chart', {
       categories: ['Memory (GB)'],
       series: [
@@ -101,18 +101,7 @@ export async function renderNodeDetail(params) {
       noCurrency: true,
     });
 
-    // Use shared fmtCPU / fmtMem from utils.js
-
-    // Pods table — color-code unhealthy statuses
-    const podStatusColor = (s) => {
-      if (!s) return 'gray';
-      const lower = s.toLowerCase();
-      if (lower === 'running' || lower === 'succeeded' || lower === 'completed') return 'green';
-      if (lower === 'pending' || lower === 'containercreating' || lower === 'podinitializing') return 'blue';
-      if (lower.includes('backoff') || lower.includes('error') || lower.includes('oomkilled') || lower === 'failed') return 'red';
-      if (lower.includes('pull') || lower.includes('terminating')) return 'amber';
-      return 'amber';
-    };
+    // Pod status tooltip reasons (unique to node-detail)
     const podStatusReason = (s) => {
       if (!s) return '';
       const reasons = {
@@ -132,37 +121,6 @@ export async function renderNodeDetail(params) {
         'containerstatusunknown': 'Container status cannot be determined — node may be unreachable',
       };
       return reasons[s.toLowerCase()] || s;
-    };
-    // Parse CPU/memory request to millicores/bytes for % calculation
-    const parseCPUm = (v) => {
-      if (typeof v === 'number') return v;
-      const s = String(v || '').trim();
-      if (s.endsWith('m')) return parseFloat(s);
-      const n = parseFloat(s);
-      return isNaN(n) ? 0 : n * 1000; // assume cores if no unit
-    };
-    const parseMemB = (v) => {
-      if (typeof v === 'number') return v;
-      const s = String(v || '').trim();
-      const m = s.match(/^([\d.]+)\s*(Ti|Gi|Mi|Ki|B)?$/i);
-      if (!m) return 0;
-      const n = parseFloat(m[1]);
-      const unit = (m[2] || '').toLowerCase();
-      if (unit === 'ti') return n * 1099511627776;
-      if (unit === 'gi') return n * 1073741824;
-      if (unit === 'mi') return n * 1048576;
-      if (unit === 'ki') return n * 1024;
-      return n;
-    };
-    // Format millicores for pod usage display
-    const fmtCPUm = (v) => {
-      const m = typeof v === 'number' ? v : parseCPUm(v);
-      return m >= 1000 ? (m / 1000).toFixed(1) + ' cores' : m + 'm';
-    };
-    const fmtMemB = (v) => {
-      const b = typeof v === 'number' ? v : parseMemB(v);
-      if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' Gi';
-      return Math.round(b / 1048576) + ' Mi';
     };
 
     // Sort: app pods first, system pods second

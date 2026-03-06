@@ -29,28 +29,28 @@ function renderChannelCard(ch) {
         ${ch.enabled ? 'Disable' : 'Enable'}
       </button>
       <button class="btn btn-red btn-sm" data-delete-channel="${ch.id}">Delete</button>
-    </div>` : '<div style="margin-top:8px"><span style="color:var(--text-muted);font-size:11px">From config file</span></div>'}
+    </div>` : '<div style="margin-top:8px"><span class="text-xs-muted">From config file</span></div>'}
   </div>`;
 }
 
 function showAddChannelModal() {
   const overlay = document.createElement('div');
   overlay.innerHTML = modal('Add Notification Channel',
-    `<div style="display:flex;flex-direction:column;gap:12px">
+    `<div class="form-group">
       <div>
-        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-muted)">Type</label>
+        <label class="form-label">Type</label>
         <select class="filter-select" id="add-ch-type" style="width:100%">
           <option value="slack">Slack</option>
           <option value="teams">Teams</option>
         </select>
       </div>
       <div>
-        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-muted)">Name</label>
-        <input type="text" class="filter-search" id="add-ch-name" placeholder="e.g. #ops-alerts" style="width:100%;box-sizing:border-box">
+        <label class="form-label">Name</label>
+        <input type="text" class="filter-search" id="add-ch-name" placeholder="e.g. #ops-alerts" class="form-input">
       </div>
       <div>
-        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-muted)">Webhook URL</label>
-        <input type="text" class="filter-search" id="add-ch-url" placeholder="https://hooks.slack.com/..." style="width:100%;box-sizing:border-box">
+        <label class="form-label">Webhook URL</label>
+        <input type="text" class="filter-search" id="add-ch-url" placeholder="https://hooks.slack.com/..." class="form-input">
       </div>
     </div>`,
     `<button class="btn btn-gray" data-action="cancel">Cancel</button>
@@ -117,7 +117,7 @@ export async function renderSettings() {
 
       <div class="card">
         <h2>Operating Mode</h2>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Control how Katalyst operates on your cluster</p>
+        <p class="text-desc">Control how Katalyst operates on your cluster</p>
         <div class="mode-toggle" id="mode-toggle">
           <button class="mode-btn ${mode === 'recommend' ? 'mode-btn-active' : ''}" data-mode="recommend">
             <span class="mode-btn-title">Recommend</span>
@@ -132,29 +132,29 @@ export async function renderSettings() {
 
       <div class="card">
         <h2>Auto Pod Purger</h2>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Automatically delete pods stuck in error states (CrashLoopBackOff, OOMKilled, etc.) that have been in a bad state for at least 30 minutes</p>
-        <div style="display:flex;align-items:center;gap:12px">
+        <p class="text-desc">Automatically delete pods stuck in error states (CrashLoopBackOff, OOMKilled, etc.) that have been in a bad state for at least 30 minutes</p>
+        <div class="flex-center">
           <button class="btn ${controllers.podPurger ? 'btn-green' : 'btn-gray'} btn-sm" id="pod-purger-toggle">
             ${controllers.podPurger ? 'ON' : 'OFF'}
           </button>
-          <span style="color:var(--text-muted);font-size:12px">${controllers.podPurger ? 'Purger is actively cleaning up bad pods' : 'Purger is disabled'}</span>
+          <span class="text-small-muted">${controllers.podPurger ? 'Purger is actively cleaning up bad pods' : 'Purger is disabled'}</span>
         </div>
       </div>
 
       <div class="card">
         <h2>GPU Node Reclaimer</h2>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Automatically evict non-GPU pods from GPU nodes when GPU workloads scale down, freeing expensive GPU hardware. Includes a 5-minute grace period and PDB-safe evictions.</p>
-        <div style="display:flex;align-items:center;gap:12px">
+        <p class="text-desc">Automatically evict non-GPU pods from GPU nodes when GPU workloads scale down, freeing expensive GPU hardware. Includes a 5-minute grace period and PDB-safe evictions.</p>
+        <div class="flex-center">
           <button class="btn ${controllers.gpuReclaim ? 'btn-green' : 'btn-gray'} btn-sm" id="gpu-reclaim-toggle">
             ${controllers.gpuReclaim ? 'ON' : 'OFF'}
           </button>
-          <span style="color:var(--text-muted);font-size:12px">${controllers.gpuReclaim ? 'Reclaimer is actively monitoring GPU nodes' : 'Reclaimer is disabled'}</span>
+          <span class="text-small-muted">${controllers.gpuReclaim ? 'Reclaimer is actively monitoring GPU nodes' : 'Reclaimer is disabled'}</span>
         </div>
       </div>
 
       <div class="card">
         <h2>Controllers</h2>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Enable or disable individual optimization controllers. Changes take effect immediately.</p>
+        <p class="text-desc">Enable or disable individual optimization controllers. Changes take effect immediately.</p>
         <div id="controllers-section"></div>
       </div>
 
@@ -181,7 +181,7 @@ export async function renderSettings() {
               <tbody>${policies.map(p => `<tr>
                 <td style="font-weight:600">${p.name}</td>
                 <td>${badge(p.type, 'blue')}</td>
-                <td><code style="font-size:12px;background:var(--bg);padding:2px 6px;border-radius:4px">${p.target}</code></td>
+                <td><code class="code-inline">${p.target}</code></td>
                 <td style="white-space:normal;color:var(--text-muted);font-size:12px">${p.description}</td>
                 <td>${p.enabled ? badge('Active', 'green') : badge('Inactive', 'gray')}</td>
               </tr>`).join('')}</tbody>
@@ -208,7 +208,7 @@ export async function renderSettings() {
               return `<tr>
                 <td style="white-space:nowrap">${timeAgo(e.timestamp)}</td>
                 <td>${badge(e.action || '', actionColor)}</td>
-                <td><code style="font-size:12px;background:var(--bg);padding:2px 6px;border-radius:4px">${e.target || ''}</code></td>
+                <td><code class="code-inline">${e.target || ''}</code></td>
                 <td style="white-space:normal;color:var(--text-muted);font-size:12px">${e.details || ''}</td>
                 <td>${e.user || ''}</td>
               </tr>`;
@@ -251,7 +251,7 @@ export async function renderSettings() {
       return `<div style="margin-bottom:20px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
           ${badge(cat.label, cat.color)}
-          <span style="color:var(--text-muted);font-size:12px">${cat.desc}</span>
+          <span class="text-small-muted">${cat.desc}</span>
         </div>
         <div class="controllers-grid">${items.map(([name, meta]) => {
           const st = ctrlState(name, meta);
@@ -261,7 +261,7 @@ export async function renderSettings() {
             return `<div class="controller-item">
               <div style="min-width:0">
                 <div class="controller-name">${meta.label}</div>
-                <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${meta.desc}</div>
+                <div class="text-xs-muted" style="margin-top:2px">${meta.desc}</div>
               </div>
               <div class="ctrl-seg" data-ctrl="${name}">
                 <button data-state="off" class="${st === 'off' ? 'seg-active-off' : ''}">OFF</button>
@@ -274,7 +274,7 @@ export async function renderSettings() {
               <button class="btn ${autoApprovedDR ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle" data-ctrl="${name}" style="font-size:11px">
                 ${autoApprovedDR ? 'ON' : 'OFF'}
               </button>
-              <span style="color:var(--text-muted);font-size:11px">${autoApprovedDR ? 'Consolidation applied once per node' : 'Manual approval required'}</span>
+              <span class="text-xs-muted">${autoApprovedDR ? 'Consolidation applied once per node' : 'Manual approval required'}</span>
             </div>
           </div>` : ''}`;
           }
@@ -284,7 +284,7 @@ export async function renderSettings() {
           return `<div class="controller-item">
             <div style="min-width:0">
               <div class="controller-name">${meta.label}</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${meta.desc}</div>
+              <div class="text-xs-muted" style="margin-top:2px">${meta.desc}</div>
             </div>
             <button class="btn ${enabled ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle" data-ctrl="${name}" style="min-width:50px">
               ${enabled ? 'ON' : 'OFF'}
@@ -295,7 +295,7 @@ export async function renderSettings() {
               <button class="btn ${autoApproved ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle" data-ctrl="${name}" style="font-size:11px">
                 ${autoApproved ? 'ON' : 'OFF'}
               </button>
-              <span style="color:var(--text-muted);font-size:11px">${autoApproved ? 'Downsizing applied once per workload' : 'Manual approval required'}</span>
+              <span class="text-xs-muted">${autoApproved ? 'Downsizing applied once per workload' : 'Manual approval required'}</span>
             </div>
           </div>` : ''}`;
         }).join('')}</div>
@@ -423,8 +423,8 @@ export async function renderSettings() {
             <div class="template-row"><span class="template-label">Node Range</span><span>${t.minNodes} - ${t.maxNodes}</span></div>
             <div class="template-row"><span class="template-label">Zones</span><span>${zones}</span></div>
             ${excluded.length ? `<div class="template-row"><span class="template-label">Excluded Types</span><span class="red">${excluded.join(', ')}</span></div>` : ''}
-            ${taints.length ? `<div class="template-row"><span class="template-label">Taints</span><span>${taints.map(t => `<code style="font-size:11px;background:var(--bg);padding:1px 4px;border-radius:3px">${t.key}=${t.value}:${t.effect}</code>`).join(' ')}</span></div>` : ''}
-            ${labelEntries.length ? `<div class="template-row"><span class="template-label">Labels</span><span>${labelEntries.map(([k, v]) => `<code style="font-size:11px;background:var(--bg);padding:1px 4px;border-radius:3px">${k}=${v}</code>`).join(' ')}</span></div>` : ''}
+            ${taints.length ? `<div class="template-row"><span class="template-label">Taints</span><span>${taints.map(t => `<code class="code-xs">${t.key}=${t.value}:${t.effect}</code>`).join(' ')}</span></div>` : ''}
+            ${labelEntries.length ? `<div class="template-row"><span class="template-label">Labels</span><span>${labelEntries.map(([k, v]) => `<code class="code-xs">${k}=${v}</code>`).join(' ')}</span></div>` : ''}
           </div>
         </div>`;
       }).join('');

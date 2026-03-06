@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, utilBar, errorMsg, escapeHtml, badge, timeAgo } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, utilBar, errorMsg, escapeHtml, badge, timeAgo, fmtCPUm, podStatusColor } from '../utils.js';
 import { skeleton, makeSortable, exportCSV, cardHeader } from '../components.js';
 
 const GPU_TABS = [
@@ -180,16 +180,6 @@ async function renderScavengingTab(contentEl) {
           <tbody id="scav-body"></tbody>
         </table></div>
       </div>`;
-
-    const fmtCPUm = (m) => m >= 1000 ? (m / 1000).toFixed(1) + ' cores' : m + 'm';
-    const podStatusColor = (s) => {
-      if (!s) return 'gray';
-      const lower = s.toLowerCase();
-      if (lower === 'running') return 'green';
-      if (lower === 'pending' || lower === 'containercreating') return 'blue';
-      if (lower.includes('backoff') || lower.includes('error') || lower === 'failed') return 'red';
-      return 'amber';
-    };
 
     $('#scav-body').innerHTML = pods.length ? pods.map(p => {
       const readyParts = (p.ready || '').split('/');

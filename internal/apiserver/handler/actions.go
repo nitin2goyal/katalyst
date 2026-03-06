@@ -159,7 +159,7 @@ func (h *ActionsHandler) DeletePods(w http.ResponseWriter, r *http.Request) {
 			errors = append(errors, deleteError{
 				Name:      ref.Name,
 				Namespace: ref.Namespace,
-				Error:     fmt.Sprintf("pod not found: %v", err),
+				Error:     "pod not found",
 			})
 			continue
 		}
@@ -178,7 +178,7 @@ func (h *ActionsHandler) DeletePods(w http.ResponseWriter, r *http.Request) {
 			errors = append(errors, deleteError{
 				Name:      ref.Name,
 				Namespace: ref.Namespace,
-				Error:     fmt.Sprintf("failed to delete pod: %v", err),
+				Error:     "failed to delete pod",
 			})
 		} else {
 			deleted++
@@ -226,7 +226,8 @@ func (h *ActionsHandler) ListBadReplicaSets(w http.ResponseWriter, r *http.Reque
 
 	var rsList appsv1.ReplicaSetList
 	if err := h.client.List(ctx, &rsList); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to list replicasets: %v", err)})
+		slog.Warn("failed to list replicasets", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list replicasets"})
 		return
 	}
 
@@ -344,7 +345,7 @@ func (h *ActionsHandler) DeleteReplicaSets(w http.ResponseWriter, r *http.Reques
 			errors = append(errors, deleteError{
 				Name:      ref.Name,
 				Namespace: ref.Namespace,
-				Error:     fmt.Sprintf("replicaset not found: %v", err),
+				Error:     "replicaset not found",
 			})
 			continue
 		}
@@ -354,7 +355,7 @@ func (h *ActionsHandler) DeleteReplicaSets(w http.ResponseWriter, r *http.Reques
 			errors = append(errors, deleteError{
 				Name:      ref.Name,
 				Namespace: ref.Namespace,
-				Error:     fmt.Sprintf("failed to delete replicaset: %v", err),
+				Error:     "failed to delete replicaset",
 			})
 		} else {
 			deleted++

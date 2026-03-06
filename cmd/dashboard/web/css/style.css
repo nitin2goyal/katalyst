@@ -1487,3 +1487,47 @@ strong.high, .text-high { color: #ef4444; }
   border-radius: 4px; white-space: nowrap;
 }
 .col-toggle-item:hover { background: var(--bg); }
+
+/* === Utility classes (extracted from inline styles) === */
+.form-label {
+  display: block; font-size: 12px; font-weight: 600;
+  margin-bottom: 4px; color: var(--text-muted);
+}
+.form-group { display: flex; flex-direction: column; gap: 12px; }
+.form-input { width: 100%; box-sizing: border-box; }
+.flex-center { display: flex; align-items: center; gap: 12px; }
+.flex-wrap-gap { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.text-small-muted { color: var(--text-muted); font-size: 12px; }
+.text-xs-muted { color: var(--text-muted); font-size: 11px; }
+.text-desc { color: var(--text-muted); font-size: 13px; margin-bottom: 16px; }
+.code-inline {
+  font-size: 12px; background: var(--bg);
+  padding: 2px 6px; border-radius: 4px;
+}
+.code-xs {
+  font-size: 11px; background: var(--bg);
+  padding: 1px 4px; border-radius: 3px;
+}
+.empty-state-center { text-align: center; padding: 48px 24px; }
+.filter-section { padding: 1rem; display: flex; gap: 2rem; flex-wrap: wrap; }
+.filter-group-btns { margin-top: 0.5rem; }
+.filter-check-label { display: flex; align-items: center; gap: 0.25rem; cursor: pointer; }
+
+/* === Accessibility === */
+.btn:focus-visible, .tab:focus-visible, .mode-btn:focus-visible,
+.theme-toggle:focus-visible, .refresh-btn:focus-visible,
+a:focus-visible, input:focus-visible, select:focus-visible,
+.filter-search:focus-visible, .filter-select:focus-visible,
+.col-toggle-item:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* Skip-to-content link for keyboard users */
+.skip-link {
+  position: absolute; top: -40px; left: 0; z-index: 1000;
+  background: var(--blue); color: #fff; padding: 8px 16px;
+  font-size: 14px; text-decoration: none; border-radius: 0 0 4px 0;
+  transition: top 0.2s;
+}
+.skip-link:focus { top: 0; }

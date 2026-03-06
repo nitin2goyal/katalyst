@@ -111,6 +111,7 @@ export function escapeHtml(str) {
 
 export function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(diff)) return 'unknown';
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return mins + 'm ago';
@@ -118,4 +119,59 @@ export function timeAgo(dateStr) {
   if (hrs < 24) return hrs + 'h ago';
   const days = Math.floor(hrs / 24);
   return days + 'd ago';
+}
+
+// ── Memory unit constants ──────────────────────────────────────────────
+export const KiB = 1024;
+export const MiB = 1024 * 1024;
+export const GiB = 1024 * 1024 * 1024;
+export const TiB = 1024 * 1024 * 1024 * 1024;
+
+// ── Pod-level formatting helpers ────────────────────────────────────────
+// Parse a CPU value (number in millicores, or string like "100m" or "2") to millicores.
+export function parseCPUm(v) {
+  if (typeof v === 'number') return v;
+  const s = String(v || '').trim();
+  if (s.endsWith('m')) return parseFloat(s);
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n * 1000;
+}
+
+// Parse a memory value (number in bytes, or string like "1Gi") to bytes.
+export function parseMemB(v) {
+  if (typeof v === 'number') return v;
+  const s = String(v || '').trim();
+  const m = s.match(/^([\d.]+)\s*(Ti|Gi|Mi|Ki|B)?$/i);
+  if (!m) return 0;
+  const n = parseFloat(m[1]);
+  const unit = (m[2] || '').toLowerCase();
+  if (unit === 'ti') return n * TiB;
+  if (unit === 'gi') return n * GiB;
+  if (unit === 'mi') return n * MiB;
+  if (unit === 'ki') return n * KiB;
+  return n;
+}
+
+// Format millicores for display: 2500 → "2.5 cores", 250 → "250m"
+export function fmtCPUm(v) {
+  const m = typeof v === 'number' ? v : parseCPUm(v);
+  return m >= 1000 ? (m / 1000).toFixed(1) + ' cores' : m + 'm';
+}
+
+// Format bytes for display: 1.5Gi → "1.5 Gi", 512Mi → "512 Mi"
+export function fmtMemB(v) {
+  const b = typeof v === 'number' ? v : parseMemB(v);
+  if (b >= GiB) return (b / GiB).toFixed(1) + ' Gi';
+  return Math.round(b / MiB) + ' Mi';
+}
+
+// Map pod status string to badge color class.
+export function podStatusColor(s) {
+  if (!s) return 'gray';
+  const lower = s.toLowerCase();
+  if (lower === 'running' || lower === 'succeeded' || lower === 'completed') return 'green';
+  if (lower === 'pending' || lower === 'containercreating' || lower === 'podinitializing') return 'blue';
+  if (lower.includes('backoff') || lower.includes('error') || lower.includes('oomkilled') || lower === 'failed') return 'red';
+  if (lower.includes('pull') || lower.includes('terminating')) return 'amber';
+  return 'amber';
 }

@@ -106,16 +106,16 @@ async function renderBadPods(contentEl) {
 
     <div class="card">
       ${cardHeader('Filters')}
-      <div style="padding: 1rem; display: flex; gap: 2rem; flex-wrap: wrap;">
+      <div class="filter-section">
         <div>
           <strong>Namespaces</strong>
-          <div style="margin-top: 0.5rem;">
+          <div class="filter-group-btns">
             <button class="btn btn-gray btn-sm" id="ns-all">All</button>
             <button class="btn btn-gray btn-sm" id="ns-none">None</button>
           </div>
-          <div id="ns-checks" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+          <div id="ns-checks" class="filter-group-btns flex-wrap-gap">
             ${namespaces.map(ns => `
-              <label style="display:flex;align-items:center;gap:0.25rem;cursor:pointer;">
+              <label class="filter-check-label">
                 <input type="checkbox" data-ns="${escapeHtml(ns)}" checked>
                 ${escapeHtml(ns)} <span class="badge badge-gray">${byNs[ns]}</span>
               </label>
@@ -124,13 +124,13 @@ async function renderBadPods(contentEl) {
         </div>
         <div>
           <strong>Statuses</strong>
-          <div style="margin-top: 0.5rem;">
+          <div class="filter-group-btns">
             <button class="btn btn-gray btn-sm" id="st-all">All</button>
             <button class="btn btn-gray btn-sm" id="st-none">None</button>
           </div>
-          <div id="st-checks" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+          <div id="st-checks" class="filter-group-btns flex-wrap-gap">
             ${statuses.map(st => `
-              <label style="display:flex;align-items:center;gap:0.25rem;cursor:pointer;">
+              <label class="filter-check-label">
                 <input type="checkbox" data-status="${escapeHtml(st)}" checked>
                 ${badge(st, statusBadgeClass(st))} <span class="badge badge-gray">${byStatus[st]}</span>
               </label>
@@ -327,16 +327,16 @@ async function renderBadReplicaSets(contentEl) {
 
     <div class="card">
       ${cardHeader('Filters')}
-      <div style="padding: 1rem; display: flex; gap: 2rem; flex-wrap: wrap;">
+      <div class="filter-section">
         <div>
           <strong>Namespaces</strong>
-          <div style="margin-top: 0.5rem;">
+          <div class="filter-group-btns">
             <button class="btn btn-gray btn-sm" id="rs-ns-all">All</button>
             <button class="btn btn-gray btn-sm" id="rs-ns-none">None</button>
           </div>
-          <div id="rs-ns-checks" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+          <div id="rs-ns-checks" class="filter-group-btns flex-wrap-gap">
             ${namespaces.map(ns => `
-              <label style="display:flex;align-items:center;gap:0.25rem;cursor:pointer;">
+              <label class="filter-check-label">
                 <input type="checkbox" data-ns="${escapeHtml(ns)}" checked>
                 ${escapeHtml(ns)} <span class="badge badge-gray">${byNs[ns]}</span>
               </label>
@@ -345,13 +345,13 @@ async function renderBadReplicaSets(contentEl) {
         </div>
         <div>
           <strong>Reason</strong>
-          <div style="margin-top: 0.5rem;">
+          <div class="filter-group-btns">
             <button class="btn btn-gray btn-sm" id="rs-reason-all">All</button>
             <button class="btn btn-gray btn-sm" id="rs-reason-none">None</button>
           </div>
-          <div id="rs-reason-checks" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+          <div id="rs-reason-checks" class="filter-group-btns flex-wrap-gap">
             ${reasons.map(r => `
-              <label style="display:flex;align-items:center;gap:0.25rem;cursor:pointer;">
+              <label class="filter-check-label">
                 <input type="checkbox" data-reason="${escapeHtml(r)}" checked>
                 ${badge(r, reasonBadgeClass(r))} <span class="badge badge-gray">${byReason[r]}</span>
               </label>

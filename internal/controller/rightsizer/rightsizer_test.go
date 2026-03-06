@@ -194,31 +194,31 @@ func TestRecommender_BothOverProv_WithNodeRatio(t *testing.T) {
 		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "1400m")
 	}
 
-	// Memory: node ratio = 128Gi/32000m = 4Mi/m → 1400m * 4Mi = 5600Mi = 5Gi (formatBytes)
-	// bytesPerMilli = 128*gi / 32000 = 4294967.296
-	// suggestedMem = 1400 * 4294967.296 = 6012954214 ≈ 5Gi
-	if rec.Details["suggestedMemRequest"] != "5Gi" {
-		t.Errorf("suggestedMemRequest = %q, want %q", rec.Details["suggestedMemRequest"], "5Gi")
+	// Memory: node ratio = 128Gi/32000m → bytesPerMilli = 4294967.296
+	// suggestedMem = 1400 * 4294967.296 = 6012954214 bytes = 5734Mi
+	if rec.Details["suggestedMemRequest"] != "5734Mi" {
+		t.Errorf("suggestedMemRequest = %q, want %q", rec.Details["suggestedMemRequest"], "5734Mi")
 	}
 }
 
-func TestRecommender_NodeRatio_MemoryNeverIncreases(t *testing.T) {
+func TestRecommender_NodeRatio_MemoryCanIncrease(t *testing.T) {
 	// Pod has too much CPU and not enough memory relative to node ratio.
-	// CPU should decrease. Memory would increase to match node ratio,
-	// but we fall back to proportional reduction instead.
+	// CPU should decrease. Memory increases to match node ratio — this is
+	// intended for optimal bin-packing. Only emit if net savings positive.
 	cfg := defaultTestConfig()
 	cfg.Rightsizer.MinKeepRatio = 0.3
 	recommender := NewRecommender(cfg)
 
 	gi := int64(1024 * 1024 * 1024)
 
-	// Node: 32000m CPU, 128Gi memory → 4Mi per millicore
+	// Node: 32000m CPU, 128Gi memory → ~4.2MiB per millicore
 	// Pod: 4000m CPU, 4Gi memory → CPU way over-provisioned
 	// CPU P95=200m → floor = max(200*1.2=240, 4000*0.3=1200) = 1200m
-	// Node-ratio memory for 1200m = 1200 * 4Mi = 4800Mi ≈ 4.7Gi
-	// 4.7Gi > current 4Gi → proportional fallback: 4Gi * (1200/4000) = 1.2Gi
-	// But memFloor = 1.5Gi * 1.2 = 1.8Gi → clamp to 1.8Gi (formatBytes → "1Gi")
-	// memSaved = 4Gi - 1.8Gi = 2.2Gi > 2Gi ✓
+	// Node-ratio memory for 1200m = 1200 * (128Gi/32000m) ≈ 4.8Gi = 4915Mi
+	// 4.8Gi > current 4Gi → memory INCREASES to match node ratio
+	// memFloor = 1.5Gi * 1.2 = 1.8Gi < 4.8Gi → use 4.8Gi
+	// formatBytes preserves MiB precision: "4915Mi"
+	// Net savings positive: CPU savings >> memory cost increase
 	analysis := &PodAnalysis{
 		PodInfo:         makePodInfo("skewed-1", "prod", "Deployment", "skewed", 4000, 4*gi),
 		CPURequestMilli: 4000,
@@ -253,11 +253,15 @@ func TestRecommender_NodeRatio_MemoryNeverIncreases(t *testing.T) {
 		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "1200m")
 	}
 
-	// Memory: node ratio says 4.7Gi but current is 4Gi → proportional fallback
-	// gives 1.2Gi, clamped to memFloor (1.8Gi) → formatBytes → "1Gi"
+	// Memory increases to match node ratio (4.8Gi = 4915Mi, preserved at MiB precision)
 	suggestedMem := rec.Details["suggestedMemRequest"]
-	if suggestedMem != "1Gi" {
-		t.Errorf("suggestedMemRequest = %q, want %q (proportional fallback on highmem node)", suggestedMem, "1Gi")
+	if suggestedMem != "4915Mi" {
+		t.Errorf("suggestedMemRequest = %q, want %q (node ratio allows memory increase)", suggestedMem, "4915Mi")
+	}
+
+	// Verify net savings are positive despite memory increase
+	if rec.EstimatedSaving.MonthlySavingsUSD <= 0 {
+		t.Errorf("expected positive net savings, got %.2f", rec.EstimatedSaving.MonthlySavingsUSD)
 	}
 }
 

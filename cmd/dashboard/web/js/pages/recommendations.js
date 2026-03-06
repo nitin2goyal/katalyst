@@ -97,8 +97,16 @@ export async function renderRecsTab(targetEl) {
     const fb = targetEl.querySelector('.filter-bar');
     if (fb) attachFilterHandlers(fb, $('#rec-table'), pag);
 
-    // Expand row on click to show full description
+    // Handle button clicks (approve/dismiss) and row expand via event delegation
     targetEl.querySelector('#rec-body')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (btn) {
+        e.stopPropagation();
+        const recId = btn.dataset.recId;
+        if (btn.dataset.action === 'approve') window.__approveRec(recId);
+        else if (btn.dataset.action === 'dismiss') window.__dismissRec(recId);
+        return;
+      }
       const row = e.target.closest('tr');
       if (!row || e.target.closest('button')) return;
       const descCell = row.querySelector('.rec-desc');
@@ -136,7 +144,7 @@ export async function renderRecsTab(targetEl) {
             content.innerHTML = `
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
                 <div><strong>Data Source:</strong> ${debugSrc}</div>
-                <div><strong>Summary API:</strong> ${summary ? JSON.stringify(summary) : 'null/empty'}</div>
+                <div><strong>Summary API:</strong> ${summary ? escapeHtml(JSON.stringify(summary)) : 'null/empty'}</div>
                 <div><strong>Nodes:</strong> ${nodeList.length} total, ${emptyNodes} empty, ${gpuNodes} GPU</div>
                 <div><strong>Node Metrics:</strong> ${nodesWithUsage}/${nodeList.length} have usage data</div>
                 <div><strong>Avg Node Util:</strong> CPU ${avgNodeCPU.toFixed(1)}%, Mem ${avgNodeMem.toFixed(1)}%</div>
@@ -159,7 +167,7 @@ export async function renderRecsTab(targetEl) {
       });
     }
   } catch (e) {
-    targetEl.innerHTML = errorMsg('Failed to load recommendations: ' + e.message);
+    targetEl.innerHTML = errorMsg('Failed to load recommendations: ' + escapeHtml(e.message));
   }
 }
 
@@ -178,14 +186,14 @@ function renderRecTable(recList) {
       : st === 'pending' ? badge('Pending', 'amber')
       : st === 'approved' ? badge('Approved', 'green')
       : st === 'dismissed' ? badge('Dismissed', 'gray')
-      : badge(st, 'blue');
+      : badge(escapeHtml(st), 'blue');
     const desc = r.description || r.summary || '';
     const actions = (st === 'pending' && !isAutoApproved) ? `
-      <button class="btn btn-green btn-sm" onclick="event.stopPropagation();window.__approveRec('${r.id || r.ID}')">Approve</button>
-      <button class="btn btn-gray btn-sm" onclick="event.stopPropagation();window.__dismissRec('${r.id || r.ID}')" style="margin-left:4px">Dismiss</button>
+      <button class="btn btn-green btn-sm" data-action="approve" data-rec-id="${escapeHtml(r.id || r.ID || '')}">Approve</button>
+      <button class="btn btn-gray btn-sm" data-action="dismiss" data-rec-id="${escapeHtml(r.id || r.ID || '')}" style="margin-left:4px">Dismiss</button>
     ` : '';
     return `<tr class="clickable-row" data-rec-id="${escapeHtml(r.id || r.ID || '')}">
-      <td>${badge(r.type || r.Type || r.category || '', 'blue')}</td>
+      <td>${badge(escapeHtml(r.type || r.Type || r.category || ''), 'blue')}</td>
       <td><strong>${escapeHtml(r.target || r.resource || '')}</strong></td>
       <td class="rec-desc"><span class="rec-desc-text">${escapeHtml(desc)}</span><span class="rec-tooltip">${escapeHtml(desc)}</span></td>
       <td class="value green">${fmt$(r.estimatedSavings)}</td>

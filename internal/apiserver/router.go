@@ -25,6 +25,14 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Throttle(100))
 
+	// Limit request body size to 1MB to prevent memory exhaustion.
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	clusterHandler := handler.NewClusterHandler(clusterState, provider, cfg, k8sClient, metricsStore)
 	nodeHandler := handler.NewNodeHandler(clusterState)
 	nodeGroupHandler := handler.NewNodeGroupHandler(clusterState, guard)

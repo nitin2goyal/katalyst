@@ -215,17 +215,42 @@ func (a *Actuator) resizePodInPlace(ctx context.Context, namespace, podName, res
 		return fmt.Errorf("unsupported resource type: %s", resourceType)
 	}
 
-	// Build patch for pod resources
-	containerPatches := make([]map[string]interface{}, len(pod.Spec.Containers))
-	for i, c := range pod.Spec.Containers {
-		containerPatches[i] = map[string]interface{}{
-			"name": c.Name,
+	// Compute primary container target by subtracting sidecar requests.
+	// The recommendation targets the whole pod; sidecars keep their current requests.
+	targetValue := qty.MilliValue()
+	if resourceType == "memory" {
+		targetValue = qty.Value()
+	}
+	for _, c := range pod.Spec.Containers[1:] {
+		switch resourceType {
+		case "cpu":
+			targetValue -= c.Resources.Requests.Cpu().MilliValue()
+		case "memory":
+			targetValue -= c.Resources.Requests.Memory().Value()
+		}
+	}
+	if targetValue < 1 {
+		return fmt.Errorf("target too small for primary container after subtracting sidecars")
+	}
+
+	var patchQty string
+	switch resourceType {
+	case "cpu":
+		patchQty = resource.NewMilliQuantity(targetValue, resource.DecimalSI).String()
+	case "memory":
+		patchQty = resource.NewQuantity(targetValue, resource.BinarySI).String()
+	}
+
+	// Only patch the primary (first) container.
+	containerPatches := []map[string]interface{}{
+		{
+			"name": pod.Spec.Containers[0].Name,
 			"resources": map[string]interface{}{
 				"requests": map[string]string{
-					string(resourceName): qty.String(),
+					string(resourceName): patchQty,
 				},
 			},
-		}
+		},
 	}
 
 	patchData := map[string]interface{}{
@@ -312,17 +337,28 @@ func (a *Actuator) resizePodInPlaceCombined(ctx context.Context, namespace, podN
 		return fmt.Errorf("parsing memory quantity %q: %w", memValue, err)
 	}
 
-	containerPatches := make([]map[string]interface{}, len(pod.Spec.Containers))
-	for i, c := range pod.Spec.Containers {
-		containerPatches[i] = map[string]interface{}{
-			"name": c.Name,
+	// Compute primary container target by subtracting sidecar requests.
+	targetCPUMilli := cpuQty.MilliValue()
+	targetMemBytes := memQty.Value()
+	for _, c := range pod.Spec.Containers[1:] {
+		targetCPUMilli -= c.Resources.Requests.Cpu().MilliValue()
+		targetMemBytes -= c.Resources.Requests.Memory().Value()
+	}
+	if targetCPUMilli < 10 || targetMemBytes < 32*1024*1024 {
+		return fmt.Errorf("target too small for primary container after subtracting sidecars")
+	}
+
+	// Only patch the primary (first) container.
+	containerPatches := []map[string]interface{}{
+		{
+			"name": pod.Spec.Containers[0].Name,
 			"resources": map[string]interface{}{
 				"requests": map[string]string{
-					string(corev1.ResourceCPU):    cpuQty.String(),
-					string(corev1.ResourceMemory): memQty.String(),
+					string(corev1.ResourceCPU):    resource.NewMilliQuantity(targetCPUMilli, resource.DecimalSI).String(),
+					string(corev1.ResourceMemory): resource.NewQuantity(targetMemBytes, resource.BinarySI).String(),
 				},
 			},
-		}
+		},
 	}
 
 	patchData := map[string]interface{}{
@@ -391,17 +427,33 @@ func buildCombinedResourcePatch(containers []corev1.Container, cpuValue, memValu
 		return nil
 	}
 
-	containerPatches := make([]map[string]interface{}, len(containers))
-	for i, c := range containers {
-		containerPatches[i] = map[string]interface{}{
-			"name": c.Name,
+	// Compute primary container target by subtracting sidecar requests.
+	// The recommendation targets the whole pod; sidecars keep their current
+	// requests and only the primary (first) container is adjusted.
+	targetCPUMilli := cpuQty.MilliValue()
+	targetMemBytes := memQty.Value()
+	for _, c := range containers[1:] {
+		targetCPUMilli -= c.Resources.Requests.Cpu().MilliValue()
+		targetMemBytes -= c.Resources.Requests.Memory().Value()
+	}
+
+	// Safety: if primary target is too small after subtracting sidecars, skip.
+	if targetCPUMilli < 10 || targetMemBytes < 32*1024*1024 {
+		return nil
+	}
+
+	// Only patch the primary (first) container. Strategic merge patch uses
+	// the container name as merge key, so sidecars are left untouched.
+	containerPatches := []map[string]interface{}{
+		{
+			"name": containers[0].Name,
 			"resources": map[string]interface{}{
 				"requests": map[string]string{
-					string(corev1.ResourceCPU):    cpuQty.String(),
-					string(corev1.ResourceMemory): memQty.String(),
+					string(corev1.ResourceCPU):    resource.NewMilliQuantity(targetCPUMilli, resource.DecimalSI).String(),
+					string(corev1.ResourceMemory): resource.NewQuantity(targetMemBytes, resource.BinarySI).String(),
 				},
 			},
-		}
+		},
 	}
 
 	return map[string]interface{}{
@@ -435,16 +487,41 @@ func buildResourcePatch(containers []corev1.Container, resourceType, value strin
 		return nil
 	}
 
-	containerPatches := make([]map[string]interface{}, len(containers))
-	for i, c := range containers {
-		containerPatches[i] = map[string]interface{}{
-			"name": c.Name,
+	// Compute primary container target by subtracting sidecar requests.
+	targetValue := qty.MilliValue()
+	if resourceType == "memory" {
+		targetValue = qty.Value()
+	}
+	for _, c := range containers[1:] {
+		switch resourceType {
+		case "cpu":
+			targetValue -= c.Resources.Requests.Cpu().MilliValue()
+		case "memory":
+			targetValue -= c.Resources.Requests.Memory().Value()
+		}
+	}
+	if targetValue < 1 {
+		return nil
+	}
+
+	var patchValue string
+	switch resourceType {
+	case "cpu":
+		patchValue = resource.NewMilliQuantity(targetValue, resource.DecimalSI).String()
+	case "memory":
+		patchValue = resource.NewQuantity(targetValue, resource.BinarySI).String()
+	}
+
+	// Only patch the primary (first) container.
+	containerPatches := []map[string]interface{}{
+		{
+			"name": containers[0].Name,
 			"resources": map[string]interface{}{
 				"requests": map[string]string{
-					string(resourceName): qty.String(),
+					string(resourceName): patchValue,
 				},
 			},
-		}
+		},
 	}
 
 	return map[string]interface{}{

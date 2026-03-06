@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,30 @@ import (
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/internal/store"
 )
+
+// redactURL masks the path/query of a URL, preserving only the host.
+// e.g. "https://hooks.slack.com/services/T.../B.../xxx" → "https://hooks.slack.com/***"
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "***"
+	}
+	return u.Scheme + "://" + u.Host + "/***"
+}
+
+// redactEmail masks the local part of an email address.
+// e.g. "alice@example.com" → "a***@example.com"
+func redactEmail(email string) string {
+	parts := strings.SplitN(email, "@", 2)
+	if len(parts) != 2 {
+		return "***"
+	}
+	local := parts[0]
+	if len(local) > 1 {
+		local = string(local[0]) + "***"
+	}
+	return local + "@" + parts[1]
+}
 
 // NotificationHandler handles notification/alert queries.
 type NotificationHandler struct {
@@ -98,7 +123,7 @@ func (h *NotificationHandler) Get(w http.ResponseWriter, r *http.Request) {
 			ID:      -1,
 			Type:    "slack",
 			Name:    "Slack",
-			Target:  h.cfg.Alerts.SlackWebhookURL,
+			Target:  redactURL(h.cfg.Alerts.SlackWebhookURL),
 			Enabled: h.cfg.Alerts.Enabled,
 			Static:  true,
 		})
@@ -107,8 +132,8 @@ func (h *NotificationHandler) Get(w http.ResponseWriter, r *http.Request) {
 		channels = append(channels, channel{
 			ID:      -1,
 			Type:    "email",
-			Name:    "Email " + email,
-			Target:  email,
+			Name:    "Email",
+			Target:  redactEmail(email),
 			Enabled: h.cfg.Alerts.Enabled,
 			Static:  true,
 		})
@@ -118,7 +143,7 @@ func (h *NotificationHandler) Get(w http.ResponseWriter, r *http.Request) {
 			ID:      -1,
 			Type:    "webhook",
 			Name:    "Webhook",
-			Target:  wh,
+			Target:  redactURL(wh),
 			Enabled: h.cfg.Alerts.Enabled,
 			Static:  true,
 		})
@@ -131,7 +156,7 @@ func (h *NotificationHandler) Get(w http.ResponseWriter, r *http.Request) {
 			ID:      i,
 			Type:    ch.Type,
 			Name:    ch.Name,
-			Target:  ch.URL,
+			Target:  redactURL(ch.URL),
 			Enabled: ch.Enabled,
 			Static:  false,
 		})
@@ -173,6 +198,11 @@ func (h *NotificationHandler) AddChannel(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
 		return
 	}
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url must be a valid HTTP/HTTPS URL"})
+		return
+	}
 
 	ch := config.NotificationChannel{
 		Type:    req.Type,
@@ -191,7 +221,7 @@ func (h *NotificationHandler) AddChannel(w http.ResponseWriter, r *http.Request)
 		"id":      idx,
 		"type":    ch.Type,
 		"name":    ch.Name,
-		"url":     ch.URL,
+		"url":     redactURL(ch.URL),
 		"enabled": ch.Enabled,
 	})
 }
@@ -258,7 +288,7 @@ func (h *NotificationHandler) ToggleChannel(w http.ResponseWriter, r *http.Reque
 		"id":      idx,
 		"type":    ch.Type,
 		"name":    ch.Name,
-		"url":     ch.URL,
+		"url":     redactURL(ch.URL),
 		"enabled": ch.Enabled,
 	})
 }

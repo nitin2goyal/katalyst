@@ -213,7 +213,10 @@ func formatBytes(b int64) string {
 		gi = mi * 1024
 	)
 	switch {
-	case b >= gi:
+	case b >= gi && b%gi == 0:
+		// Only use GiB for exact multiples to avoid truncation.
+		// 4.8Gi truncated to "4Gi" would lose 800Mi — the actuator parses
+		// this string back, so precision matters.
 		return fmt.Sprintf("%dGi", b/gi)
 	case b >= mi:
 		return fmt.Sprintf("%dMi", b/mi)

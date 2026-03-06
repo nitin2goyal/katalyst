@@ -20,6 +20,7 @@ export function toast(message, type = 'info') {
   }
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
+  el.setAttribute('role', 'alert');
   el.textContent = message;
   container.appendChild(el);
   // trigger animation
@@ -107,8 +108,8 @@ export function attachFilterHandlers(containerEl, tableEl, pagination) {
 
 export function modal(title, body, actions = '') {
   return `<div class="modal-overlay" onclick="if(event.target===this)this.remove()">
-    <div class="modal">
-      <div class="modal-header"><h3>${title}</h3><button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
+      <div class="modal-header"><h3>${title}</h3><button class="modal-close" aria-label="Close" onclick="this.closest('.modal-overlay').remove()">&times;</button></div>
       <div class="modal-body">${body}</div>
       ${actions ? `<div class="modal-actions">${actions}</div>` : ''}
     </div>

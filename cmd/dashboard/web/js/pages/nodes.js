@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg, GiB, TiB } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, columnToggle, attachColumnToggle } from '../components.js';
 
 // Format disk type + size as a concise string, e.g. "Hyperdisk Balanced 100G"
@@ -45,7 +45,7 @@ export async function renderNodes(targetEl) {
     const totalCPU = nodeList.reduce((s, n) => s + (n.cpuCapacity || 0), 0);
     const totalMem = nodeList.reduce((s, n) => s + (n.memCapacity || 0), 0);
     const fmtCPU = totalCPU >= 1000000 ? (totalCPU / 1000).toFixed(0) : (totalCPU / 1000).toFixed(1);
-    const fmtMem = totalMem >= 1024*1024*1024*1024 ? (totalMem / (1024*1024*1024*1024)).toFixed(1) + ' TiB' : (totalMem / (1024*1024*1024)).toFixed(1) + ' GiB';
+    const fmtMem = totalMem >= TiB ? (totalMem / TiB).toFixed(1) + ' TiB' : (totalMem / GiB).toFixed(1) + ' GiB';
 
     container().innerHTML = `
       ${!targetEl ? '<div class="page-header"><h1>Nodes & Node Groups</h1><p>Cluster node infrastructure</p></div>' : ''}
@@ -91,7 +91,7 @@ export async function renderNodes(targetEl) {
           <td>${ng.currentCount ?? 0}</td><td>${ng.minCount ?? ''}</td><td>${ng.maxCount ?? ''}</td>
           <td>${ng.totalGPUs ? ng.totalGPUs : '-'}</td>
           <td>${ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0}</td>
-          <td>${ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) + ' Gi' : '0 Gi'}</td>
+          <td>${ng.totalMemory ? (ng.totalMemory / GiB).toFixed(1) + ' Gi' : '0 Gi'}</td>
           <td><strong class="${utilClass(ng.cpuUtilPct || 0)}">${fmtPct(ng.cpuUtilPct)}</strong></td>
           <td><strong class="${utilClass(ng.memUtilPct || 0)}">${fmtPct(ng.memUtilPct)}</strong></td>
           <td><strong class="${utilClass(ng.cpuAllocPct || 0)}">${fmtPct(ng.cpuAllocPct)}</strong></td>
@@ -152,7 +152,7 @@ export async function renderNodes(targetEl) {
     // CSV exports
     window.__exportNgCSV = () => {
       exportCSV(['Name', 'Instance Type', 'Disk Type', 'Disk Size (GB)', 'Count', 'Min', 'Max', 'GPUs', 'Total Cores', 'Total Memory (GiB)', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'Cluster', 'Cost/mo'],
-        ngList.map(ng => [ng.name, ng.instanceType, ng.diskType || '', ng.diskSizeGB || '', ng.currentCount, ng.minCount, ng.maxCount, ng.totalGPUs || 0, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / (1024*1024*1024)).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), (ng.cpuAllocPct||0).toFixed(1), (ng.memAllocPct||0).toFixed(1), ng.sprCluster || '', ng.monthlyCostUSD]),
+        ngList.map(ng => [ng.name, ng.instanceType, ng.diskType || '', ng.diskSizeGB || '', ng.currentCount, ng.minCount, ng.maxCount, ng.totalGPUs || 0, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / GiB).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), (ng.cpuAllocPct||0).toFixed(1), (ng.memAllocPct||0).toFixed(1), ng.sprCluster || '', ng.monthlyCostUSD]),
         'katalyst-nodegroups.csv');
     };
     window.__exportNodesCSV = () => {

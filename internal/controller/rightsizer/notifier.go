@@ -49,6 +49,11 @@ func (n *Notifier) Notify(ctx context.Context, rec optimizer.Recommendation) {
 		n.auditLog.Record("rightsize", targetKey, "system", rec.Summary)
 	}
 
+	// Skip if no channels configured — don't consume cooldown
+	if n.config.Alerts.SlackWebhookURL == "" && len(n.config.Alerts.Channels) == 0 {
+		return
+	}
+
 	// Check cooldown before sending to channels
 	n.mu.Lock()
 	cooldown := time.Duration(n.config.Alerts.CooldownMinutes) * time.Minute
@@ -62,11 +67,6 @@ func (n *Notifier) Notify(ctx context.Context, rec optimizer.Recommendation) {
 	}
 	n.lastNotified[targetKey] = time.Now()
 	n.mu.Unlock()
-
-	// Skip if no channels configured
-	if n.config.Alerts.SlackWebhookURL == "" && len(n.config.Alerts.Channels) == 0 {
-		return
-	}
 
 	// Send to static Slack webhook
 	if n.config.Alerts.SlackWebhookURL != "" {
@@ -95,7 +95,10 @@ func (n *Notifier) Notify(ctx context.Context, rec optimizer.Recommendation) {
 
 func (n *Notifier) sendSlack(ctx context.Context, rec optimizer.Recommendation, webhookURL string) error {
 	color := "#36a64f" // green for savings
-	if rec.Priority == optimizer.PriorityHigh {
+	switch rec.Priority {
+	case optimizer.PriorityCritical:
+		color = "#ff0000"
+	case optimizer.PriorityHigh:
 		color = "#ffcc00"
 	}
 
@@ -141,7 +144,10 @@ func (n *Notifier) sendSlack(ctx context.Context, rec optimizer.Recommendation, 
 
 func (n *Notifier) sendTeams(ctx context.Context, rec optimizer.Recommendation, webhookURL string) error {
 	themeColor := "00FF00"
-	if rec.Priority == optimizer.PriorityHigh {
+	switch rec.Priority {
+	case optimizer.PriorityCritical:
+		themeColor = "FF0000"
+	case optimizer.PriorityHigh:
 		themeColor = "FFCC00"
 	}
 
@@ -179,4 +185,20 @@ func (n *Notifier) sendTeams(ctx context.Context, rec optimizer.Recommendation, 
 		return fmt.Errorf("Teams returned status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// Cleanup removes expired entries from the lastNotified map.
+func (n *Notifier) Cleanup() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	cooldown := time.Duration(n.config.Alerts.CooldownMinutes) * time.Minute
+	if cooldown == 0 {
+		cooldown = 60 * time.Minute
+	}
+	cutoff := time.Now().Add(-cooldown)
+	for k, t := range n.lastNotified {
+		if t.Before(cutoff) {
+			delete(n.lastNotified, k)
+		}
+	}
 }

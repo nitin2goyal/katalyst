@@ -48,7 +48,9 @@ func NewAnalyzer(cfg *config.Config, store *metrics.Store) *Analyzer {
 
 // AnalyzePod analyzes resource usage patterns for a single pod.
 func (a *Analyzer) AnalyzePod(ctx context.Context, pod optimizer.PodInfo) *PodAnalysis {
-	if pod.CPURequest == 0 && pod.MemoryRequest == 0 {
+	// Both CPU and memory requests must be set for meaningful analysis.
+	// CPURequest=0 would produce cpuUtil=0 → false IsOverProvCPU=true.
+	if pod.CPURequest == 0 || pod.MemoryRequest == 0 {
 		return nil
 	}
 
@@ -78,8 +80,9 @@ func (a *Analyzer) AnalyzePod(ctx context.Context, pod optimizer.PodInfo) *PodAn
 				analysis.MemP95 += window.P95Memory
 				analysis.MemP99 += window.P99Memory
 				analysis.MemMax += window.MaxMemory
-				// Use the max DataPoints across containers
-				if window.DataPoints > analysis.DataPoints {
+				// Use the min DataPoints across containers — the analysis
+				// is only as reliable as the least-observed container.
+				if analysis.DataPoints == 0 || window.DataPoints < analysis.DataPoints {
 					analysis.DataPoints = window.DataPoints
 				}
 			}

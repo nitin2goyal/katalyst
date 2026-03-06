@@ -11,7 +11,8 @@
   <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.44.0/dist/apexcharts.min.js"></script>
 </head>
 <body>
-  <nav id="sidebar">
+  <a href="#page-container" class="skip-link">Skip to content</a>
+  <nav id="sidebar" role="navigation" aria-label="Main navigation">
     <div class="sidebar-header">
       <div class="logo">
         <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
@@ -53,17 +54,17 @@
     </ul>
     <div class="sidebar-footer">
       <div class="mode-badge" id="mode-badge">loading...</div>
-      <button class="theme-toggle" id="theme-toggle" title="Switch to light mode">
+      <button class="theme-toggle" id="theme-toggle" title="Switch to light mode" aria-label="Toggle theme">
         <span class="theme-icon">&#9728;</span>
       </button>
       <div class="refresh-indicator" id="refresh-indicator">
-        <button class="refresh-btn" id="refresh-btn" title="Refresh data">&#x21bb;</button>
+        <button class="refresh-btn" id="refresh-btn" title="Refresh data" aria-label="Refresh data">&#x21bb;</button>
         <span id="refresh-age">Just now</span>
       </div>
     </div>
   </nav>
 
-  <main id="content">
+  <main id="content" role="main">
     <div id="page-container"></div>
   </main>
 
