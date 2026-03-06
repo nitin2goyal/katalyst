@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -188,6 +190,11 @@ func (h *ScaleDownBlockersHandler) getScaleDownFailedEvents(ctx context.Context)
 		// Parse pod names from the error message
 		blockedBy := parseBlockingPods(ev.Message)
 
+		// Skip events with no actionable info (no node, no blocking pods)
+		if nodeName == "" && len(blockedBy) == 0 {
+			continue
+		}
+
 		result = append(result, map[string]interface{}{
 			"timestamp": ts.Format(time.RFC3339),
 			"nodeName":  nodeName,
@@ -251,6 +258,7 @@ func parseBlockingPods(message string) []map[string]string {
 	}
 
 	// Pattern 2: "failed to delete pod <ns/pod> for ScaleDown"
+	// Only extract if there's an actual ns/pod reference (contains "/")
 	deleteParts := strings.Split(message, "failed to delete pod ")
 	for _, part := range deleteParts[1:] {
 		ref := part
@@ -261,18 +269,18 @@ func parseBlockingPods(message string) []map[string]string {
 		}
 		ref = strings.TrimRight(ref, ",.])")
 
-		ns, name := "", ref
-		if idx := strings.IndexByte(ref, '/'); idx >= 0 {
-			ns = ref[:idx]
-			name = ref[idx+1:]
+		// Must contain "/" to be a valid ns/pod reference
+		idx := strings.IndexByte(ref, '/')
+		if idx < 0 || idx == 0 || idx == len(ref)-1 {
+			continue
 		}
-		if name != "" {
-			pods = append(pods, map[string]string{
-				"namespace": ns,
-				"pod":       name,
-				"reason":    "delete failed",
-			})
-		}
+		ns := ref[:idx]
+		name := ref[idx+1:]
+		pods = append(pods, map[string]string{
+			"namespace": ns,
+			"pod":       name,
+			"reason":    "delete failed",
+		})
 	}
 
 	return pods
@@ -503,4 +511,68 @@ func timeAgoStr(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
+}
+
+// DeletePDBs deletes the specified PDBs that are blocking scale-down.
+func (h *ScaleDownBlockersHandler) DeletePDBs(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PDBs []struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		} `json:"pdbs"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if len(req.PDBs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no PDBs specified"})
+		return
+	}
+	if len(req.PDBs) > maxDeleteBatch {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("too many PDBs: max %d per request", maxDeleteBatch)})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	deleted := 0
+	var errors []deleteError
+	for _, ref := range req.PDBs {
+		if ref.Name == "" || ref.Namespace == "" {
+			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: "name and namespace required"})
+			continue
+		}
+		if protectedNamespaces[ref.Namespace] {
+			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: "protected namespace"})
+			continue
+		}
+
+		pdb := &policyv1.PodDisruptionBudget{}
+		key := client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}
+		if err := h.client.Get(ctx, key, pdb); err != nil {
+			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: fmt.Sprintf("PDB not found: %v", err)})
+			continue
+		}
+
+		// Safety check: only delete PDBs with 0 disruptions allowed
+		if pdb.Status.DisruptionsAllowed != 0 {
+			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: fmt.Sprintf("PDB has %d disruptions allowed, not blocking", pdb.Status.DisruptionsAllowed)})
+			continue
+		}
+
+		if err := h.client.Delete(ctx, pdb); err != nil {
+			slog.Warn("failed to delete PDB", "name", ref.Name, "namespace", ref.Namespace, "error", err)
+			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: fmt.Sprintf("delete failed: %v", err)})
+		} else {
+			deleted++
+			slog.Info("deleted blocking PDB", "name", ref.Name, "namespace", ref.Namespace)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"deleted": deleted,
+		"errors":  errors,
+	})
 }

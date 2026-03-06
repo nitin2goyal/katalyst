@@ -143,6 +143,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 
 		// Scale-Down Blockers
 		r.Get("/scaledown/blockers", scaledownHandler.GetBlockers)
+		r.Post("/scaledown/delete-pdbs", scaledownHandler.DeletePDBs)
 	})
 
 	return r

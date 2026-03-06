@@ -1,6 +1,6 @@
-import { api } from '../api.js';
+import { api, apiPost } from '../api.js';
 import { $, badge, escapeHtml, timeAgo, errorMsg } from '../utils.js';
-import { skeleton, makeSortable, attachPagination, cardHeader, filterBar, attachFilterHandlers } from '../components.js';
+import { skeleton, makeSortable, attachPagination, cardHeader, filterBar, attachFilterHandlers, confirmDialog, toast } from '../components.js';
 
 const container = () => $('#page-container');
 
@@ -241,8 +241,37 @@ async function renderEvents(targetEl) {
   }
 
   const events = data.failedEvents || [];
+  const blockingPDBs = data.blockingPDBs || [];
+
+  // Collect unique PDB names referenced in failed events
+  const eventPodNS = new Set();
+  for (const ev of events) {
+    for (const p of (ev.blockedBy || [])) {
+      if (p.reason === 'PDB violation' || p.reason === 'multiple PDBs') {
+        eventPodNS.add(p.namespace);
+      }
+    }
+  }
+  // PDBs that are both blocking (disruptionsAllowed=0) AND in namespaces referenced by failed events
+  const relevantPDBs = blockingPDBs.filter(p => eventPodNS.has(p.namespace));
 
   targetEl.innerHTML = `
+    ${relevantPDBs.length > 0 ? `
+    <div class="card" style="border-left:3px solid var(--red);margin-bottom:1rem">
+      <div style="padding:1rem;display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <span style="font-size:1.25rem">&#9888;</span>
+          <div>
+            <strong>${relevantPDBs.length} blocking PDB${relevantPDBs.length > 1 ? 's' : ''} in affected namespaces</strong>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+              These PDBs have 0 disruptions allowed and are preventing node drain in the events below
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-red" id="delete-blocking-pdbs-btn">Delete Blocking PDBs</button>
+      </div>
+    </div>` : ''}
+
     <div class="card">
       ${cardHeader('ScaleDownFailed Events (' + events.length + ')')}
       ${events.length === 0
@@ -276,6 +305,37 @@ async function renderEvents(targetEl) {
     makeSortable(table);
     attachPagination(table);
     attachExpandableCells(table);
+  }
+
+  // Delete blocking PDBs button
+  const deleteBtn = document.getElementById('delete-blocking-pdbs-btn');
+  if (deleteBtn && relevantPDBs.length > 0) {
+    deleteBtn.addEventListener('click', () => {
+      const pdbList = relevantPDBs.map(p => `${p.namespace}/${p.name}`);
+      const listHtml = pdbList.length <= 15
+        ? `<ul style="max-height:300px;overflow:auto;margin:0.5rem 0;padding-left:1.25rem;font-size:13px">${pdbList.map(p => `<li style="margin:2px 0">${escapeHtml(p)}</li>`).join('')}</ul>`
+        : `<ul style="max-height:300px;overflow:auto;margin:0.5rem 0;padding-left:1.25rem;font-size:13px">${pdbList.slice(0, 15).map(p => `<li style="margin:2px 0">${escapeHtml(p)}</li>`).join('')}<li style="margin:2px 0;color:var(--text-muted)">...and ${pdbList.length - 15} more</li></ul>`;
+
+      confirmDialog(
+        `Delete <strong>${relevantPDBs.length}</strong> blocking PDB${relevantPDBs.length > 1 ? 's' : ''}?<br><br>` +
+        `This will allow the cluster autoscaler to drain nodes blocked by these PDBs.` +
+        listHtml,
+        async () => {
+          try {
+            const result = await apiPost('/scaledown/delete-pdbs', {
+              pdbs: relevantPDBs.map(p => ({ name: p.name, namespace: p.namespace }))
+            });
+            const msg = `Deleted ${result.deleted} PDB${result.deleted !== 1 ? 's' : ''}` +
+              (result.errors?.length ? `, ${result.errors.length} failed` : '');
+            toast(msg, result.errors?.length ? 'warning' : 'success');
+            // Refresh the tab
+            setTimeout(() => renderEvents(targetEl), 1000);
+          } catch (err) {
+            toast('Failed to delete PDBs: ' + err.message, 'error');
+          }
+        }
+      );
+    });
   }
 }
 
