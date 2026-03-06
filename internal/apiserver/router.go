@@ -43,6 +43,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	policyHandler := handler.NewPolicyHandler(clusterState, cfg)
 	actionsHandler := handler.NewActionsHandler(clusterState, k8sClient)
 	autoscalerHandler := handler.NewAutoscalerHandler(clusterState, cfg, k8sClient)
+	scaledownHandler := handler.NewScaleDownBlockersHandler(clusterState, k8sClient)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Cluster
@@ -139,6 +140,9 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		// Autoscaler
 		r.Get("/autoscaler/status", autoscalerHandler.GetStatus)
 		r.Get("/autoscaler/events", autoscalerHandler.GetEvents)
+
+		// Scale-Down Blockers
+		r.Get("/scaledown/blockers", scaledownHandler.GetBlockers)
 	})
 
 	return r

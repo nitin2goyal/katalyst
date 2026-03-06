@@ -14,6 +14,7 @@ import { renderWorkloadDetail } from './pages/workload-detail.js';
 import { renderSettings } from './pages/settings.js';
 import { renderInfrastructure } from './pages/infrastructure.js';
 import { renderAutoscaler } from './pages/autoscaler.js';
+import { renderScaleDown } from './pages/scaledown.js';
 
 // Backward-compat redirects for old routes
 const redirectMap = {
@@ -48,6 +49,8 @@ addRoute('/infrastructure', (params) => renderInfrastructure(params));
 addRoute('/infrastructure/{tab}', (params) => renderInfrastructure(params));
 addRoute('/autoscaler', (params) => renderAutoscaler(params));
 addRoute('/autoscaler/{tab}', (params) => renderAutoscaler(params));
+addRoute('/scaledown', (params) => renderScaleDown(params));
+addRoute('/scaledown/{tab}', (params) => renderScaleDown(params));
 addRoute('/settings', renderSettings);
 
 // Backward-compat redirects for old routes
