@@ -67,6 +67,13 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaCount int64) *optimizer.Recommendation {
 	pod := analysis.PodInfo
 
+	// Skip small pods: don't rightsize pods requesting less than 2Gi memory.
+	// The savings are negligible and the risk of OOM is not worth it.
+	const minMemForRightsize = 2 * 1024 * 1024 * 1024 // 2Gi
+	if analysis.MemRequestBytes < minMemForRightsize {
+		return nil
+	}
+
 	minKeepRatio := r.config.Rightsizer.MinKeepRatio
 	if minKeepRatio <= 0 {
 		minKeepRatio = 0.7 // fallback default
@@ -136,15 +143,22 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		return nil
 	}
 
+	// Never increase memory — if the pod is under-provisioned on memory
+	// (P95 usage > current request), leave memory unchanged.
+	if suggestedMem > analysis.MemRequestBytes {
+		suggestedMem = analysis.MemRequestBytes
+	}
+
+	// Skip if memory doesn't decrease by at least 2Gi — not worth the disruption
+	memSaved := analysis.MemRequestBytes - suggestedMem
+	if memSaved < minMemForRightsize {
+		return nil
+	}
+
 	cpuSavings := estimateCPUSavings(analysis.CPURequestMilli, suggestedCPU, r.config.CloudProvider)
 	memSavings := estimateMemorySavings(analysis.MemRequestBytes, suggestedMem, r.config.CloudProvider)
 	perPodSavings := cpuSavings + memSavings
 	totalSavings := perPodSavings * float64(replicaCount)
-
-	memDirection := "→"
-	if suggestedMem > analysis.MemRequestBytes {
-		memDirection = "↑"
-	}
 
 	return &optimizer.Recommendation{
 		ID:              fmt.Sprintf("rightsize-combined-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
@@ -154,10 +168,10 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		TargetKind:      pod.OwnerKind,
 		TargetName:      pod.OwnerName,
 		TargetNamespace: pod.Pod.Namespace,
-		Summary: fmt.Sprintf("Rightsize %s/%s: CPU %dm→%dm, memory %s%s%s (%d replicas)",
+		Summary: fmt.Sprintf("Rightsize %s/%s: CPU %dm→%dm, memory %s→%s (%d replicas)",
 			pod.Pod.Namespace, pod.OwnerName,
 			analysis.CPURequestMilli, suggestedCPU,
-			formatBytes(analysis.MemRequestBytes), memDirection, formatBytes(suggestedMem),
+			formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem),
 			replicaCount),
 		ActionSteps: []string{
 			fmt.Sprintf("Patch CPU request from %dm to %dm and memory from %s to %s",

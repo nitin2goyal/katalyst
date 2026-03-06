@@ -90,9 +90,9 @@ func TestRecommender_CPUOverProv_GeneratesRec(t *testing.T) {
 	gi := int64(1024 * 1024 * 1024)
 
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("web-1", "default", "Deployment", "web", 1000, 4*gi),
+		PodInfo:         makePodInfo("web-1", "default", "Deployment", "web", 1000, 8*gi),
 		CPURequestMilli: 1000,
-		MemRequestBytes: 4 * gi,
+		MemRequestBytes: 8 * gi,
 		CPUP50:          100,
 		CPUP95:          200,
 		CPUP99:          300,
@@ -213,15 +213,16 @@ func TestRecommender_NodeRatio_MemoryNeverIncreases(t *testing.T) {
 	gi := int64(1024 * 1024 * 1024)
 
 	// Node: 32000m CPU, 128Gi memory → 4Mi per millicore
-	// Pod: 4000m CPU, 2Gi memory → CPU way over-provisioned
+	// Pod: 4000m CPU, 4Gi memory → CPU way over-provisioned
 	// CPU P95=200m → floor = max(200*1.2=240, 4000*0.3=1200) = 1200m
-	// Node-ratio memory for 1200m = 1200 * 4Mi = 4800Mi ≈ 4Gi
-	// 4Gi > current 2Gi → proportional fallback: 2Gi * (1200/4000) = 0.6Gi
+	// Node-ratio memory for 1200m = 1200 * 4Mi = 4800Mi ≈ 4.7Gi
+	// 4.7Gi > current 4Gi → proportional fallback: 4Gi * (1200/4000) = 1.2Gi
 	// But memFloor = 1.5Gi * 1.2 = 1.8Gi → clamp to 1.8Gi (formatBytes → "1Gi")
+	// memSaved = 4Gi - 1.8Gi = 2.2Gi > 2Gi ✓
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("skewed-1", "prod", "Deployment", "skewed", 4000, 2*gi),
+		PodInfo:         makePodInfo("skewed-1", "prod", "Deployment", "skewed", 4000, 4*gi),
 		CPURequestMilli: 4000,
-		MemRequestBytes: 2 * gi,
+		MemRequestBytes: 4 * gi,
 		CPUP50:          100,
 		CPUP95:          200,
 		CPUP99:          300,
@@ -252,8 +253,8 @@ func TestRecommender_NodeRatio_MemoryNeverIncreases(t *testing.T) {
 		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "1200m")
 	}
 
-	// Memory: node ratio says 4Gi but current is 2Gi → proportional fallback
-	// gives 0.6Gi, clamped to memFloor (1.8Gi) → formatBytes → "1Gi"
+	// Memory: node ratio says 4.7Gi but current is 4Gi → proportional fallback
+	// gives 1.2Gi, clamped to memFloor (1.8Gi) → formatBytes → "1Gi"
 	suggestedMem := rec.Details["suggestedMemRequest"]
 	if suggestedMem != "1Gi" {
 		t.Errorf("suggestedMemRequest = %q, want %q (proportional fallback on highmem node)", suggestedMem, "1Gi")
@@ -356,24 +357,26 @@ func TestRecommender_MinKeepRatioClamped(t *testing.T) {
 
 func TestRecommender_CPUFloor10m(t *testing.T) {
 	// Very low usage → CPU clamped to 10m minimum
+	// Uses 4Gi memory to exceed the 2Gi minimum for rightsizing
 	cfg := defaultTestConfig()
 	cfg.Rightsizer.MinKeepRatio = 0.01
 	recommender := NewRecommender(cfg)
 
+	gi := int64(1024 * 1024 * 1024)
 	mi := int64(1024 * 1024)
 
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("micro-1", "default", "Deployment", "micro", 100, 256*mi),
+		PodInfo:         makePodInfo("micro-1", "default", "Deployment", "micro", 100, 4*gi),
 		CPURequestMilli: 100,
-		MemRequestBytes: 256 * mi,
+		MemRequestBytes: 4 * gi,
 		CPUP50:          1,
 		CPUP95:          2,
 		CPUP99:          3,
 		CPUMax:          5,
-		MemP50:          5 * mi,
-		MemP95:          8 * mi,
-		MemP99:          10 * mi,
-		MemMax:          12 * mi,
+		MemP50:          500 * mi,
+		MemP95:          800 * mi,
+		MemP99:          1 * gi,
+		MemMax:          int64(1.2 * float64(gi)),
 		IsOverProvCPU:   true,
 		IsOverProvMem:   true,
 		IsBothOverProv:  true,
@@ -436,9 +439,9 @@ func TestRecommender_SavingsEstimate(t *testing.T) {
 	gi := int64(1024 * 1024 * 1024)
 
 	analysis := &PodAnalysis{
-		PodInfo:         makePodInfo("svc-1", "prod", "Deployment", "svc", 1000, 4*gi),
+		PodInfo:         makePodInfo("svc-1", "prod", "Deployment", "svc", 1000, 8*gi),
 		CPURequestMilli: 1000,
-		MemRequestBytes: 4 * gi,
+		MemRequestBytes: 8 * gi,
 		CPUP50:          100,
 		CPUP95:          200,
 		CPUP99:          300,
