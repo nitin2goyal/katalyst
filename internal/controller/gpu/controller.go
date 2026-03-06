@@ -107,7 +107,7 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 }
 
 func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) error {
-	if c.config.Mode != "active" {
+	if c.config.GetMode() != "active" {
 		return nil
 	}
 	if !rec.AutoExecutable {

@@ -1,5 +1,6 @@
 import { $ } from '../utils.js';
 import { destroyCharts } from '../charts.js';
+import { addCleanup } from '../router.js';
 import { renderGPU } from './gpu.js';
 import { renderCommitments } from './commitments.js';
 const container = () => $('#page-container');
@@ -34,7 +35,7 @@ export async function renderInfrastructure(params) {
   }
 
   // Tab click handlers
-  document.getElementById('infra-tabs').addEventListener('click', (e) => {
+  const tabHandler = (e) => {
     const btn = e.target.closest('.tab');
     if (!btn) return;
     const tabId = btn.dataset.tab;
@@ -42,7 +43,9 @@ export async function renderInfrastructure(params) {
     btn.classList.add('tab-active');
     history.replaceState(null, '', `#/infrastructure/${tabId}`);
     switchTab(tabId);
-  });
+  };
+  document.getElementById('infra-tabs').addEventListener('click', tabHandler);
+  addCleanup(() => document.getElementById('infra-tabs')?.removeEventListener('click', tabHandler));
 
   await switchTab(activeTab);
 }

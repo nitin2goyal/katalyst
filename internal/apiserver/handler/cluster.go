@@ -71,7 +71,7 @@ func (h *ClusterHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"mode":              h.config.Mode,
+		"mode":              h.config.GetMode(),
 		"cloudProvider":     h.config.CloudProvider,
 		"nodeCount":         len(nodes),
 		"podCount":          len(pods),
@@ -87,6 +87,7 @@ func (h *ClusterHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ClusterHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
+	h.config.Mu.RLock()
 	resp := map[string]interface{}{
 		"status": "healthy",
 		"mode":   h.config.Mode,
@@ -100,6 +101,7 @@ func (h *ClusterHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 			"aiGate":         boolToStatus(h.config.AIGate.Enabled),
 		},
 	}
+	h.config.Mu.RUnlock()
 	writeJSON(w, http.StatusOK, resp)
 }
 

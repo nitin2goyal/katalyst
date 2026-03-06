@@ -292,6 +292,7 @@ func (s *Store) cleanupLocked() {
 
 	// Safety cap: if pod series keys still exceed the maximum after
 	// retention-based cleanup, evict the oldest entries first.
+	// Collect keys under lock, sort outside lock, then delete under lock.
 	if len(s.podSeries) > maxPodSeriesKeys {
 		type keyAge struct {
 			key string
@@ -305,15 +306,26 @@ func (s *Store) cleanupLocked() {
 				delete(s.podSeries, k)
 			}
 		}
+
+		// Release lock during the expensive sort, then re-acquire for deletion.
+		s.mu.Unlock()
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].ts.Before(entries[j].ts)
 		})
-		toRemove := len(entries) - maxPodSeriesKeys
+		s.mu.Lock()
+
+		// Re-check count after re-acquiring lock — another goroutine may have cleaned up.
+		toRemove := len(s.podSeries) - maxPodSeriesKeys
+		if toRemove > len(entries) {
+			toRemove = len(entries)
+		}
 		for i := 0; i < toRemove; i++ {
 			delete(s.podSeries, entries[i].key)
 		}
-		slog.Info("metrics: evicted stale pod series to enforce cap",
-			"removed", toRemove, "remaining", len(s.podSeries))
+		if toRemove > 0 {
+			slog.Info("metrics: evicted stale pod series to enforce cap",
+				"removed", toRemove, "remaining", len(s.podSeries))
+		}
 	}
 }
 

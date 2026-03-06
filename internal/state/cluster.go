@@ -375,7 +375,8 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	s.MetricsAvailable = metricsAvailable
 	s.NodesWithMetrics = len(metricsMap)
 	s.autoscalers = autoscalerMap
-	// Cache successful metrics data for reuse across sync cycles
+	// Cache successful metrics data for reuse across sync cycles.
+	// Replace (not merge) to prevent unbounded growth from deleted nodes.
 	if len(metricsMap) > 0 {
 		s.lastNodeMetrics = metricsMap
 		s.lastMetricsUpdate = time.Now()
@@ -519,7 +520,7 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	}
 
 	// Apply pod metrics (actual usage from Metrics Server, fetched above without lock).
-	// Cache successful pod metrics for reuse across sync cycles.
+	// Replace (not merge) to prevent unbounded growth from deleted pods.
 	if len(podMetricsMap) > 0 {
 		s.lastPodMetrics = podMetricsMap
 	}
@@ -552,6 +553,15 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		nodeStates = append(nodeStates, n)
 	}
 	s.nodeGroups.Update(groups, nodeStates)
+
+	// Prune node locks for nodes that no longer exist in the cluster.
+	if s.NodeLock != nil {
+		currentNodeNames := make(map[string]bool, len(s.nodes))
+		for name := range s.nodes {
+			currentNodeNames[name] = true
+		}
+		s.NodeLock.PruneDeleted(currentNodeNames)
+	}
 
 	return nil
 }

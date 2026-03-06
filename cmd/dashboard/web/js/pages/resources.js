@@ -1,5 +1,6 @@
 import { $ } from '../utils.js';
 import { destroyCharts } from '../charts.js';
+import { addCleanup } from '../router.js';
 import { renderNodes } from './nodes.js';
 import { renderWorkloads } from './workloads.js';
 import { renderRecsTab } from './recommendations.js';
@@ -40,7 +41,7 @@ export async function renderResources(params) {
     if (render) await render(contentEl);
   }
 
-  document.getElementById('resources-tabs').addEventListener('click', (e) => {
+  const tabHandler = (e) => {
     const btn = e.target.closest('.tab');
     if (!btn) return;
     const tabId = btn.dataset.tab;
@@ -48,7 +49,9 @@ export async function renderResources(params) {
     btn.classList.add('tab-active');
     history.replaceState(null, '', tabId === 'nodes' ? '#/resources' : `#/resources/${tabId}`);
     switchTab(tabId);
-  });
+  };
+  document.getElementById('resources-tabs').addEventListener('click', tabHandler);
+  addCleanup(() => document.getElementById('resources-tabs')?.removeEventListener('click', tabHandler));
 
   await switchTab(activeTab);
 }

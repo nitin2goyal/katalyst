@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { $, $$, badge, fmtPct, fmt$, utilBar, escapeHtml, timeAgo, errorMsg } from '../utils.js';
 import { skeleton, makeSortable, attachPagination, cardHeader, filterBar, attachFilterHandlers } from '../components.js';
+import { addCleanup } from '../router.js';
 
 const container = () => $('#page-container');
 
@@ -35,7 +36,7 @@ export async function renderAutoscaler(params) {
     if (render) await render(contentEl);
   }
 
-  document.getElementById('page-tabs').addEventListener('click', (e) => {
+  const tabHandler = (e) => {
     const btn = e.target.closest('.tab');
     if (!btn) return;
     const tabId = btn.dataset.tab;
@@ -43,7 +44,9 @@ export async function renderAutoscaler(params) {
     btn.classList.add('tab-active');
     history.replaceState(null, '', tabId === 'status' ? '#/autoscaler' : `#/autoscaler/${tabId}`);
     switchTab(tabId);
-  });
+  };
+  document.getElementById('page-tabs').addEventListener('click', tabHandler);
+  addCleanup(() => document.getElementById('page-tabs')?.removeEventListener('click', tabHandler));
 
   await switchTab(activeTab);
 }

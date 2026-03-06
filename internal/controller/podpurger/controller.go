@@ -80,7 +80,7 @@ func (c *Controller) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			if !c.config.PodPurger.Enabled {
+			if !c.config.IsControllerEnabled("podPurger") {
 				continue
 			}
 			if c.state.Breaker.IsTripped(c.Name()) {

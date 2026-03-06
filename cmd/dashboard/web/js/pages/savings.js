@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, cardHeader, badge, exportCSV } from '../components.js';
+import { addCleanup } from '../router.js';
 import { computeRecommendations } from '../recommendations-engine.js';
 
 export async function renderSavings(targetEl) {
@@ -148,6 +149,7 @@ export async function renderSavings(targetEl) {
         list.map(s => [s.type, s.name || s.target, s.description, s.estimatedSavings || s.savings]),
         'katalyst-savings-report.csv');
     };
+    addCleanup(() => { delete window.__exportSavingsDetailCSV; });
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load savings: ' + e.message);
   }

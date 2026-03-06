@@ -104,10 +104,12 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		// proportionally — optimal for bin-packing.
 		bytesPerMilli := float64(analysis.NodeMemCapBytes) / float64(analysis.NodeCPUCapMilli)
 		suggestedMem = int64(float64(suggestedCPU) * bytesPerMilli)
-	} else {
+	} else if analysis.CPURequestMilli > 0 {
 		// No node info — reduce memory proportionally to CPU
 		cpuKeepRatio := float64(suggestedCPU) / float64(analysis.CPURequestMilli)
 		suggestedMem = int64(float64(analysis.MemRequestBytes) * cpuKeepRatio)
+	} else {
+		suggestedMem = memFloor
 	}
 
 	// Never go below actual usage

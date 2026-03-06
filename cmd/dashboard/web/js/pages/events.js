@@ -134,6 +134,7 @@ export async function renderEvents(targetEl) {
       }
       toast('Event action noted. Switch to OPTIMIZE mode to enable automatic execution.', 'info');
     };
+    addCleanup(() => { delete window.__applyEvent; });
 
     renderTimeline('all');
 

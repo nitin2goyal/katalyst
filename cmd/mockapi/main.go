@@ -10,8 +10,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+var mu sync.RWMutex
 
 var currentMode = "recommend"
 var controllerStates = map[string]bool{
@@ -31,6 +34,8 @@ var mockChannels = []map[string]any{
 	{"type": "webhook", "name": "Custom Webhook", "target": "https://hooks.example.com/kopt", "enabled": false},
 }
 
+const maxBodySize = 1 << 20 // 1 MB
+
 func main() {
 	port := flag.Int("port", 8080, "Mock API port")
 	flag.Parse()
@@ -43,19 +48,24 @@ func main() {
 	mux.HandleFunc("/api/v1/cluster/efficiency", jsonHandler(clusterEfficiency))
 	mux.HandleFunc("/api/v1/cluster/score", jsonHandler(clusterScore))
 	mux.HandleFunc("/api/v1/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, configHandler())
+		mu.RLock()
+		resp := configHandler()
+		mu.RUnlock()
+		writeJSON(w, resp)
 	})
 	mux.HandleFunc("/api/v1/config/mode", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
 			var body map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				writeJSON(w, map[string]string{"error": "invalid JSON"})
 				return
 			}
 			if m, ok := body["mode"]; ok {
 				if m == "recommend" || m == "active" {
+					mu.Lock()
 					currentMode = m
+					mu.Unlock()
 				} else {
 					w.WriteHeader(http.StatusBadRequest)
 					writeJSON(w, map[string]string{"error": "invalid mode, must be 'recommend' or 'active'"})
@@ -63,7 +73,10 @@ func main() {
 				}
 			}
 		}
-		writeJSON(w, map[string]string{"status": "ok", "mode": currentMode})
+		mu.RLock()
+		mode := currentMode
+		mu.RUnlock()
+		writeJSON(w, map[string]string{"status": "ok", "mode": mode})
 	})
 	mux.HandleFunc("/api/v1/config/controllers/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/config/controllers/")
@@ -72,16 +85,21 @@ func main() {
 			name := strings.TrimSuffix(path, "/auto-approve")
 			if r.Method == http.MethodPut && name != "" {
 				var body map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
 					w.WriteHeader(http.StatusBadRequest)
 					writeJSON(w, map[string]string{"error": "invalid JSON"})
 					return
 				}
 				if aa, ok := body["autoApprove"].(bool); ok {
+					mu.Lock()
 					autoApproveStates[name] = aa
+					mu.Unlock()
 				}
 			}
-			writeJSON(w, map[string]interface{}{"controller": name, "autoApprove": autoApproveStates[name]})
+			mu.RLock()
+			resp := map[string]interface{}{"controller": name, "autoApprove": autoApproveStates[name]}
+			mu.RUnlock()
+			writeJSON(w, resp)
 			return
 		}
 		// Handle dry-run sub-path: controllers/{name}/dry-run
@@ -94,16 +112,21 @@ func main() {
 					return
 				}
 				var body map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
 					w.WriteHeader(http.StatusBadRequest)
 					writeJSON(w, map[string]string{"error": "invalid JSON"})
 					return
 				}
 				if dr, ok := body["dryRun"].(bool); ok {
+					mu.Lock()
 					dryRunStates[name] = dr
+					mu.Unlock()
 				}
 			}
-			writeJSON(w, map[string]interface{}{"controller": name, "dryRun": dryRunStates[name]})
+			mu.RLock()
+			resp := map[string]interface{}{"controller": name, "dryRun": dryRunStates[name]}
+			mu.RUnlock()
+			writeJSON(w, resp)
 			return
 		}
 		// Handle enabled toggle: controllers/{name}
@@ -115,30 +138,40 @@ func main() {
 				return
 			}
 			var body map[string]interface{}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				writeJSON(w, map[string]string{"error": "invalid JSON"})
 				return
 			}
 			if enabled, ok := body["enabled"].(bool); ok {
+				mu.Lock()
 				controllerStates[name] = enabled
+				mu.Unlock()
 			}
 		}
-		writeJSON(w, map[string]interface{}{"controller": name, "enabled": controllerStates[name]})
+		mu.RLock()
+		resp := map[string]interface{}{"controller": name, "enabled": controllerStates[name]}
+		mu.RUnlock()
+		writeJSON(w, resp)
 	})
 	mux.HandleFunc("/api/v1/config/pod-purger", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
 			var body map[string]interface{}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				writeJSON(w, map[string]string{"error": "invalid JSON"})
 				return
 			}
 			if enabled, ok := body["enabled"].(bool); ok {
+				mu.Lock()
 				controllerStates["podPurger"] = enabled
+				mu.Unlock()
 			}
 		}
-		writeJSON(w, map[string]interface{}{"enabled": controllerStates["podPurger"]})
+		mu.RLock()
+		resp := map[string]interface{}{"enabled": controllerStates["podPurger"]}
+		mu.RUnlock()
+		writeJSON(w, resp)
 	})
 	mux.HandleFunc("/api/v1/nodegroups/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/nodegroups/")
@@ -249,7 +282,10 @@ func main() {
 	mux.HandleFunc("/api/v1/notifications/channels/", func(w http.ResponseWriter, r *http.Request) {
 		idxStr := strings.TrimPrefix(r.URL.Path, "/api/v1/notifications/channels/")
 		idx, err := strconv.Atoi(idxStr)
-		if err != nil || idx < 0 || idx >= len(mockChannels) {
+		mu.RLock()
+		outOfRange := err != nil || idx < 0 || idx >= len(mockChannels)
+		mu.RUnlock()
+		if outOfRange {
 			w.WriteHeader(http.StatusNotFound)
 			writeJSON(w, map[string]string{"error": "channel not found"})
 			return
@@ -257,29 +293,47 @@ func main() {
 		switch r.Method {
 		case http.MethodPut:
 			var body map[string]interface{}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				writeJSON(w, map[string]string{"error": "invalid JSON"})
 				return
 			}
-			if enabled, ok := body["enabled"].(bool); ok {
-				mockChannels[idx]["enabled"] = enabled
+			mu.Lock()
+			if idx < len(mockChannels) {
+				if enabled, ok := body["enabled"].(bool); ok {
+					mockChannels[idx]["enabled"] = enabled
+				}
 			}
-			writeJSON(w, mockChannels[idx])
+			var resp map[string]any
+			if idx < len(mockChannels) {
+				resp = mockChannels[idx]
+			}
+			mu.Unlock()
+			writeJSON(w, resp)
 		case http.MethodDelete:
-			mockChannels = append(mockChannels[:idx], mockChannels[idx+1:]...)
+			mu.Lock()
+			if idx < len(mockChannels) {
+				mockChannels = append(mockChannels[:idx], mockChannels[idx+1:]...)
+			}
 			if len(mockChannels) == 0 {
 				mockChannels = []map[string]any{}
 			}
+			mu.Unlock()
 			writeJSON(w, map[string]string{"status": "deleted"})
 		default:
-			writeJSON(w, mockChannels[idx])
+			mu.RLock()
+			var resp map[string]any
+			if idx < len(mockChannels) {
+				resp = mockChannels[idx]
+			}
+			mu.RUnlock()
+			writeJSON(w, resp)
 		}
 	})
 	mux.HandleFunc("/api/v1/notifications/channels", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var body map[string]interface{}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				writeJSON(w, map[string]string{"error": "invalid JSON"})
 				return
@@ -290,10 +344,13 @@ func main() {
 				"target":  body["url"],
 				"enabled": true,
 			}
+			mu.Lock()
 			mockChannels = append(mockChannels, ch)
+			id := len(mockChannels) - 1
+			mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 			writeJSON(w, map[string]any{
-				"id":      len(mockChannels) - 1,
+				"id":      id,
 				"type":    ch["type"],
 				"name":    ch["name"],
 				"url":     ch["target"],
@@ -301,7 +358,10 @@ func main() {
 			})
 			return
 		}
-		writeJSON(w, notificationsData())
+		mu.RLock()
+		resp := notificationsData()
+		mu.RUnlock()
+		writeJSON(w, resp)
 	})
 	mux.HandleFunc("/api/v1/notifications", jsonHandler(notificationsData))
 	mux.HandleFunc("/api/v1/events", jsonHandler(eventsData))

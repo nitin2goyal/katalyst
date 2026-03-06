@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
 import { makeBarChart, makeAreaChart, makeDonutChart, destroyCharts } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, cardHeader, dateRangePicker, badge, exportCSV } from '../components.js';
+import { addCleanup } from '../router.js';
 import { renderSavings } from './savings.js';
 import { computeRecommendations } from '../recommendations-engine.js';
 
@@ -45,7 +46,7 @@ export async function renderCost(params) {
   }
 
   // Tab click handlers
-  document.getElementById('cost-tabs').addEventListener('click', (e) => {
+  const tabHandler = (e) => {
     const btn = e.target.closest('.tab');
     if (!btn) return;
     const tabId = btn.dataset.tab;
@@ -53,7 +54,9 @@ export async function renderCost(params) {
     btn.classList.add('tab-active');
     history.replaceState(null, '', tabId === 'dashboard' ? '#/cost' : `#/cost/${tabId}`);
     switchTab(tabId);
-  });
+  };
+  document.getElementById('cost-tabs').addEventListener('click', tabHandler);
+  addCleanup(() => document.getElementById('cost-tabs')?.removeEventListener('click', tabHandler));
 
   await switchTab(activeTab);
 }
@@ -229,6 +232,7 @@ async function renderCostDashboard(targetEl) {
         wlList.map(w => [w.namespace, w.kind, w.name, w.monthlyCostUSD]),
         'katalyst-workload-costs.csv');
     };
+    addCleanup(() => { delete window.__exportSavingsCSV; delete window.__exportWlCostCSV; });
 
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load cost data: ' + e.message);

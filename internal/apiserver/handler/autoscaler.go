@@ -114,7 +114,7 @@ func (h *AutoscalerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"config": map[string]interface{}{
-			"mode":    h.config.Mode,
+			"mode":    h.config.GetMode(),
 			"message": "Node lifecycle managed by GKE cluster autoscaler",
 		},
 		"summary": map[string]interface{}{

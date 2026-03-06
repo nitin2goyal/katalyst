@@ -88,7 +88,7 @@ func (c *Controller) Analyze(ctx context.Context, snapshot *optimizer.ClusterSna
 // Recommendations rejected by AI Gate or that are non-auto-executable are
 // returned so callers can persist them as CRDs.
 func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) (optimizer.Recommendation, bool, error) {
-	if c.config.Mode != "active" {
+	if c.config.GetMode() != "active" {
 		return rec, false, nil
 	}
 	if !rec.AutoExecutable {

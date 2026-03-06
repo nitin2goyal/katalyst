@@ -5,13 +5,19 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config is the top-level configuration for KOptimizer.
+// Mu protects fields that can be mutated at runtime via the API (Mode,
+// controller Enabled flags, AutoApprove flags). Readers of these fields
+// should use GetMode() / IsControllerEnabled() or acquire Mu.RLock().
 type Config struct {
+	Mu sync.RWMutex `yaml:"-"`
+
 	Mode              string        `yaml:"mode"` // "monitor", "recommend", "active"
 	CloudProvider     string        `yaml:"cloudProvider"` // "aws", "gcp", "azure"
 	Region            string        `yaml:"region"`
@@ -418,4 +424,88 @@ func (c *Config) ValidateDetailed() error {
 	}
 
 	return nil
+}
+
+// GetMode returns the current operating mode, safe for concurrent reads.
+func (c *Config) GetMode() string {
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+	return c.Mode
+}
+
+// SetMode sets the operating mode, safe for concurrent writes.
+func (c *Config) SetMode(mode string) {
+	c.Mu.Lock()
+	c.Mode = mode
+	c.Mu.Unlock()
+}
+
+// SetControllerEnabled sets a controller's enabled state, safe for concurrent writes.
+func (c *Config) SetControllerEnabled(name string, enabled bool) bool {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	switch name {
+	case "costMonitor":
+		c.CostMonitor.Enabled = enabled
+	case "nodegroupMgr":
+		c.NodeGroupMgr.Enabled = enabled
+	case "rightsizer":
+		c.Rightsizer.Enabled = enabled
+	case "workloadScaler":
+		c.WorkloadScaler.Enabled = enabled
+	case "gpu":
+		c.GPU.Enabled = enabled
+	case "gpuReclaim":
+		c.GPU.ReclaimEnabled = enabled
+	case "commitments":
+		c.Commitments.Enabled = enabled
+	case "aiGate":
+		c.AIGate.Enabled = enabled
+	case "podPurger":
+		c.PodPurger.Enabled = enabled
+	default:
+		return false
+	}
+	return true
+}
+
+// IsControllerEnabled returns whether a named controller is enabled, safe for concurrent reads.
+func (c *Config) IsControllerEnabled(name string) bool {
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+	switch name {
+	case "costMonitor":
+		return c.CostMonitor.Enabled
+	case "nodegroupMgr":
+		return c.NodeGroupMgr.Enabled
+	case "rightsizer":
+		return c.Rightsizer.Enabled
+	case "workloadScaler":
+		return c.WorkloadScaler.Enabled
+	case "gpu":
+		return c.GPU.Enabled
+	case "gpuReclaim":
+		return c.GPU.ReclaimEnabled
+	case "commitments":
+		return c.Commitments.Enabled
+	case "aiGate":
+		return c.AIGate.Enabled
+	case "podPurger":
+		return c.PodPurger.Enabled
+	default:
+		return false
+	}
+}
+
+// SetAutoApprove sets a controller's auto-approve state, safe for concurrent writes.
+func (c *Config) SetAutoApprove(name string, autoApprove bool) bool {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	switch name {
+	case "rightsizer":
+		c.Rightsizer.AutoApprove = autoApprove
+	default:
+		return false
+	}
+	return true
 }

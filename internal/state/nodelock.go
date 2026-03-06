@@ -106,3 +106,18 @@ func (nl *NodeLock) ExpireStale(maxAge time.Duration) {
 		}
 	}
 }
+
+// PruneDeleted removes locks for nodes that no longer exist in the cluster.
+// Call this after each refresh with the current set of node names.
+func (nl *NodeLock) PruneDeleted(currentNodes map[string]bool) {
+	nl.mu.Lock()
+	defer nl.mu.Unlock()
+
+	for node := range nl.locks {
+		if !currentNodes[node] {
+			slog.Info("pruning lock for deleted node", "node", node,
+				"controller", nl.locks[node].Controller)
+			delete(nl.locks, node)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg, GiB, TiB } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, columnToggle, attachColumnToggle } from '../components.js';
+import { addCleanup } from '../router.js';
 
 // Format disk type + size as a concise string, e.g. "Hyperdisk Balanced 100G"
 function fmtDisk(type, sizeGB) {
@@ -160,6 +161,7 @@ export async function renderNodes(targetEl) {
         nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, n.diskType || '', n.diskSizeGB || '', (n.diskUtilPct||0).toFixed(1), (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), (n.cpuAllocPct||0).toFixed(1), (n.memAllocPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.hourlyCostUSD]),
         'katalyst-nodes.csv');
     };
+    addCleanup(() => { delete window.__exportNgCSV; delete window.__exportNodesCSV; });
 
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load node data: ' + e.message);

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/koptimizer/koptimizer/internal/config"
@@ -12,7 +11,6 @@ import (
 )
 
 type ConfigHandler struct {
-	mu       sync.RWMutex
 	config   *config.Config
 	settings *store.SettingsStore
 }
@@ -22,8 +20,8 @@ func NewConfigHandler(cfg *config.Config, settings *store.SettingsStore) *Config
 }
 
 func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.config.Mu.RLock()
+	defer h.config.Mu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"mode":          h.config.Mode,
 		"cloudProvider": h.config.CloudProvider,
@@ -62,9 +60,7 @@ func (h *ConfigHandler) SetMode(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Mode {
 	case "monitor", "recommend", "active":
-		h.mu.Lock()
-		h.config.Mode = req.Mode
-		h.mu.Unlock()
+		h.config.SetMode(req.Mode)
 		h.settings.SaveMode(req.Mode)
 		writeJSON(w, http.StatusOK, map[string]string{"mode": req.Mode})
 	default:
@@ -86,9 +82,7 @@ func (h *ConfigHandler) SetPodPurger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	h.config.PodPurger.Enabled = req.Enabled
-	h.mu.Unlock()
+	h.config.SetControllerEnabled("podPurger", req.Enabled)
 	h.settings.SavePodPurgerEnabled(req.Enabled)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": req.Enabled})
 }
@@ -109,32 +103,10 @@ func (h *ConfigHandler) SetController(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	switch name {
-	case "costMonitor":
-		h.config.CostMonitor.Enabled = req.Enabled
-	case "nodegroupMgr":
-		h.config.NodeGroupMgr.Enabled = req.Enabled
-	case "rightsizer":
-		h.config.Rightsizer.Enabled = req.Enabled
-	case "workloadScaler":
-		h.config.WorkloadScaler.Enabled = req.Enabled
-	case "gpu":
-		h.config.GPU.Enabled = req.Enabled
-	case "gpuReclaim":
-		h.config.GPU.ReclaimEnabled = req.Enabled
-	case "commitments":
-		h.config.Commitments.Enabled = req.Enabled
-	case "aiGate":
-		h.config.AIGate.Enabled = req.Enabled
-	case "podPurger":
-		h.config.PodPurger.Enabled = req.Enabled
-	default:
-		h.mu.Unlock()
+	if !h.config.SetControllerEnabled(name, req.Enabled) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown controller: " + name})
 		return
 	}
-	h.mu.Unlock()
 
 	h.settings.SaveControllerEnabled(name, req.Enabled)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "enabled": req.Enabled})
@@ -156,16 +128,10 @@ func (h *ConfigHandler) SetAutoApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	switch name {
-	case "rightsizer":
-		h.config.Rightsizer.AutoApprove = req.AutoApprove
-	default:
-		h.mu.Unlock()
+	if !h.config.SetAutoApprove(name, req.AutoApprove) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "controller does not support autoApprove: " + name})
 		return
 	}
-	h.mu.Unlock()
 
 	h.settings.SaveAutoApprove(name, req.AutoApprove)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"controller": name, "autoApprove": req.AutoApprove})

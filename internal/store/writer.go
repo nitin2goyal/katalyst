@@ -12,12 +12,13 @@ import (
 // a single goroutine. It provides backpressure via a bounded channel, ordered
 // writes, and graceful drain on shutdown.
 type Writer struct {
-	db      *sql.DB
-	ch      chan func(*sql.DB)
-	wg      sync.WaitGroup
-	dropped atomic.Uint64
-	mu      sync.Mutex
-	closed  bool
+	db        *sql.DB
+	ch        chan func(*sql.DB)
+	wg        sync.WaitGroup
+	dropped   atomic.Uint64
+	mu        sync.Mutex
+	closed    bool
+	closeOnce sync.Once
 }
 
 // NewWriter creates an async writer with the given buffer size.
@@ -97,14 +98,11 @@ func (w *Writer) DroppedCount() uint64 {
 // Drain waits for all queued writes to be processed. Call this before
 // closing the database. Safe to call concurrently with Enqueue.
 func (w *Writer) Drain() {
-	w.mu.Lock()
-	if w.closed {
+	w.closeOnce.Do(func() {
+		w.mu.Lock()
+		w.closed = true
 		w.mu.Unlock()
-		return
-	}
-	w.closed = true
-	w.mu.Unlock()
-
-	close(w.ch)
+		close(w.ch)
+	})
 	w.wg.Wait()
 }

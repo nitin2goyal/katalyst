@@ -1,6 +1,7 @@
 import { api, apiPost } from '../api.js';
 import { $, badge, escapeHtml, timeAgo, errorMsg } from '../utils.js';
 import { skeleton, makeSortable, attachPagination, cardHeader, filterBar, attachFilterHandlers, confirmDialog, toast } from '../components.js';
+import { addCleanup } from '../router.js';
 
 const container = () => $('#page-container');
 
@@ -41,7 +42,7 @@ export async function renderScaleDown(params) {
     if (render) await render(contentEl);
   }
 
-  document.getElementById('page-tabs').addEventListener('click', (e) => {
+  const tabHandler = (e) => {
     const btn = e.target.closest('.tab');
     if (!btn) return;
     const tabId = btn.dataset.tab;
@@ -49,7 +50,9 @@ export async function renderScaleDown(params) {
     btn.classList.add('tab-active');
     history.replaceState(null, '', tabId === 'overview' ? '#/scaledown' : `#/scaledown/${tabId}`);
     switchTab(tabId);
-  });
+  };
+  document.getElementById('page-tabs').addEventListener('click', tabHandler);
+  addCleanup(() => document.getElementById('page-tabs')?.removeEventListener('click', tabHandler));
 
   await switchTab(activeTab);
 }

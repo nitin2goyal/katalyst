@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, utilBar, healthDot, errorMsg } from '../utils.js';
 import { renderGauge, destroyCharts } from '../charts.js';
 import { skeleton, makeSortable, badge, cardHeader } from '../components.js';
+import { addCleanup } from '../router.js';
 import { renderEvents } from './events.js';
 import { renderAudit } from './audit.js';
 import { computeRecommendations } from '../recommendations-engine.js';
@@ -198,14 +199,16 @@ export async function renderOverview() {
       if (render) await render(activityContent);
     }
 
-    document.getElementById('activity-tabs')?.addEventListener('click', (e) => {
+    const actTabHandler = (e) => {
       const btn = e.target.closest('.tab');
       if (!btn) return;
       const tabId = btn.dataset.tab;
       document.querySelectorAll('#activity-tabs .tab').forEach(b => b.classList.remove('tab-active'));
       btn.classList.add('tab-active');
       switchActivityTab(tabId);
-    });
+    };
+    document.getElementById('activity-tabs')?.addEventListener('click', actTabHandler);
+    addCleanup(() => document.getElementById('activity-tabs')?.removeEventListener('click', actTabHandler));
 
     await switchActivityTab('events');
 

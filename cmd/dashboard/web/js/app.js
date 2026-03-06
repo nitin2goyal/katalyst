@@ -144,8 +144,8 @@ window.addEventListener('kopt-theme-toggle', () => {
   }
 });
 
-// Refresh indicator update
-setInterval(updateRefreshIndicator, 5000);
+// Refresh indicator update (single global interval — safe since this module loads once)
+const _refreshInterval = setInterval(updateRefreshIndicator, 5000);
 
 // Sidebar collapse toggle
 function initSidebarCollapse() {

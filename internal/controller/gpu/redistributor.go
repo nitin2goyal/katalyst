@@ -299,7 +299,7 @@ func (r *Redistributor) Execute(ctx context.Context, rec optimizer.Recommendatio
 		nodeName = rec.Details["sourceNode"]
 	}
 
-	if r.config.Mode != "active" {
+	if r.config.GetMode() != "active" {
 		return nil
 	}
 

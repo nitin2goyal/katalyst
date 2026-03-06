@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge, columnToggle, attachColumnToggle } from '../components.js';
+import { addCleanup } from '../router.js';
 
 const COLUMNS = [
   { key: 'namespace',       label: 'Namespace',        default: false },
@@ -172,6 +173,7 @@ export async function renderWorkloads(targetEl) {
         }),
         'katalyst-workloads.csv');
     };
+    addCleanup(() => { delete window.__exportWlCSV; });
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load workloads: ' + e.message);
   }

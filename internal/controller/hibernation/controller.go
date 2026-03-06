@@ -186,7 +186,7 @@ func (c *Controller) Hibernate(ctx context.Context) error {
 		return nil
 	}
 
-	if c.config.Mode != "active" {
+	if c.config.GetMode() != "active" {
 		logger.Info("Not in active mode, skipping hibernate")
 		return nil
 	}
@@ -300,7 +300,7 @@ func (c *Controller) Wake(ctx context.Context) error {
 		return nil
 	}
 
-	if c.config.Mode != "active" {
+	if c.config.GetMode() != "active" {
 		logger.Info("Not in active mode, skipping wake")
 		return nil
 	}

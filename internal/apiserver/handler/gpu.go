@@ -65,7 +65,7 @@ func (h *GPUHandler) GetNodes(w http.ResponseWriter, r *http.Request) {
 			"idleDuration":                 gpuCfg.IdleDuration.String(),
 			"scavengingCPUThresholdMillis": gpuCfg.ScavengingCPUThresholdMillis,
 			"reclaimGracePeriod":           gpuCfg.ReclaimGracePeriod.String(),
-			"mode":                         h.config.Mode,
+			"mode":                         h.config.GetMode(),
 		},
 		"total":    len(gpuNodes),
 		"page":     1,
@@ -305,7 +305,7 @@ func (h *GPUHandler) GetScavenging(w http.ResponseWriter, r *http.Request) {
 		"totalCPUPods":        len(cpuPods),
 		"scavengingNodeCount": scavengingNodeCount,
 		"totalHeadroomMillis": totalHeadroom,
-		"mode":                h.config.Mode,
+		"mode":                h.config.GetMode(),
 		"scavengingEnabled":   h.config.GPU.CPUScavengingEnabled,
 	})
 }
