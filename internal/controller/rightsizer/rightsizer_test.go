@@ -203,8 +203,9 @@ func TestRecommender_BothOverProv_WithNodeRatio(t *testing.T) {
 
 func TestRecommender_NodeRatio_MemoryCanIncrease(t *testing.T) {
 	// Pod has too much CPU and not enough memory relative to node ratio.
-	// CPU should decrease. Memory increases to match node ratio — this is
-	// intended for optimal bin-packing. Only emit if net savings positive.
+	// CPU should decrease. Memory is capped at current value — we never
+	// increase memory during a cost-saving downsize to avoid unnecessary
+	// disruption.
 	cfg := defaultTestConfig()
 	cfg.Rightsizer.MinKeepRatio = 0.3
 	recommender := NewRecommender(cfg)
@@ -253,15 +254,15 @@ func TestRecommender_NodeRatio_MemoryCanIncrease(t *testing.T) {
 		t.Errorf("suggestedCPURequest = %q, want %q", rec.Details["suggestedCPURequest"], "1200m")
 	}
 
-	// Memory increases to match node ratio (4.8Gi = 4915Mi, preserved at MiB precision)
+	// Memory stays at current value (4Gi) — capped, not increased
 	suggestedMem := rec.Details["suggestedMemRequest"]
-	if suggestedMem != "4915Mi" {
-		t.Errorf("suggestedMemRequest = %q, want %q (node ratio allows memory increase)", suggestedMem, "4915Mi")
+	if suggestedMem != "4Gi" {
+		t.Errorf("suggestedMemRequest = %q, want %q (memory capped at current)", suggestedMem, "4Gi")
 	}
 
-	// Verify net savings are positive despite memory increase
+	// Verify savings are positive (CPU-only savings)
 	if rec.EstimatedSaving.MonthlySavingsUSD <= 0 {
-		t.Errorf("expected positive net savings, got %.2f", rec.EstimatedSaving.MonthlySavingsUSD)
+		t.Errorf("expected positive savings, got %.2f", rec.EstimatedSaving.MonthlySavingsUSD)
 	}
 }
 

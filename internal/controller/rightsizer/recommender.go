@@ -117,6 +117,13 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		suggestedMem = memFloor
 	}
 
+	// Never increase memory during a cost-saving downsize — the disruption
+	// of restarting pods to increase memory while reducing CPU is confusing
+	// and rarely worth it. Cap memory at its current value.
+	if suggestedMem > analysis.MemRequestBytes {
+		suggestedMem = analysis.MemRequestBytes
+	}
+
 	// Skip if nothing changes
 	if suggestedCPU == analysis.CPURequestMilli && suggestedMem == analysis.MemRequestBytes {
 		return nil
@@ -140,11 +147,6 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		return nil
 	}
 
-	memDirection := "→"
-	if suggestedMem > analysis.MemRequestBytes {
-		memDirection = "↑"
-	}
-
 	return &optimizer.Recommendation{
 		ID:              fmt.Sprintf("rightsize-combined-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
 		Type:            optimizer.RecommendationPodRightsize,
@@ -153,10 +155,10 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 		TargetKind:      pod.OwnerKind,
 		TargetName:      pod.OwnerName,
 		TargetNamespace: pod.Pod.Namespace,
-		Summary: fmt.Sprintf("Rightsize %s/%s: CPU %dm→%dm, memory %s%s%s (%d replicas)",
+		Summary: fmt.Sprintf("Rightsize %s/%s: CPU %dm→%dm, memory %s→%s (%d replicas)",
 			pod.Pod.Namespace, pod.OwnerName,
 			analysis.CPURequestMilli, suggestedCPU,
-			formatBytes(analysis.MemRequestBytes), memDirection, formatBytes(suggestedMem),
+			formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem),
 			replicaCount),
 		ActionSteps: []string{
 			fmt.Sprintf("Patch CPU request from %dm to %dm and memory from %s to %s",
