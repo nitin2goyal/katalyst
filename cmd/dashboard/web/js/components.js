@@ -119,7 +119,7 @@ export function modal(title, body, actions = '') {
 
 export function confirmDialog(message, onConfirm) {
   const overlay = document.createElement('div');
-  overlay.innerHTML = modal('Confirm', `<p>${escapeHtml(String(message))}</p>`,
+  overlay.innerHTML = modal('Confirm', `<div>${message}</div>`,
     `<button class="btn btn-gray" data-action="cancel">Cancel</button>
      <button class="btn btn-blue" data-action="confirm">Confirm</button>`);
   const el = overlay.firstElementChild;
