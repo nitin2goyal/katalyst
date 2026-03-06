@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, badge, toast, cardHeader } from '../components.js';
 
@@ -53,9 +53,9 @@ export async function renderMultiCluster(targetEl) {
     };
     const effColor = s => s >= 80 ? 'green' : s >= 50 ? 'amber' : 'red';
     $('#cluster-grid').innerHTML = clusters.length ? clusters.map(c => `
-      <div class="cluster-card" onclick="window.__switchCluster('${c.id || c.name}')">
+      <div class="cluster-card" onclick="window.__switchCluster('${encodeURIComponent(c.id || c.name)}')">
         <div class="cluster-card-header">
-          <span class="cluster-name">${c.name || ''}</span>
+          <span class="cluster-name">${esc(c.name || '')}</span>
           ${providerBadge(c.provider)}
         </div>
         <div class="cluster-card-stats">

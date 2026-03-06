@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, cardHeader, badge, exportCSV } from '../components.js';
 import { addCleanup } from '../router.js';
@@ -103,15 +103,15 @@ export async function renderSavings(targetEl) {
       const name = s.name || s.target || '';
       // Parse namespace/kind/name pattern for workload drilldown
       const parts = name.split('/');
-      if (parts.length === 3) return `<a href="#/workloads/${parts[0]}/${parts[1]}/${parts[2]}" class="btn btn-gray btn-sm">View</a>`;
+      if (parts.length === 3) return `<a href="#/workloads/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}/${encodeURIComponent(parts[2])}" class="btn btn-gray btn-sm">View</a>`;
       return `<a href="#/resources/recommendations" class="btn btn-gray btn-sm">View</a>`;
     };
     $('#savings-detail-body').innerHTML = list.length ? list.map(s => {
       const amt = s.estimatedSavings || s.savings || 0;
       return `<tr>
         <td>${badge(s.type || 'optimization', 'blue')}</td>
-        <td><strong>${s.name || s.target || ''}</strong></td>
-        <td style="white-space:normal;max-width:400px;line-height:1.5">${s.description || ''}</td>
+        <td><strong>${esc(s.name || s.target || '')}</strong></td>
+        <td style="white-space:normal;max-width:400px;line-height:1.5">${esc(s.description || '')}</td>
         <td class="value green">${fmt$(amt)}</td>
         <td>${impactBadge(amt)}</td>
         <td>${savingsAction(s)}</td>

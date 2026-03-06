@@ -33,8 +33,9 @@ export function toast(message, type = 'info') {
 
 export function breadcrumbs(items) {
   return `<nav class="breadcrumbs">${items.map((item, i) => {
-    if (i === items.length - 1) return `<span class="bc-current">${item.label}</span>`;
-    return `<a href="${item.href}" class="bc-link">${item.label}</a><span class="bc-sep">/</span>`;
+    const label = escapeHtml(String(item.label || ''));
+    if (i === items.length - 1) return `<span class="bc-current">${label}</span>`;
+    return `<a href="${item.href}" class="bc-link">${label}</a><span class="bc-sep">/</span>`;
   }).join('')}</nav>`;
 }
 
@@ -44,7 +45,7 @@ export function filterBar(options = {}) {
   const filterHtml = filters.map(f =>
     `<select class="filter-select" data-filter="${f.key}">
       <option value="">${f.label}</option>
-      ${f.options.map(o => `<option value="${o}">${o}</option>`).join('')}
+      ${f.options.map(o => `<option value="${escapeHtml(String(o))}">${escapeHtml(String(o))}</option>`).join('')}
     </select>`
   ).join('');
 
@@ -118,7 +119,7 @@ export function modal(title, body, actions = '') {
 
 export function confirmDialog(message, onConfirm) {
   const overlay = document.createElement('div');
-  overlay.innerHTML = modal('Confirm', `<p>${message}</p>`,
+  overlay.innerHTML = modal('Confirm', `<p>${escapeHtml(String(message))}</p>`,
     `<button class="btn btn-gray" data-action="cancel">Cancel</button>
      <button class="btn btn-blue" data-action="confirm">Confirm</button>`);
   const el = overlay.firstElementChild;

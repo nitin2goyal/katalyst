@@ -96,11 +96,11 @@ export function healthDot(status) {
 }
 
 export function badge(text, cls) {
-  return `<span class="badge badge-${cls}">${text || ''}</span>`;
+  return `<span class="badge badge-${cls}">${escapeHtml(String(text ?? ''))}</span>`;
 }
 
 export function errorMsg(msg) {
-  return `<div class="error-msg">${msg}</div>`;
+  return `<div class="error-msg">${escapeHtml(String(msg))}</div>`;
 }
 
 export function escapeHtml(str) {
@@ -108,6 +108,9 @@ export function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// Shorthand alias for use in template literals
+export const esc = escapeHtml;
 
 export function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();

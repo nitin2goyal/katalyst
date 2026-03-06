@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg, GiB, TiB } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg, esc, GiB, TiB } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, columnToggle, attachColumnToggle } from '../components.js';
 import { addCleanup } from '../router.js';
 
@@ -85,9 +85,9 @@ export async function renderNodes(targetEl) {
       });
       $('#ng-body').innerHTML = filtered.length ? filtered.map(ng => {
         const isEmpty = ng.isEmpty || emptyNames.has(ng.name) || emptyNames.has(ng.id);
-        return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" onclick="location.hash='#/nodegroups/${ng.id || ''}'">
-          <td>${ng.name || ng.id || ''}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}${ng.hasGPU ? ' ' + badge('GPU', 'purple') : ''}</td>
-          <td>${ng.instanceType || ''}</td>
+        return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" onclick="location.hash='#/nodegroups/${encodeURIComponent(ng.id || '')}'">
+          <td>${esc(ng.name || ng.id || '')}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}${ng.hasGPU ? ' ' + badge('GPU', 'purple') : ''}</td>
+          <td>${esc(ng.instanceType || '')}</td>
           <td style="font-size:0.8rem">${fmtDisk(ng.diskType, ng.diskSizeGB)}</td>
           <td>${ng.currentCount ?? 0}</td><td>${ng.minCount ?? ''}</td><td>${ng.maxCount ?? ''}</td>
           <td>${ng.totalGPUs ? ng.totalGPUs : '-'}</td>
@@ -97,7 +97,7 @@ export async function renderNodes(targetEl) {
           <td><strong class="${utilClass(ng.memUtilPct || 0)}">${fmtPct(ng.memUtilPct)}</strong></td>
           <td><strong class="${utilClass(ng.cpuAllocPct || 0)}">${fmtPct(ng.cpuAllocPct)}</strong></td>
           <td><strong class="${utilClass(ng.memAllocPct || 0)}">${fmtPct(ng.memAllocPct)}</strong></td>
-          <td>${ng.sprCluster || ''}</td>
+          <td>${esc(ng.sprCluster || '')}</td>
           <td>${fmt$(ng.monthlyCostUSD)}</td>
         </tr>`;
       }).join('') : '<tr><td colspan="15" style="color:var(--text-muted)">No node groups</td></tr>';
@@ -116,8 +116,8 @@ export async function renderNodes(targetEl) {
       });
     }
 
-    $('#node-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${n.name || ''}'">
-      <td>${n.name || ''}</td><td>${n.nodeGroup || ''}</td><td>${n.instanceType || ''}</td>
+    $('#node-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(n.name || '')}'">
+      <td>${esc(n.name || '')}</td><td>${esc(n.nodeGroup || '')}</td><td>${esc(n.instanceType || '')}</td>
       <td style="font-size:0.8rem">${fmtDisk(n.diskType, n.diskSizeGB)}</td>
       <td><strong class="${utilClass(n.diskUtilPct || 0)}">${fmtPct(n.diskUtilPct)}</strong></td>
       <td><strong class="${utilClass(n.cpuUtilPct || 0)}">${fmtPct(n.cpuUtilPct)}</strong></td>

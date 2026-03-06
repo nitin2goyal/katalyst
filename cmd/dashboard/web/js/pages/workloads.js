@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, esc } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge, columnToggle, attachColumnToggle } from '../components.js';
 import { addCleanup } from '../router.js';
 
@@ -105,10 +105,10 @@ export async function renderWorkloads(targetEl) {
       const pdbMinAvail = w.pdbMinAvailable != null ? w.pdbMinAvailable : '-';
       const pdbMaxUnavail = w.pdbMaxUnavailable != null ? w.pdbMaxUnavailable : '-';
       const pdbDisruptAllow = w.pdbDisruptionsAllowed != null ? w.pdbDisruptionsAllowed : '-';
-      return `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
-        <td>${w.namespace || ''}</td>
-        <td>${w.kind || ''}</td>
-        <td>${w.name || ''}</td>
+      return `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+        <td>${esc(w.namespace || '')}</td>
+        <td>${esc(w.kind || '')}</td>
+        <td>${esc(w.name || '')}</td>
         <td>${w.replicas ?? ''}</td>
         <td>${fmtCPU(w.cpuRequest)}</td>
         <td>${fmtCPU(w.cpuLimit)}</td>
@@ -123,8 +123,8 @@ export async function renderWorkloads(targetEl) {
         <td>${w.minReplicas ?? '-'}</td>
         <td>${w.maxReplicas ?? '-'}</td>
         <td>${w.autoscaler ? badge(w.autoscaler, 'blue') : '-'}</td>
-        <td>${w.xmx || '-'}</td>
-        <td title="${w.image || ''}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)">${shortImg(w.image)}</td>
+        <td>${esc(w.xmx || '-')}</td>
+        <td title="${esc(w.image || '')}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)">${esc(shortImg(w.image))}</td>
         <td>${effBadge(eff?.cpuEfficiencyPct, eff?.hasMetrics)}</td>
         <td>${effBadge(eff?.memEfficiencyPct, eff?.hasMetrics)}</td>
         <td>${eff ? '<span class="red">' + fmt$(eff.wastedCostUSD) + '</span>' : '-'}</td>

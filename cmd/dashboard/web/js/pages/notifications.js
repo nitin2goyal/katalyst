@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, timeAgo, errorMsg } from '../utils.js';
+import { $, toArray, timeAgo, errorMsg, esc } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, badge, cardHeader, emptyState } from '../components.js';
 
 const container = () => $('#page-container');
@@ -44,8 +44,8 @@ export async function renderNotifications() {
                 <span class="channel-type">${badge(ch.type || 'webhook', 'blue')}</span>
                 <span class="channel-status">${badge(ch.enabled ? 'active' : 'disabled', ch.enabled ? 'green' : 'gray')}</span>
               </div>
-              <div class="channel-name">${ch.name || ch.type || ''}</div>
-              <div class="channel-detail">${ch.target || ''}</div>
+              <div class="channel-name">${esc(ch.name || ch.type || '')}</div>
+              <div class="channel-detail">${esc(ch.target || '')}</div>
             </div>
           `).join('') : emptyState('&#128276;', 'No notification channels configured')}
         </div>
@@ -57,9 +57,9 @@ export async function renderNotifications() {
     $('#alerts-body').innerHTML = alerts.length ? alerts.map(a => `<tr>
       <td>${timeAgo(a.timestamp)}</td>
       <td>${badge(a.severity || 'info', severityClass(a.severity))}</td>
-      <td>${a.category || ''}</td>
-      <td>${a.message || ''}</td>
-      <td><strong>${a.target || ''}</strong></td>
+      <td>${esc(a.category || '')}</td>
+      <td>${esc(a.message || '')}</td>
+      <td><strong>${esc(a.target || '')}</strong></td>
       <td>${badge(a.status || 'unknown', statusClass(a.status))}</td>
     </tr>`).join('') : '<tr><td colspan="6" style="color:var(--text-muted)">No alerts</td></tr>';
     makeSortable($('#alerts-table'));

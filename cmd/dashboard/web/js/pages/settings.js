@@ -1,5 +1,5 @@
 import { api, apiPut, apiPost, apiDelete } from '../api.js';
-import { $, toArray, timeAgo, errorMsg } from '../utils.js';
+import { $, toArray, timeAgo, errorMsg, esc } from '../utils.js';
 import { skeleton, toast, badge, cardHeader, emptyState, modal, confirmDialog, makeSortable, attachPagination } from '../components.js';
 import { addCleanup } from '../router.js';
 
@@ -22,8 +22,8 @@ function renderChannelCard(ch) {
       <span class="channel-type">${channelTypeBadge(ch.type)}</span>
       <span class="channel-status">${badge(ch.enabled ? 'active' : 'disabled', ch.enabled ? 'green' : 'gray')}</span>
     </div>
-    <div class="channel-name">${ch.name || ch.type || ''}</div>
-    <div class="channel-detail" title="${ch.target || ''}">${truncateURL(ch.target)}</div>
+    <div class="channel-name">${esc(ch.name || ch.type || '')}</div>
+    <div class="channel-detail" title="${esc(ch.target || '')}">${esc(truncateURL(ch.target))}</div>
     ${!isStatic ? `<div class="channel-actions" style="margin-top:8px;display:flex;gap:8px">
       <button class="btn ${ch.enabled ? 'btn-gray' : 'btn-green'} btn-sm" data-toggle-channel="${ch.id}">
         ${ch.enabled ? 'Disable' : 'Enable'}
@@ -109,9 +109,9 @@ export async function renderSettings() {
       <div class="card">
         <h2>Cluster Information</h2>
         <div class="detail-list">
-          <div class="detail-item"><span class="detail-label">Cloud Provider</span><span>${(config.cloudProvider || 'unknown').toUpperCase()}</span></div>
-          <div class="detail-item"><span class="detail-label">Region</span><span>${config.region || 'unknown'}</span></div>
-          <div class="detail-item"><span class="detail-label">Cluster Name</span><span>${config.clusterName || 'unknown'}</span></div>
+          <div class="detail-item"><span class="detail-label">Cloud Provider</span><span>${esc((config.cloudProvider || 'unknown').toUpperCase())}</span></div>
+          <div class="detail-item"><span class="detail-label">Region</span><span>${esc(config.region || 'unknown')}</span></div>
+          <div class="detail-item"><span class="detail-label">Cluster Name</span><span>${esc(config.clusterName || 'unknown')}</span></div>
         </div>
       </div>
 
@@ -179,10 +179,10 @@ export async function renderSettings() {
             <div class="table-wrap"><table id="policies-table">
               <thead><tr><th>Policy</th><th>Type</th><th>Target</th><th>Description</th><th>Status</th></tr></thead>
               <tbody>${policies.map(p => `<tr>
-                <td style="font-weight:600">${p.name}</td>
+                <td style="font-weight:600">${esc(p.name)}</td>
                 <td>${badge(p.type, 'blue')}</td>
-                <td><code class="code-inline">${p.target}</code></td>
-                <td style="white-space:normal;color:var(--text-muted);font-size:12px">${p.description}</td>
+                <td><code class="code-inline">${esc(p.target)}</code></td>
+                <td style="white-space:normal;color:var(--text-muted);font-size:12px">${esc(p.description)}</td>
                 <td>${p.enabled ? badge('Active', 'green') : badge('Inactive', 'gray')}</td>
               </tr>`).join('')}</tbody>
             </table></div>
@@ -208,9 +208,9 @@ export async function renderSettings() {
               return `<tr>
                 <td style="white-space:nowrap">${timeAgo(e.timestamp)}</td>
                 <td>${badge(e.action || '', actionColor)}</td>
-                <td><code class="code-inline">${e.target || ''}</code></td>
-                <td style="white-space:normal;color:var(--text-muted);font-size:12px">${e.details || ''}</td>
-                <td>${e.user || ''}</td>
+                <td><code class="code-inline">${esc(e.target || '')}</code></td>
+                <td style="white-space:normal;color:var(--text-muted);font-size:12px">${esc(e.details || '')}</td>
+                <td>${esc(e.user || '')}</td>
               </tr>`;
             }).join('')}</tbody>
           </table></div>
@@ -413,18 +413,18 @@ export async function renderSettings() {
         const labelEntries = Object.entries(labels);
         return `<div class="template-card">
           <div class="template-header">
-            <span class="template-name">${t.name}</span>
+            <span class="template-name">${esc(t.name)}</span>
             ${badge(t.capacityType || 'on-demand', 'blue')}
           </div>
-          <div class="template-desc">${t.description || ''}</div>
+          <div class="template-desc">${esc(t.description || '')}</div>
           <div class="template-details">
-            <div class="template-row"><span class="template-label">Instance Families</span><span>${families}</span></div>
-            <div class="template-row"><span class="template-label">Architecture</span><span>${t.architecture || 'amd64'}</span></div>
+            <div class="template-row"><span class="template-label">Instance Families</span><span>${esc(families)}</span></div>
+            <div class="template-row"><span class="template-label">Architecture</span><span>${esc(t.architecture || 'amd64')}</span></div>
             <div class="template-row"><span class="template-label">Node Range</span><span>${t.minNodes} - ${t.maxNodes}</span></div>
-            <div class="template-row"><span class="template-label">Zones</span><span>${zones}</span></div>
-            ${excluded.length ? `<div class="template-row"><span class="template-label">Excluded Types</span><span class="red">${excluded.join(', ')}</span></div>` : ''}
-            ${taints.length ? `<div class="template-row"><span class="template-label">Taints</span><span>${taints.map(t => `<code class="code-xs">${t.key}=${t.value}:${t.effect}</code>`).join(' ')}</span></div>` : ''}
-            ${labelEntries.length ? `<div class="template-row"><span class="template-label">Labels</span><span>${labelEntries.map(([k, v]) => `<code class="code-xs">${k}=${v}</code>`).join(' ')}</span></div>` : ''}
+            <div class="template-row"><span class="template-label">Zones</span><span>${esc(zones)}</span></div>
+            ${excluded.length ? `<div class="template-row"><span class="template-label">Excluded Types</span><span class="red">${esc(excluded.join(', '))}</span></div>` : ''}
+            ${taints.length ? `<div class="template-row"><span class="template-label">Taints</span><span>${taints.map(t => `<code class="code-xs">${esc(t.key)}=${esc(t.value)}:${esc(t.effect)}</code>`).join(' ')}</span></div>` : ''}
+            ${labelEntries.length ? `<div class="template-row"><span class="template-label">Labels</span><span>${labelEntries.map(([k, v]) => `<code class="code-xs">${esc(k)}=${esc(v)}</code>`).join(' ')}</span></div>` : ''}
           </div>
         </div>`;
       }).join('');

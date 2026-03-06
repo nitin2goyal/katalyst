@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, utilBar, badge, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, utilBar, badge, errorMsg, esc } from '../utils.js';
 import { skeleton, breadcrumbs, makeSortable } from '../components.js';
 
 const container = () => $('#page-container');
@@ -20,10 +20,10 @@ export async function renderNodeGroupDetail(params) {
         { label: 'Nodes', href: '#/nodes' },
         { label: ng.name || id }
       ])}
-      <div class="page-header"><h1>${ng.name || id}</h1><p>Node group detail view</p></div>
+      <div class="page-header"><h1>${esc(ng.name || id)}</h1><p>Node group detail view</p></div>
       <div class="kpi-grid">
-        <div class="kpi-card"><div class="label">Instance Type</div><div class="value">${ng.instanceType || ''}</div></div>
-        <div class="kpi-card"><div class="label">Family</div><div class="value">${ng.instanceFamily || ''}</div></div>
+        <div class="kpi-card"><div class="label">Instance Type</div><div class="value">${esc(ng.instanceType || '')}</div></div>
+        <div class="kpi-card"><div class="label">Family</div><div class="value">${esc(ng.instanceFamily || '')}</div></div>
         <div class="kpi-card"><div class="label">Node Count</div><div class="value blue">${ng.currentCount ?? nodeList.length}</div><div class="sub">min: ${ng.minCount ?? '?'} / max: ${ng.maxCount ?? '?'}</div></div>
         <div class="kpi-card"><div class="label">CPU Utilization</div><div class="value">${fmtPct(ng.cpuUtilPct)}</div></div>
         <div class="kpi-card"><div class="label">Memory Utilization</div><div class="value">${fmtPct(ng.memUtilPct)}</div></div>
@@ -46,8 +46,8 @@ export async function renderNodeGroupDetail(params) {
         </table></div>
       </div>`;
 
-    $('#ng-nodes-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${n.name || ''}'">
-      <td>${n.name || ''}</td><td>${n.instanceType || ''}</td>
+    $('#ng-nodes-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(n.name || '')}'">
+      <td>${esc(n.name || '')}</td><td>${esc(n.instanceType || '')}</td>
       <td>${utilBar(n.cpuUtilPct)}</td><td>${utilBar(n.memUtilPct)}</td>
       <td><span class="blue">${n.appPodCount ?? ''}</span></td>
       <td><span style="color:var(--text-muted)">${n.systemPodCount ?? ''}</span></td>

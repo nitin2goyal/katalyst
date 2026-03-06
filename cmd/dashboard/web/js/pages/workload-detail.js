@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, escapeHtml } from '../utils.js';
+import { $, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, escapeHtml, esc } from '../utils.js';
 import { skeleton, breadcrumbs, tabs, attachTabHandlers, badge } from '../components.js';
 import { makeChart, destroyCharts } from '../charts.js';
 
@@ -28,7 +28,7 @@ export async function renderWorkloadDetail(params) {
         { label: 'Workloads', href: '#/workloads' },
         { label: `${ns}/${name}` }
       ])}
-      <div class="page-header"><h1>${name}</h1><p>${kind} in ${ns}</p></div>
+      <div class="page-header"><h1>${esc(name)}</h1><p>${esc(kind)} in ${esc(ns)}</p></div>
       ${isInactive ? `<div class="card" style="background:var(--bg);border-left:4px solid var(--text-muted);padding:16px 20px;margin-bottom:20px">
         <strong>Inactive workload</strong> — This ${kind} has 0 replicas and no resource allocation. It may be scaled down, completed, or superseded by a newer revision.
       </div>` : ''}
@@ -36,7 +36,7 @@ export async function renderWorkloadDetail(params) {
         <div class="kpi-card"><div class="label">Replicas</div><div class="value ${isInactive ? '' : 'blue'}">${wl.replicas ?? '?'}</div></div>
         <div class="kpi-card"><div class="label">Total CPU</div><div class="value">${isInactive ? '—' : fmtCPU(cpuMillis)}</div></div>
         <div class="kpi-card"><div class="label">Total Memory</div><div class="value">${isInactive ? '—' : fmtMem(memBytes)}</div></div>
-        <div class="kpi-card"><div class="label">Namespace</div><div class="value">${ns}</div></div>
+        <div class="kpi-card"><div class="label">Namespace</div><div class="value">${esc(ns)}</div></div>
       </div>
       <div class="card" id="wl-tabs-card">
         ${tabs([
@@ -59,13 +59,13 @@ export async function renderWorkloadDetail(params) {
             </div>
             <div><h3>Details</h3>
               <div class="detail-list">
-                <div class="detail-item"><span class="detail-label">Kind</span><span>${kind}</span></div>
-                <div class="detail-item"><span class="detail-label">Namespace</span><span>${ns}</span></div>
+                <div class="detail-item"><span class="detail-label">Kind</span><span>${esc(kind)}</span></div>
+                <div class="detail-item"><span class="detail-label">Namespace</span><span>${esc(ns)}</span></div>
                 <div class="detail-item"><span class="detail-label">Replicas</span><span>${wl.replicas ?? '?'}</span></div>
-                <div class="detail-item"><span class="detail-label">CPU Request</span><span>${wl.cpuRequest || fmtCPU(cpuMillis)}</span></div>
-                <div class="detail-item"><span class="detail-label">Memory Request</span><span>${wl.memRequest || fmtMem(memBytes)}</span></div>
-                <div class="detail-item"><span class="detail-label">CPU Limit</span><span>${wl.cpuLimit || '—'}</span></div>
-                <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${wl.memLimit || '—'}</span></div>
+                <div class="detail-item"><span class="detail-label">CPU Request</span><span>${esc(wl.cpuRequest || fmtCPU(cpuMillis))}</span></div>
+                <div class="detail-item"><span class="detail-label">Memory Request</span><span>${esc(wl.memRequest || fmtMem(memBytes))}</span></div>
+                <div class="detail-item"><span class="detail-label">CPU Limit</span><span>${esc(wl.cpuLimit || '—')}</span></div>
+                <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${esc(wl.memLimit || '—')}</span></div>
               </div>
             </div>
           </div>`;
@@ -108,19 +108,19 @@ export async function renderWorkloadDetail(params) {
               <div class="card" style="border:2px solid var(--border)">
                 <h3>Current Resources</h3>
                 <div class="detail-list">
-                  <div class="detail-item"><span class="detail-label">CPU Request</span><span>${cur.cpuRequest || '?'}</span></div>
-                  <div class="detail-item"><span class="detail-label">CPU Limit</span><span>${cur.cpuLimit || '?'}</span></div>
-                  <div class="detail-item"><span class="detail-label">Memory Request</span><span>${cur.memRequest || '?'}</span></div>
-                  <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${cur.memLimit || '?'}</span></div>
+                  <div class="detail-item"><span class="detail-label">CPU Request</span><span>${esc(cur.cpuRequest || '?')}</span></div>
+                  <div class="detail-item"><span class="detail-label">CPU Limit</span><span>${esc(cur.cpuLimit || '?')}</span></div>
+                  <div class="detail-item"><span class="detail-label">Memory Request</span><span>${esc(cur.memRequest || '?')}</span></div>
+                  <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${esc(cur.memLimit || '?')}</span></div>
                 </div>
               </div>
               <div class="card" style="border:2px solid var(--green)">
                 <h3>Recommended ${rs.estimatedSavings ? `<span class="value green" style="font-size:14px">${fmt$(rs.estimatedSavings)}/mo savings</span>` : ''}</h3>
                 <div class="detail-list">
-                  <div class="detail-item"><span class="detail-label">CPU Request</span><span>${rec.cpuRequest || '?'}</span></div>
-                  <div class="detail-item"><span class="detail-label">CPU Limit</span><span>${rec.cpuLimit || '?'}</span></div>
-                  <div class="detail-item"><span class="detail-label">Memory Request</span><span>${rec.memRequest || '?'}</span></div>
-                  <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${rec.memLimit || '?'}</span></div>
+                  <div class="detail-item"><span class="detail-label">CPU Request</span><span>${esc(rec.cpuRequest || '?')}</span></div>
+                  <div class="detail-item"><span class="detail-label">CPU Limit</span><span>${esc(rec.cpuLimit || '?')}</span></div>
+                  <div class="detail-item"><span class="detail-label">Memory Request</span><span>${esc(rec.memRequest || '?')}</span></div>
+                  <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${esc(rec.memLimit || '?')}</span></div>
                 </div>
               </div>
             </div>

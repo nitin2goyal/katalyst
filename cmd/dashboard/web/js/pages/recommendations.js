@@ -1,5 +1,5 @@
 import { api, apiPost } from '../api.js';
-import { $, toArray, fmt$, fmtPct, errorMsg, escapeHtml } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, errorMsg, escapeHtml, esc } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, badge, cardHeader, toast } from '../components.js';
 import { computeRecommendations } from '../recommendations-engine.js';
 
@@ -154,7 +154,7 @@ export async function renderRecsTab(targetEl) {
               </div>
               <div style="margin-top:12px"><strong>Recs by type:</strong> ${Object.entries(recsByType).map(([t, c]) => `${t}: ${c}`).join(' | ')}</div>
               <div><strong>Savings by type:</strong> ${Object.entries(savingsByType).map(([t, s]) => `${t}: ${fmt$(s)}`).join(' | ')}</div>
-              <div style="margin-top:8px;color:var(--text-muted)">Top 5 nodes by cost: ${nodeList.sort((a, b) => (b.hourlyCostUSD || 0) - (a.hourlyCostUSD || 0)).slice(0, 5).map(n => `${n.name}: $${((n.hourlyCostUSD || 0) * 730.5).toFixed(0)}/mo (CPU: ${((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100).toFixed(0)}%, Mem: ${((n.memUsed || 0) / (n.memCapacity || 1) * 100).toFixed(0)}%)`).join(' | ')}</div>
+              <div style="margin-top:8px;color:var(--text-muted)">Top 5 nodes by cost: ${nodeList.sort((a, b) => (b.hourlyCostUSD || 0) - (a.hourlyCostUSD || 0)).slice(0, 5).map(n => `${esc(n.name)}: $${((n.hourlyCostUSD || 0) * 730.5).toFixed(0)}/mo (CPU: ${((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100).toFixed(0)}%, Mem: ${((n.memUsed || 0) / (n.memCapacity || 1) * 100).toFixed(0)}%)`).join(' | ')}</div>
               ${debugData ? `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
                 <strong>Backend Engine Debug (/api/v1/recommendations/debug):</strong>
                 <pre style="font-size:11px;overflow-x:auto;margin-top:4px;color:var(--text-muted)">${escapeHtml(JSON.stringify(debugData, null, 2))}</pre>

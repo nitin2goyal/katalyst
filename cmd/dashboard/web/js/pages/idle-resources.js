@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, fmt$, fmtPct, errorMsg } from '../utils.js';
+import { $, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { skeleton, makeSortable, exportCSV, cardHeader, badge } from '../components.js';
 
 export async function renderIdleResources(targetEl) {
@@ -26,13 +26,13 @@ export async function renderIdleResources(targetEl) {
         <div class="table-wrap"><table id="idle-nodes-table">
           <thead><tr><th>Node</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>Idle Since</th><th>Wasted Cost</th><th>Reason</th></tr></thead>
           <tbody>${nodes.length ? nodes.map(n => `<tr class="warning-row">
-            <td><a href="#/nodes/${n.name}" class="link">${n.name}</a></td>
-            <td>${n.instanceType || ''}</td>
+            <td><a href="#/nodes/${encodeURIComponent(n.name)}" class="link">${esc(n.name)}</a></td>
+            <td>${esc(n.instanceType || '')}</td>
             <td>${badge(fmtPct(n.cpuUtilPct), n.cpuUtilPct < 10 ? 'red' : 'amber')}</td>
             <td>${badge(fmtPct(n.memUtilPct), n.memUtilPct < 15 ? 'red' : 'amber')}</td>
             <td>${n.idleSinceHrs}h</td>
             <td class="red">${fmt$(n.wastedCostUSD)}/mo</td>
-            <td style="white-space:normal;max-width:300px;font-size:12px;color:var(--text-muted)">${n.reason || ''}</td>
+            <td style="white-space:normal;max-width:300px;font-size:12px;color:var(--text-muted)">${esc(n.reason || '')}</td>
           </tr>`).join('') : '<tr><td colspan="7" style="color:var(--text-muted)">No idle nodes detected</td></tr>'}</tbody>
         </table></div>
       </div>
@@ -42,15 +42,15 @@ export async function renderIdleResources(targetEl) {
         <div class="table-wrap"><table id="idle-wl-table">
           <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>CPU Used</th><th>Mem Used</th><th>Replicas</th><th>Idle Since</th><th>Wasted</th><th>Reason</th></tr></thead>
           <tbody>${workloads.length ? workloads.map(w => `<tr class="warning-row">
-            <td>${w.namespace}</td>
-            <td>${w.kind}</td>
-            <td><a href="#/workloads/${w.namespace}/${w.kind}/${w.name}" class="link">${w.name}</a></td>
+            <td>${esc(w.namespace)}</td>
+            <td>${esc(w.kind)}</td>
+            <td><a href="#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}" class="link">${esc(w.name)}</a></td>
             <td>${badge(fmtPct(w.cpuUsedPct), w.cpuUsedPct < 10 ? 'red' : 'amber')}</td>
             <td>${badge(fmtPct(w.memUsedPct), w.memUsedPct < 15 ? 'red' : 'amber')}</td>
             <td>${w.replicas}</td>
             <td>${w.idleSinceHrs}h</td>
             <td class="red">${fmt$(w.wastedCostUSD)}/mo</td>
-            <td style="white-space:normal;max-width:300px;font-size:12px;color:var(--text-muted)">${w.reason || ''}</td>
+            <td style="white-space:normal;max-width:300px;font-size:12px;color:var(--text-muted)">${esc(w.reason || '')}</td>
           </tr>`).join('') : '<tr><td colspan="9" style="color:var(--text-muted)">No idle workloads detected</td></tr>'}</tbody>
         </table></div>
       </div>
@@ -61,8 +61,8 @@ export async function renderIdleResources(targetEl) {
         <div class="table-wrap"><table id="pvc-table">
           <thead><tr><th>Name</th><th>Namespace</th><th>Size</th><th>Age</th><th>Monthly Cost</th></tr></thead>
           <tbody>${pvcs.length ? pvcs.map(p => `<tr class="warning-row">
-            <td>${p.name}</td>
-            <td>${p.namespace}</td>
+            <td>${esc(p.name)}</td>
+            <td>${esc(p.namespace)}</td>
             <td>${p.sizeGB} GB</td>
             <td>${Math.floor(p.ageHours / 24)}d</td>
             <td class="red">${fmt$(p.monthlyCostUSD)}</td>

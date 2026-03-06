@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeBarChart, makeAreaChart, makeDonutChart, destroyCharts } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, cardHeader, dateRangePicker, badge, exportCSV } from '../components.js';
 import { addCleanup } from '../router.js';
@@ -177,7 +177,7 @@ async function renderCostDashboard(targetEl) {
             ? '<span class="badge badge-blue">New</span>'
             : `${arrow} ${fmtPct(Math.abs(change))}`;
           return `<tr class="clickable-row" onclick="location.hash='#/cost/workload?ns=${encodeURIComponent(n.namespace)}'">
-            <td><a href="#/cost/workload?ns=${encodeURIComponent(n.namespace)}" class="link"><strong>${n.namespace || ''}</strong></a></td>
+            <td><a href="#/cost/workload?ns=${encodeURIComponent(n.namespace)}" class="link"><strong>${esc(n.namespace || '')}</strong></a></td>
             <td>${fmt$(n.previousCost)}</td>
             <td>${fmt$(n.currentCost)}</td>
             <td class="${changeClass}">${changeDisplay}</td>
@@ -195,11 +195,11 @@ async function renderCostDashboard(targetEl) {
         const name = s.name || s.target || '';
         const parts = name.split('/');
         const action = parts.length === 3
-          ? `<a href="#/workloads/${parts[0]}/${parts[1]}/${parts[2]}" class="btn btn-gray btn-sm">View</a>`
+          ? `<a href="#/workloads/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}/${encodeURIComponent(parts[2])}" class="btn btn-gray btn-sm">View</a>`
           : `<a href="#/resources/recommendations" class="btn btn-gray btn-sm">View</a>`;
         return `<tr class="savings-row">
           <td>${badge(s.type || 'optimization', 'green')}</td>
-          <td style="white-space:normal;max-width:400px;line-height:1.5">${s.description || s.name || ''}</td>
+          <td style="white-space:normal;max-width:400px;line-height:1.5">${esc(s.description || s.name || '')}</td>
           <td class="value green">${fmt$(s.estimatedSavings || s.savings)}</td>
           <td>${action}</td>
         </tr>`;
@@ -210,8 +210,8 @@ async function renderCostDashboard(targetEl) {
 
     // Workload cost table
     const wlList = toArray(byWl, 'workloads');
-    $('#wl-cost-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
-      <td>${w.namespace || ''}</td><td>${w.kind || ''}</td><td>${w.name || ''}</td>
+    $('#wl-cost-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+      <td>${esc(w.namespace || '')}</td><td>${esc(w.kind || '')}</td><td>${esc(w.name || '')}</td>
       <td><strong>${fmt$(w.monthlyCostUSD)}</strong></td>
     </tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted)">No workload cost data</td></tr>';
     makeSortable($('#wl-cost-table'));
@@ -281,7 +281,7 @@ async function renderNamespaceBreakdown(targetEl) {
     }
 
     $('#ns-cost-body').innerHTML = nsEntries.length ? nsEntries.map(([ns, cost]) => `<tr class="clickable-row" onclick="location.hash='#/cost/workload?ns=${encodeURIComponent(ns)}'">
-      <td><a href="#/cost/workload?ns=${encodeURIComponent(ns)}" class="link"><strong>${ns}</strong></a></td>
+      <td><a href="#/cost/workload?ns=${encodeURIComponent(ns)}" class="link"><strong>${esc(ns)}</strong></a></td>
       <td>${fmt$(cost)}</td>
       <td>${fmtPct(total > 0 ? cost / total * 100 : 0)}</td>
     </tr>`).join('') : '<tr><td colspan="3" style="color:var(--text-muted)">No namespace cost data</td></tr>';
@@ -314,13 +314,13 @@ async function renderWorkloadBreakdown(targetEl) {
     const total = wlList.reduce((s, w) => s + (w.monthlyCostUSD || 0), 0);
 
     targetEl.innerHTML = `
-      ${filterNs ? `<div class="breadcrumbs"><a href="#/cost/namespace" class="bc-link">Namespaces</a><span class="bc-sep">/</span><span class="bc-current">${filterNs}</span></div>` : ''}
+      ${filterNs ? `<div class="breadcrumbs"><a href="#/cost/namespace" class="bc-link">Namespaces</a><span class="bc-sep">/</span><span class="bc-current">${esc(filterNs)}</span></div>` : ''}
       <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr)">
-        <div class="kpi-card"><div class="label">${filterNs ? filterNs + ' Cost' : 'Total Monthly Cost'}</div><div class="value">${fmt$(total)}</div></div>
+        <div class="kpi-card"><div class="label">${filterNs ? esc(filterNs) + ' Cost' : 'Total Monthly Cost'}</div><div class="value">${fmt$(total)}</div></div>
         <div class="kpi-card"><div class="label">Workloads</div><div class="value">${wlList.length}</div></div>
       </div>
       <div class="card">
-        ${cardHeader(filterNs ? `Workloads in ${filterNs}` : 'Cost by Workload', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlBreakdownCSV()">Export CSV</button>')}
+        ${cardHeader(filterNs ? `Workloads in ${esc(filterNs)}` : 'Cost by Workload', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlBreakdownCSV()">Export CSV</button>')}
         ${filterBar({ placeholder: 'Search workloads...', filters: [] })}
         <div class="table-wrap"><table id="wl-breakdown-table">
           <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Monthly Cost</th><th>% of Total</th></tr></thead>
@@ -328,8 +328,8 @@ async function renderWorkloadBreakdown(targetEl) {
         </table></div>
       </div>`;
 
-    $('#wl-breakdown-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${w.namespace}/${w.kind}/${w.name}'">
-      <td>${w.namespace || ''}</td><td>${w.kind || ''}</td><td>${w.name || ''}</td>
+    $('#wl-breakdown-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+      <td>${esc(w.namespace || '')}</td><td>${esc(w.kind || '')}</td><td>${esc(w.name || '')}</td>
       <td><strong>${fmt$(w.monthlyCostUSD)}</strong></td>
       <td>${fmtPct(total > 0 ? (w.monthlyCostUSD || 0) / total * 100 : 0)}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No workload cost data</td></tr>';

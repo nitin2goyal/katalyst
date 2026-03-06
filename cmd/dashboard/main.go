@@ -65,9 +65,27 @@ func main() {
 		w.Write(indexHTML)
 	})
 
+	// Security headers middleware
+	handler := securityHeaders(mux)
+
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("KOptimizer Dashboard listening on %s (API proxy -> %s)", addr, *apiURL)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; "+
+				"connect-src 'self'; "+
+				"font-src 'self'")
+		next.ServeHTTP(w, r)
+	})
 }

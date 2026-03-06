@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, utilBar, healthDot, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, utilBar, healthDot, errorMsg, esc } from '../utils.js';
 import { renderGauge, destroyCharts } from '../charts.js';
 import { skeleton, makeSortable, badge, cardHeader } from '../components.js';
 import { addCleanup } from '../router.js';
@@ -70,7 +70,7 @@ export async function renderOverview() {
                   <span class="score-cat-val ${scoreColor(catScore)}">${catScore}/10</span>
                 </div>
                 <div class="score-cat-bar"><div class="score-cat-fill ${scoreColor(catScore)}" style="width:${pct}%"></div></div>
-                <div class="score-cat-detail">${c.details || ''}</div>
+                <div class="score-cat-detail">${esc(c.details || '')}</div>
               </div>`;
             }).join('')}
           </div>
@@ -173,15 +173,15 @@ export async function renderOverview() {
     } else {
       hg.innerHTML = names.map(n => {
         const st = controllerStatuses[n];
-        return `<div class="health-item">${healthDot(st)}${n}</div>`;
+        return `<div class="health-item">${healthDot(st)}${esc(n)}</div>`;
       }).join('');
     }
 
     // Node groups mini-table (data pre-fetched in initial Promise.all)
     {
       const list = toArray(ngsData, 'nodeGroups');
-      $('#overview-ng-body').innerHTML = list.length ? list.slice(0, 10).map(ng => `<tr class="clickable-row" onclick="location.hash='#/nodegroups/${ng.id || ''}'">
-        <td>${ng.name || ''}</td><td>${ng.instanceType || ''}</td>
+      $('#overview-ng-body').innerHTML = list.length ? list.slice(0, 10).map(ng => `<tr class="clickable-row" onclick="location.hash='#/nodegroups/${encodeURIComponent(ng.id || '')}'">
+        <td>${esc(ng.name || '')}</td><td>${esc(ng.instanceType || '')}</td>
         <td>${ng.currentCount ?? 0}</td>
         <td>${utilBar(ng.cpuUtilPct)}</td><td>${utilBar(ng.memUtilPct)}</td>
         <td>${fmt$(ng.monthlyCostUSD)}</td>

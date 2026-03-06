@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, utilBar, errorMsg, escapeHtml, badge, timeAgo, fmtCPUm, podStatusColor } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, utilBar, errorMsg, escapeHtml, esc, badge, timeAgo, fmtCPUm, podStatusColor } from '../utils.js';
 import { skeleton, makeSortable, exportCSV, cardHeader } from '../components.js';
 
 const GPU_TABS = [
@@ -83,8 +83,8 @@ async function renderNodesTab(contentEl) {
           <tbody id="gpu-rec-body"></tbody>
         </table></div></div>` : ''}`;
 
-    $('#gpu-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${n.name || ''}'">
-      <td>${n.name || ''}</td><td>${n.instanceType || ''}</td>
+    $('#gpu-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(n.name || '')}'">
+      <td>${esc(n.name || '')}</td><td>${esc(n.instanceType || '')}</td>
       <td>${renderNodeStatusBadges(n)}</td>
       <td>${n.gpuCount ?? 0}</td><td>${n.gpuUsed ?? 0}</td>
       <td>${n.cpuHeadroomMillis ? n.cpuHeadroomMillis + 'm' : '-'}</td>
@@ -94,7 +94,7 @@ async function renderNodesTab(contentEl) {
 
     if (recList.length) {
       $('#gpu-rec-body').innerHTML = recList.map(r => `<tr>
-        <td>${badge(r.type || '', 'purple')}</td><td>${r.target || r.node || ''}</td>
+        <td>${badge(r.type || '', 'purple')}</td><td>${esc(r.target || r.node || '')}</td>
         <td>${escapeHtml(r.description || '')}</td><td class="value green">${fmt$(r.estimatedSavings)}</td>
       </tr>`).join('');
       makeSortable($('#gpu-rec-table'));

@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, errorMsg } from '../utils.js';
+import { $, errorMsg, esc } from '../utils.js';
 import { skeleton, badge, cardHeader } from '../components.js';
 
 const container = () => $('#page-container');
@@ -30,10 +30,10 @@ export async function renderPolicies() {
         <div class="table-wrap"><table id="policies-table">
           <thead><tr><th>Policy</th><th>Type</th><th>Target</th><th>Description</th><th>Status</th></tr></thead>
           <tbody>${policies.length ? policies.map(p => `<tr>
-            <td style="font-weight:600">${p.name}</td>
+            <td style="font-weight:600">${esc(p.name)}</td>
             <td>${badge(p.type, 'blue')}</td>
-            <td><code style="font-size:12px;background:var(--bg);padding:2px 6px;border-radius:4px">${p.target}</code></td>
-            <td style="white-space:normal;color:var(--text-muted);font-size:12px">${p.description}</td>
+            <td><code style="font-size:12px;background:var(--bg);padding:2px 6px;border-radius:4px">${esc(p.target)}</code></td>
+            <td style="white-space:normal;color:var(--text-muted);font-size:12px">${esc(p.description)}</td>
             <td>${p.enabled ? badge('Active', 'green') : badge('Inactive', 'gray')}</td>
           </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted)">No policies configured</td></tr>'}</tbody>
         </table></div>
@@ -50,18 +50,18 @@ export async function renderPolicies() {
       const labelEntries = Object.entries(labels);
       return `<div class="template-card">
         <div class="template-header">
-          <span class="template-name">${t.name}</span>
+          <span class="template-name">${esc(t.name)}</span>
           ${badge(t.capacityType || 'on-demand', 'blue')}
         </div>
-        <div class="template-desc">${t.description || ''}</div>
+        <div class="template-desc">${esc(t.description || '')}</div>
         <div class="template-details">
-          <div class="template-row"><span class="template-label">Instance Families</span><span>${families}</span></div>
-          <div class="template-row"><span class="template-label">Architecture</span><span>${t.architecture || 'amd64'}</span></div>
+          <div class="template-row"><span class="template-label">Instance Families</span><span>${esc(families)}</span></div>
+          <div class="template-row"><span class="template-label">Architecture</span><span>${esc(t.architecture || 'amd64')}</span></div>
           <div class="template-row"><span class="template-label">Node Range</span><span>${t.minNodes} - ${t.maxNodes}</span></div>
-          <div class="template-row"><span class="template-label">Zones</span><span>${zones}</span></div>
-          ${excluded.length ? `<div class="template-row"><span class="template-label">Excluded Types</span><span class="red">${excluded.join(', ')}</span></div>` : ''}
-          ${taints.length ? `<div class="template-row"><span class="template-label">Taints</span><span>${taints.map(t => `<code style="font-size:11px;background:var(--bg);padding:1px 4px;border-radius:3px">${t.key}=${t.value}:${t.effect}</code>`).join(' ')}</span></div>` : ''}
-          ${labelEntries.length ? `<div class="template-row"><span class="template-label">Labels</span><span>${labelEntries.map(([k, v]) => `<code style="font-size:11px;background:var(--bg);padding:1px 4px;border-radius:3px">${k}=${v}</code>`).join(' ')}</span></div>` : ''}
+          <div class="template-row"><span class="template-label">Zones</span><span>${esc(zones)}</span></div>
+          ${excluded.length ? `<div class="template-row"><span class="template-label">Excluded Types</span><span class="red">${esc(excluded.join(', '))}</span></div>` : ''}
+          ${taints.length ? `<div class="template-row"><span class="template-label">Taints</span><span>${taints.map(t => `<code style="font-size:11px;background:var(--bg);padding:1px 4px;border-radius:3px">${esc(t.key)}=${esc(t.value)}:${esc(t.effect)}</code>`).join(' ')}</span></div>` : ''}
+          ${labelEntries.length ? `<div class="template-row"><span class="template-label">Labels</span><span>${labelEntries.map(([k, v]) => `<code style="font-size:11px;background:var(--bg);padding:1px 4px;border-radius:3px">${esc(k)}=${esc(v)}</code>`).join(' ')}</span></div>` : ''}
         </div>
       </div>`;
     }).join('');

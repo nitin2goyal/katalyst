@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, cardHeader, badge, exportCSV } from '../components.js';
 
@@ -75,10 +75,10 @@ export async function renderNetworkCost(targetEl) {
     $('#net-body').innerHTML = flows.length ? flows.map(f => {
       const isCross = f.sourceAZ !== f.destAZ;
       return `<tr${isCross ? ' class="warning-row"' : ''}>
-        <td>${f.namespace || ''}</td>
-        <td><strong>${f.workload || ''}</strong></td>
-        <td>${f.sourceAZ || ''}</td>
-        <td>${f.destAZ || ''}</td>
+        <td>${esc(f.namespace || '')}</td>
+        <td><strong>${esc(f.workload || '')}</strong></td>
+        <td>${esc(f.sourceAZ || '')}</td>
+        <td>${esc(f.destAZ || '')}</td>
         <td>${f.trafficGB ? f.trafficGB.toFixed(1) + ' GB' : '-'}</td>
         <td>${fmt$(f.monthlyCostUSD)}</td>
         <td>${badge(isCross ? 'cross-az' : 'in-az', isCross ? 'red' : 'green')}</td>

@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, utilBar, badge, errorMsg, GiB, parseCPUm, parseMemB, fmtCPUm, fmtMemB, podStatusColor } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, utilBar, badge, errorMsg, esc, GiB, parseCPUm, parseMemB, fmtCPUm, fmtMemB, podStatusColor } from '../utils.js';
 import { skeleton, breadcrumbs, makeSortable } from '../components.js';
 import { makeBarChart } from '../charts.js';
 
@@ -20,10 +20,10 @@ export async function renderNodeDetail(params) {
         { label: 'Nodes', href: '#/nodes' },
         { label: name }
       ])}
-      <div class="page-header"><h1>${name}</h1><p>Node detail view</p></div>
+      <div class="page-header"><h1>${esc(name)}</h1><p>Node detail view</p></div>
       <div class="kpi-grid">
-        <div class="kpi-card"><div class="label">Instance Type</div><div class="value">${node.instanceType || ''}</div></div>
-        <div class="kpi-card"><div class="label">Node Group</div><div class="value"><a href="#/nodegroups/${node.nodeGroupId || node.nodeGroup || ''}" class="link">${node.nodeGroup || ''}</a></div></div>
+        <div class="kpi-card"><div class="label">Instance Type</div><div class="value">${esc(node.instanceType || '')}</div></div>
+        <div class="kpi-card"><div class="label">Node Group</div><div class="value"><a href="#/nodegroups/${encodeURIComponent(node.nodeGroupId || node.nodeGroup || '')}" class="link">${esc(node.nodeGroup || '')}</a></div></div>
         <div class="kpi-card"><div class="label">CPU Utilization</div><div class="value">${fmtPct(node.cpuUtilPct)}</div></div>
         <div class="kpi-card"><div class="label">Memory Utilization</div><div class="value">${fmtPct(node.memUtilPct)}</div></div>
         <div class="kpi-card"><div class="label">Pod Count</div><div class="value blue">${node.appPodCount != null ? node.appPodCount + ' <span style="font-size:0.6em;color:var(--text-muted)">+ ' + (node.systemPodCount || 0) + ' sys</span>' : (node.podCount ?? pods.length)}</div></div>
@@ -35,7 +35,7 @@ export async function renderNodeDetail(params) {
         <div class="table-wrap"><table>
           <thead><tr><th>Device</th><th>Type</th><th>Size</th><th>IOPS</th><th>Throughput</th><th>Encrypted</th></tr></thead>
           <tbody>${disks.map(d => `<tr>
-            <td><code class="code-inline">${d.name || ''}</code></td>
+            <td><code class="code-inline">${esc(d.name || '')}</code></td>
             <td>${badge(d.type || 'unknown', d.type === 'io2' ? 'purple' : 'blue')}</td>
             <td><strong>${d.sizeGiB || 0} GiB</strong></td>
             <td>${d.iops ? d.iops.toLocaleString() : '-'}</td>
@@ -135,7 +135,7 @@ export async function renderNodeDetail(params) {
       const memPctVal = memUsedB != null && memReqB > 0 ? (memUsedB / memReqB * 100) : null;
       const readyColor = p.ready && p.ready.split('/')[0] === p.ready.split('/')[1] ? 'green' : 'amber';
       return `<tr>
-      <td>${p.name || ''}</td><td>${p.namespace || ''}</td>
+      <td>${esc(p.name || '')}</td><td>${esc(p.namespace || '')}</td>
       <td>${p.isSystem ? badge('System', 'gray') : badge('App', 'blue')}</td>
       <td>${p.ready ? `<span style="color:var(--${readyColor});font-weight:500">${p.ready}</span>` : '-'}</td>
       <td>${fmtCPUm(cpuReqM)}</td>
@@ -145,7 +145,7 @@ export async function renderNodeDetail(params) {
       <td>${memUsedB != null ? fmtMemB(memUsedB) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${memPctVal != null ? utilBar(memPctVal) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${p.diskUsage ? fmtMem(p.diskUsage) : '-'}</td>
-      <td title="${podStatusReason(p.status)}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
+      <td title="${esc(podStatusReason(p.status))}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
     </tr>`;
     }).join('') : '<tr><td colspan="12" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
