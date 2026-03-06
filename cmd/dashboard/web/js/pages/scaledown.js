@@ -176,6 +176,22 @@ async function renderPDBs(targetEl) {
   const pdbs = data.blockingPDBs || [];
 
   targetEl.innerHTML = `
+    ${pdbs.length > 0 ? `
+    <div class="card" style="border-left:3px solid var(--red);margin-bottom:1rem">
+      <div style="padding:1rem;display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <span style="font-size:1.25rem">&#9888;</span>
+          <div>
+            <strong>${pdbs.length} PDB${pdbs.length > 1 ? 's' : ''} with 0 disruptions allowed</strong>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+              These PDBs are preventing the autoscaler from draining nodes
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-red" id="delete-all-pdbs-btn">Delete All Blocking PDBs</button>
+      </div>
+    </div>` : ''}
+
     <div class="card">
       ${cardHeader('PDBs with 0 Disruptions Allowed (' + pdbs.length + ')')}
       ${filterBar({ placeholder: 'Search PDBs...', filters: [
@@ -185,6 +201,7 @@ async function renderPDBs(targetEl) {
         ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">No blocking PDBs found</div>'
         : `<div class="table-wrap"><table id="pdb-table">
           <thead><tr>
+            <th><input type="checkbox" id="pdb-select-all" title="Select all"></th>
             <th>Name</th>
             <th>Namespace</th>
             <th>Reason</th>
@@ -195,7 +212,8 @@ async function renderPDBs(targetEl) {
             <th>Age (days)</th>
           </tr></thead>
           <tbody>
-            ${pdbs.map(p => `<tr data-ns="${escapeHtml(p.namespace)}">
+            ${pdbs.map((p, i) => `<tr data-ns="${escapeHtml(p.namespace)}">
+              <td><input type="checkbox" class="pdb-check" data-idx="${i}"></td>
               <td>${escapeHtml(p.name)}</td>
               <td>${escapeHtml(p.namespace)}</td>
               <td>${reasonBadge(p.reason)}</td>
@@ -206,13 +224,81 @@ async function renderPDBs(targetEl) {
               <td>${ageBadge(p.ageDays)}</td>
             </tr>`).join('')}
           </tbody>
-        </table></div>`}
+        </table></div>
+        <div style="padding:0.75rem;display:flex;align-items:center;gap:0.75rem">
+          <button class="btn btn-red btn-sm" id="delete-selected-pdbs-btn" disabled>Delete Selected</button>
+          <span id="pdb-selection-count" style="font-size:12px;color:var(--text-muted)">0 selected</span>
+        </div>`}
     </div>`;
 
   if (pdbs.length > 0) {
     const table = $('#pdb-table');
     makeSortable(table);
     attachPagination(table);
+
+    // Select all checkbox
+    const selectAll = document.getElementById('pdb-select-all');
+    const deleteSelectedBtn = document.getElementById('delete-selected-pdbs-btn');
+    const selCount = document.getElementById('pdb-selection-count');
+
+    function updateSelectionUI() {
+      const checks = table.querySelectorAll('.pdb-check');
+      const checked = table.querySelectorAll('.pdb-check:checked');
+      selCount.textContent = checked.length + ' selected';
+      deleteSelectedBtn.disabled = checked.length === 0;
+      selectAll.checked = checked.length === checks.length && checks.length > 0;
+      selectAll.indeterminate = checked.length > 0 && checked.length < checks.length;
+    }
+
+    selectAll.addEventListener('change', () => {
+      table.querySelectorAll('.pdb-check').forEach(c => { c.checked = selectAll.checked; });
+      updateSelectionUI();
+    });
+    table.addEventListener('change', (e) => {
+      if (e.target.classList.contains('pdb-check')) updateSelectionUI();
+    });
+
+    // Delete selected PDBs
+    function deleteWithConfirm(pdbsToDelete) {
+      const pdbList = pdbsToDelete.map(p => `${p.namespace}/${p.name}`);
+      const listHtml = pdbList.length <= 15
+        ? `<ul style="max-height:300px;overflow:auto;margin:0.5rem 0;padding-left:1.25rem;font-size:13px">${pdbList.map(p => `<li style="margin:2px 0">${escapeHtml(p)}</li>`).join('')}</ul>`
+        : `<ul style="max-height:300px;overflow:auto;margin:0.5rem 0;padding-left:1.25rem;font-size:13px">${pdbList.slice(0, 15).map(p => `<li style="margin:2px 0">${escapeHtml(p)}</li>`).join('')}<li style="margin:2px 0;color:var(--text-muted)">...and ${pdbList.length - 15} more</li></ul>`;
+
+      confirmDialog(
+        `Delete <strong>${pdbsToDelete.length}</strong> blocking PDB${pdbsToDelete.length > 1 ? 's' : ''}?<br><br>` +
+        `This will allow the cluster autoscaler to drain nodes blocked by these PDBs.` +
+        listHtml,
+        async () => {
+          try {
+            const result = await apiPost('/scaledown/delete-pdbs', {
+              pdbs: pdbsToDelete.map(p => ({ name: p.name, namespace: p.namespace }))
+            });
+            let msg = `Deleted ${result.deleted} PDB${result.deleted !== 1 ? 's' : ''}`;
+            if (result.errors?.length) {
+              const firstErr = result.errors[0].error || 'unknown';
+              msg += `, ${result.errors.length} failed: ${firstErr}`;
+            }
+            toast(msg, result.errors?.length ? (result.deleted > 0 ? 'warning' : 'error') : 'success');
+            setTimeout(() => renderPDBs(targetEl), 1000);
+          } catch (err) {
+            toast('Failed to delete PDBs: ' + err.message, 'error');
+          }
+        }
+      );
+    }
+
+    deleteSelectedBtn.addEventListener('click', () => {
+      const checked = table.querySelectorAll('.pdb-check:checked');
+      const selected = Array.from(checked).map(c => pdbs[parseInt(c.dataset.idx)]);
+      if (selected.length > 0) deleteWithConfirm(selected);
+    });
+
+    // Delete all button
+    const deleteAllBtn = document.getElementById('delete-all-pdbs-btn');
+    if (deleteAllBtn) {
+      deleteAllBtn.addEventListener('click', () => deleteWithConfirm(pdbs));
+    }
     attachFilterHandlers($('.filter-bar'), table);
   }
 }
