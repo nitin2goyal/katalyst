@@ -1,5 +1,15 @@
 // Shared formatters and helpers
 
+// Centralized chart color palette — use instead of hardcoded hex values
+export const chartColors = {
+  primary: '#4361ee',
+  primaryLight: '#93a8f4',
+  success: '#10b981',
+  purple: '#8b5cf6',
+  purpleLight: '#bba4f4',
+  muted: '#e2e8f0',
+};
+
 export const $ = (sel, ctx) => (ctx || document).querySelector(sel);
 export const $$ = (sel, ctx) => [...(ctx || document).querySelectorAll(sel)];
 

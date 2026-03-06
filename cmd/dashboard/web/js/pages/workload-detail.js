@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, escapeHtml, esc } from '../utils.js';
+import { $, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, escapeHtml, esc, chartColors } from '../utils.js';
 import { skeleton, breadcrumbs, tabs, attachTabHandlers, badge } from '../components.js';
 import { makeChart, destroyCharts } from '../charts.js';
 
@@ -29,7 +29,7 @@ export async function renderWorkloadDetail(params) {
         { label: `${ns}/${name}` }
       ])}
       <div class="page-header"><h1>${esc(name)}</h1><p>${esc(kind)} in ${esc(ns)}</p></div>
-      ${isInactive ? `<div class="card" style="background:var(--bg);border-left:4px solid var(--text-muted);padding:16px 20px;margin-bottom:20px">
+      ${isInactive ? `<div class="card alert-border-muted mb-4" style="padding:16px 20px">
         <strong>Inactive workload</strong> — This ${kind} has 0 replicas and no resource allocation. It may be scaled down, completed, or superseded by a newer revision.
       </div>` : ''}
       <div class="kpi-grid">
@@ -53,7 +53,7 @@ export async function renderWorkloadDetail(params) {
       destroyCharts();
       if (tab === 'overview') {
         tabContent.innerHTML = `
-          <div class="grid-2" style="margin-top:16px">
+          <div class="grid-2 mt-4">
             <div><h3>Resource Requests vs Usage</h3>
               <div class="chart-container"><canvas id="wl-resource-chart"></canvas></div>
             </div>
@@ -88,9 +88,9 @@ export async function renderWorkloadDetail(params) {
           data: {
             labels: ['CPU (millicores)', 'Memory (Mi)'],
             datasets: [
-              { label: 'Actual', data: [cpuUsed, memUsedMi], backgroundColor: '#4361ee', borderRadius: 4 },
-              { label: 'Request', data: [cpuReq, memReqMi], backgroundColor: '#10b981', borderRadius: 4 },
-              { label: 'Limit', data: [cpuLimit, memLimitMi], backgroundColor: '#e2e8f0', borderRadius: 4 },
+              { label: 'Actual', data: [cpuUsed, memUsedMi], backgroundColor: chartColors.primary, borderRadius: 4 },
+              { label: 'Request', data: [cpuReq, memReqMi], backgroundColor: chartColors.success, borderRadius: 4 },
+              { label: 'Limit', data: [cpuLimit, memLimitMi], backgroundColor: chartColors.muted, borderRadius: 4 },
             ]
           },
           options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
@@ -103,9 +103,9 @@ export async function renderWorkloadDetail(params) {
         const cur = rs.current || {};
         const rec = rs.recommended || {};
         tabContent.innerHTML = `
-          <div style="margin-top:16px">
+          <div class="mt-4">
             <div class="grid-2">
-              <div class="card" style="border:2px solid var(--border)">
+              <div class="card card-border">
                 <h3>Current Resources</h3>
                 <div class="detail-list">
                   <div class="detail-item"><span class="detail-label">CPU Request</span><span>${esc(cur.cpuRequest || '?')}</span></div>
@@ -114,7 +114,7 @@ export async function renderWorkloadDetail(params) {
                   <div class="detail-item"><span class="detail-label">Memory Limit</span><span>${esc(cur.memLimit || '?')}</span></div>
                 </div>
               </div>
-              <div class="card" style="border:2px solid var(--green)">
+              <div class="card card-border-green">
                 <h3>Recommended ${rs.estimatedSavings ? `<span class="value green" style="font-size:14px">${fmt$(rs.estimatedSavings)}/mo savings</span>` : ''}</h3>
                 <div class="detail-list">
                   <div class="detail-item"><span class="detail-label">CPU Request</span><span>${esc(rec.cpuRequest || '?')}</span></div>
@@ -124,7 +124,7 @@ export async function renderWorkloadDetail(params) {
                 </div>
               </div>
             </div>
-            ${rs.reason ? `<div class="card" style="margin-top:16px;background:#f0fdf4"><p>${escapeHtml(rs.reason)}</p></div>` : ''}
+            ${rs.reason ? `<div class="card mt-4" style="background:#f0fdf4"><p>${escapeHtml(rs.reason)}</p></div>` : ''}
           </div>`;
       } else if (tab === 'scaling') {
         if (!sc.hpa && !sc.replicas) {
@@ -133,7 +133,7 @@ export async function renderWorkloadDetail(params) {
         }
         const hpa = sc.hpa || {};
         tabContent.innerHTML = `
-          <div style="margin-top:16px">
+          <div class="mt-4">
             <div class="kpi-grid">
               <div class="kpi-card"><div class="label">Current Replicas</div><div class="value blue">${sc.currentReplicas ?? wl.replicas ?? '?'}</div></div>
               <div class="kpi-card"><div class="label">Min Replicas</div><div class="value">${hpa.minReplicas ?? sc.minReplicas ?? '?'}</div></div>

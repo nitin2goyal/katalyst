@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, utilBar, badge, errorMsg, esc, GiB, parseCPUm, parseMemB, fmtCPUm, fmtMemB, podStatusColor } from '../utils.js';
+import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, utilBar, badge, errorMsg, esc, GiB, parseCPUm, parseMemB, fmtCPUm, fmtMemB, podStatusColor, chartColors } from '../utils.js';
 import { skeleton, breadcrumbs, makeSortable } from '../components.js';
 import { makeBarChart } from '../charts.js';
 
@@ -26,12 +26,12 @@ export async function renderNodeDetail(params) {
         <div class="kpi-card"><div class="label">Node Group</div><div class="value"><a href="#/nodegroups/${encodeURIComponent(node.nodeGroupId || node.nodeGroup || '')}" class="link">${esc(node.nodeGroup || '')}</a></div></div>
         <div class="kpi-card"><div class="label">CPU Utilization</div><div class="value">${fmtPct(node.cpuUtilPct)}</div></div>
         <div class="kpi-card"><div class="label">Memory Utilization</div><div class="value">${fmtPct(node.memUtilPct)}</div></div>
-        <div class="kpi-card"><div class="label">Pod Count</div><div class="value blue">${node.appPodCount != null ? node.appPodCount + ' <span style="font-size:0.6em;color:var(--text-muted)">+ ' + (node.systemPodCount || 0) + ' sys</span>' : (node.podCount ?? pods.length)}</div></div>
+        <div class="kpi-card"><div class="label">Pod Count</div><div class="value blue">${node.appPodCount != null ? node.appPodCount + ' <span class="text-xs-muted" style="font-size:0.6em">+ ' + (node.systemPodCount || 0) + ' sys</span>' : (node.podCount ?? pods.length)}</div></div>
         <div class="kpi-card"><div class="label">Boot Disk</div><div class="value" style="font-size:0.9rem">${node.diskType ? (node.diskType.replace(/^pd-/, 'PD ').replace(/^hyperdisk-/, 'Hyperdisk ').replace(/\b\w/g, c => c.toUpperCase())) + (node.diskSizeGB ? ' ' + node.diskSizeGB + 'G' : '') : '-'}</div></div>
         <div class="kpi-card"><div class="label">Hourly Cost</div><div class="value">${fmt$(node.hourlyCostUSD)}</div></div>
       </div>
       ${disks.length ? `<div class="card">
-        <h2>Attached disks <span style="font-weight:400;font-size:12px;color:var(--text-muted)">${disks.length} disk${disks.length > 1 ? 's' : ''} &middot; ${totalDiskGiB} GiB total</span></h2>
+        <h2>Attached disks <span class="text-small-muted" style="font-weight:400">${disks.length} disk${disks.length > 1 ? 's' : ''} &middot; ${totalDiskGiB} GiB total</span></h2>
         <div class="table-wrap"><table>
           <thead><tr><th>Device</th><th>Type</th><th>Size</th><th>IOPS</th><th>Throughput</th><th>Encrypted</th></tr></thead>
           <tbody>${disks.map(d => `<tr>
@@ -76,7 +76,7 @@ export async function renderNodeDetail(params) {
         { name: 'Allocated (unused)', data: [parseFloat(cpuAllocCores.toFixed(1))] },
         { name: 'Free', data: [parseFloat(cpuFreeCores.toFixed(1))] },
       ],
-      colors: ['#4361ee', '#93a8f4', '#e2e8f0'],
+      colors: [chartColors.primary, chartColors.primaryLight, chartColors.muted],
       horizontal: true,
       stacked: true,
       noCurrency: true,
@@ -95,7 +95,7 @@ export async function renderNodeDetail(params) {
         { name: 'Allocated (unused)', data: [parseFloat(memAllocGB.toFixed(1))] },
         { name: 'Free', data: [parseFloat(memFreeGB.toFixed(1))] },
       ],
-      colors: ['#8b5cf6', '#bba4f4', '#e2e8f0'],
+      colors: [chartColors.purple, chartColors.purpleLight, chartColors.muted],
       horizontal: true,
       stacked: true,
       noCurrency: true,

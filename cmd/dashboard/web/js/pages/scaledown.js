@@ -118,11 +118,11 @@ async function renderOverview(targetEl) {
       ${cardHeader('Blocking PDBs by Namespace')}
       <div style="padding: 1rem;">
         ${topNamespaces.map(([ns, count]) => `
-          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
-            <span style="min-width:200px;font-size:13px;color:var(--text-secondary)">${escapeHtml(ns)}</span>
-            <div style="flex:1;background:var(--bg-tertiary);border-radius:4px;height:20px;overflow:hidden">
-              <div style="width:${Math.min(100, count / (blockingPDBs.length || 1) * 100)}%;height:100%;background:var(--red);border-radius:4px;display:flex;align-items:center;padding-left:6px">
-                <span style="font-size:11px;color:#fff;font-weight:600">${count}</span>
+          <div class="bar-row">
+            <span class="bar-label">${escapeHtml(ns)}</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:${Math.min(100, count / (blockingPDBs.length || 1) * 100)}%;background:var(--red)">
+                <span class="bar-fill-text">${count}</span>
               </div>
             </div>
           </div>
@@ -177,15 +177,13 @@ async function renderPDBs(targetEl) {
 
   targetEl.innerHTML = `
     ${pdbs.length > 0 ? `
-    <div class="card" style="border-left:3px solid var(--red);margin-bottom:1rem">
-      <div style="padding:1rem;display:flex;align-items:center;justify-content:space-between">
-        <div style="display:flex;align-items:center;gap:0.75rem">
-          <span style="font-size:1.25rem">&#9888;</span>
+    <div class="card alert-border-red mb-4">
+      <div class="alert-card-split">
+        <div class="alert-card">
+          <span class="alert-card-icon">&#9888;</span>
           <div>
             <strong>${pdbs.length} PDB${pdbs.length > 1 ? 's' : ''} with 0 disruptions allowed</strong>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
-              These PDBs are preventing the autoscaler from draining nodes
-            </div>
+            <div class="alert-card-sub">These PDBs are preventing the autoscaler from draining nodes</div>
           </div>
         </div>
         <button class="btn btn-red" id="delete-all-pdbs-btn">Delete All Blocking PDBs</button>
@@ -198,7 +196,7 @@ async function renderPDBs(targetEl) {
         { id: 'ns-filter', label: 'Namespace', options: [...new Set(pdbs.map(p => p.namespace))].sort() }
       ]})}
       ${pdbs.length === 0
-        ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">No blocking PDBs found</div>'
+        ? '<div class="empty-state-center text-small-muted">No blocking PDBs found</div>'
         : `<div class="table-wrap"><table id="pdb-table">
           <thead><tr>
             <th><input type="checkbox" id="pdb-select-all" title="Select all"></th>
@@ -346,15 +344,13 @@ async function renderEvents(targetEl) {
 
   targetEl.innerHTML = `
     ${relevantPDBs.length > 0 ? `
-    <div class="card" style="border-left:3px solid var(--red);margin-bottom:1rem">
-      <div style="padding:1rem;display:flex;align-items:center;justify-content:space-between">
-        <div style="display:flex;align-items:center;gap:0.75rem">
-          <span style="font-size:1.25rem">&#9888;</span>
+    <div class="card alert-border-red mb-4">
+      <div class="alert-card-split">
+        <div class="alert-card">
+          <span class="alert-card-icon">&#9888;</span>
           <div>
             <strong>${relevantPDBs.length} blocking PDB${relevantPDBs.length > 1 ? 's' : ''} in affected namespaces</strong>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
-              These PDBs have 0 disruptions allowed and are preventing node drain in the events below
-            </div>
+            <div class="alert-card-sub">These PDBs have 0 disruptions allowed and are preventing node drain in the events below</div>
           </div>
         </div>
         <button class="btn btn-red" id="delete-blocking-pdbs-btn">Delete Blocking PDBs</button>
@@ -364,7 +360,7 @@ async function renderEvents(targetEl) {
     <div class="card">
       ${cardHeader('ScaleDownFailed Events (' + events.length + ')')}
       ${events.length === 0
-        ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">No ScaleDownFailed events found</div>'
+        ? '<div class="empty-state-center text-small-muted">No ScaleDownFailed events found</div>'
         : `<div class="table-wrap"><table id="events-table">
           <thead><tr>
             <th>Time</th>
@@ -383,7 +379,7 @@ async function renderEvents(targetEl) {
                   `<div style="margin:2px 0">${badge(p.reason, podReasonColor(p.reason))} <span style="font-size:12px">${escapeHtml(p.namespace)}/${escapeHtml(p.pod)}</span></div>`
                 ).join('')
                 : `<span style="color:var(--text-muted);font-size:12px">${escapeHtml(truncate(e.message || '-', 80))}</span>`}</td>
-              <td class="expandable-cell" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Click to expand">${escapeHtml(e.message || '-')}</td>
+              <td class="expandable-cell cell-expandable" title="Click to expand">${escapeHtml(e.message || '-')}</td>
             </tr>`).join('')}
           </tbody>
         </table></div>`}
@@ -446,12 +442,12 @@ async function renderSingleReplica(targetEl) {
   const items = data.singleReplicaPDBs || [];
 
   targetEl.innerHTML = `
-    <div class="card" style="border-left:3px solid var(--amber);margin-bottom:1rem">
-      <div style="padding:1rem;display:flex;align-items:center;gap:0.75rem">
-        <span style="font-size:1.25rem">&#9888;</span>
+    <div class="card alert-border-amber mb-4">
+      <div class="alert-card">
+        <span class="alert-card-icon">&#9888;</span>
         <div>
           <strong>Single-replica deployments with blocking PDBs</strong>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+          <div class="alert-card-sub">
             These deployments have exactly 1 replica and a PDB that prevents eviction.
             The autoscaler cannot drain nodes hosting these pods. Either increase replicas or remove the PDB.
           </div>
@@ -462,7 +458,7 @@ async function renderSingleReplica(targetEl) {
     <div class="card">
       ${cardHeader('Single Replica + PDB (' + items.length + ')')}
       ${items.length === 0
-        ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">No single-replica deployments with blocking PDBs</div>'
+        ? '<div class="empty-state-center text-small-muted">No single-replica deployments with blocking PDBs</div>'
         : `<div class="table-wrap"><table id="single-replica-table">
           <thead><tr>
             <th>Deployment</th>
@@ -523,7 +519,7 @@ async function renderPods(targetEl) {
         </tr></thead>
         <tbody>
           ${problematic.map(p => `<tr>
-            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
+            <td class="cell-truncate" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
             <td>${escapeHtml(p.namespace)}</td>
             <td>${p.nodeName ? `<a href="#/nodes/${escapeHtml(p.nodeName)}">${escapeHtml(shortNodeName(p.nodeName))}</a>` : '-'}</td>
             <td>${statusBadge(p.status)}</td>
@@ -533,7 +529,7 @@ async function renderPods(targetEl) {
           </tr>`).join('')}
         </tbody>
       </table></div>
-    </div>` : '<div class="card"><div style="padding:2rem;text-align:center;color:var(--text-muted)">No problematic pods found</div></div>'}
+    </div>` : '<div class="card"><div class="empty-state-center text-small-muted">No problematic pods found</div></div>'}
 
     ${unevictable.length > 0 ? `
     <div class="card">
@@ -548,7 +544,7 @@ async function renderPods(targetEl) {
         </tr></thead>
         <tbody>
           ${unevictable.map(p => `<tr>
-            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
+            <td class="cell-truncate" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
             <td>${escapeHtml(p.namespace)}</td>
             <td>${p.nodeName ? `<a href="#/nodes/${escapeHtml(p.nodeName)}">${escapeHtml(shortNodeName(p.nodeName))}</a>` : '-'}</td>
             <td>${unevictableReasonBadge(p.reason)}</td>

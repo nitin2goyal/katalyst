@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, utilBar, errorMsg } from '../utils.js';
-import { skeleton, makeSortable, filterBar, attachFilterHandlers, exportCSV, cardHeader, badge } from '../components.js';
+import { skeleton, makeSortable, filterBar, attachFilterHandlers, exportCSV, cardHeader, badge, richEmptyState } from '../components.js';
 
 export async function renderCommitments(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -20,11 +20,8 @@ export async function renderCommitments(targetEl) {
     if (!cList.length) {
       container().innerHTML = `
         ${!targetEl ? '<div class="page-header"><h1>Commitments</h1><p>Reserved instances and savings plans</p></div>' : ''}
-        <div class="card" style="text-align:center;padding:48px 24px">
-          <div style="font-size:48px;margin-bottom:16px;opacity:0.3">CUD</div>
-          <h3 style="margin-bottom:8px">No Commitments Found</h3>
-          <p style="color:var(--text-muted);max-width:480px;margin:0 auto;line-height:1.6">No Committed Use Discounts (CUDs) or reservations detected. GCP CUDs are managed via the GCP Console. Once active, they will appear here for utilization tracking and expiry monitoring.</p>
-        </div>`;
+        ${richEmptyState('CUD', 'No Commitments Found',
+          'No Committed Use Discounts (CUDs) or reservations detected. GCP CUDs are managed via the GCP Console. Once active, they will appear here for utilization tracking and expiry monitoring.')}`;
       return;
     }
 

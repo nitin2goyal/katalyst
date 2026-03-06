@@ -58,14 +58,14 @@ export async function renderNodes(targetEl) {
         <div class="kpi-card"><div class="label">Empty Groups</div><div class="value ${emptyList.length ? 'amber' : ''}">${emptyList.length}</div></div>
       </div>
       <div class="card" id="ng-card">
-        ${cardHeader('Node Groups', `<label class="toggle-label" style="margin-right:12px;font-size:13px;cursor:pointer"><input type="checkbox" id="show-empty-ng"> Show empty groups</label><button class="btn btn-gray btn-sm" onclick="window.__exportNgCSV()">Export CSV</button>`)}
+        ${cardHeader('Node Groups', `<label class="toggle-label text-desc" style="margin-right:12px;cursor:pointer"><input type="checkbox" id="show-empty-ng"> Show empty groups</label><button class="btn btn-gray btn-sm" onclick="window.__exportNgCSV()">Export CSV</button>`)}
         <div class="table-wrap"><table id="ng-table">
           <thead><tr><th>Name</th><th>Instance Type</th><th>Disk</th><th>Count</th><th>Min</th><th>Max</th><th>GPUs</th><th>Total Cores</th><th>Total Memory</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Cluster</th><th>Cost/mo</th></tr></thead>
           <tbody id="ng-body"></tbody>
         </table></div>
       </div>
       <div class="card" id="nodes-card">
-        ${cardHeader('All Nodes', columnToggle(nodeColumns) + '<button class="btn btn-gray btn-sm" onclick="window.__exportNodesCSV()" style="margin-left:8px">Export CSV</button>')}
+        ${cardHeader('All Nodes', columnToggle(nodeColumns) + '<button class="btn btn-gray btn-sm ml-2" onclick="window.__exportNodesCSV()">Export CSV</button>')}
         ${filterBar({
           placeholder: 'Search nodes...',
           filters: [
@@ -88,7 +88,7 @@ export async function renderNodes(targetEl) {
         return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" onclick="location.hash='#/nodegroups/${encodeURIComponent(ng.id || '')}'">
           <td>${esc(ng.name || ng.id || '')}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}${ng.hasGPU ? ' ' + badge('GPU', 'purple') : ''}</td>
           <td>${esc(ng.instanceType || '')}</td>
-          <td style="font-size:0.8rem">${fmtDisk(ng.diskType, ng.diskSizeGB)}</td>
+          <td class="text-sm">${fmtDisk(ng.diskType, ng.diskSizeGB)}</td>
           <td>${ng.currentCount ?? 0}</td><td>${ng.minCount ?? ''}</td><td>${ng.maxCount ?? ''}</td>
           <td>${ng.totalGPUs ? ng.totalGPUs : '-'}</td>
           <td>${ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0}</td>
@@ -118,14 +118,14 @@ export async function renderNodes(targetEl) {
 
     $('#node-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(n.name || '')}'">
       <td>${esc(n.name || '')}</td><td>${esc(n.nodeGroup || '')}</td><td>${esc(n.instanceType || '')}</td>
-      <td style="font-size:0.8rem">${fmtDisk(n.diskType, n.diskSizeGB)}</td>
+      <td class="text-sm">${fmtDisk(n.diskType, n.diskSizeGB)}</td>
       <td><strong class="${utilClass(n.diskUtilPct || 0)}">${fmtPct(n.diskUtilPct)}</strong></td>
       <td><strong class="${utilClass(n.cpuUtilPct || 0)}">${fmtPct(n.cpuUtilPct)}</strong></td>
       <td><strong class="${utilClass(n.memUtilPct || 0)}">${fmtPct(n.memUtilPct)}</strong></td>
       <td><strong class="${utilClass(n.cpuAllocPct || 0)}">${fmtPct(n.cpuAllocPct)}</strong></td>
       <td><strong class="${utilClass(n.memAllocPct || 0)}">${fmtPct(n.memAllocPct)}</strong></td>
-      <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span style="color:var(--text-muted)">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
-      <td>${n.unschedulable ? '<span class="badge badge-red">Yes</span>' : '<span style="color:var(--text-muted)">No</span>'}</td>
+      <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span class="sys-count">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
+      <td>${n.unschedulable ? '<span class="badge badge-red">Yes</span>' : '<span class="text-small-muted">No</span>'}</td>
       <td>${n.drainStatus ? `<span class="badge ${n.drainStatus === 'Drained' ? 'badge-green' : 'badge-amber'}">${n.drainStatus}</span>` : ''}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
     </tr>`).join('') : '<tr><td colspan="13" style="color:var(--text-muted)">No nodes</td></tr>';

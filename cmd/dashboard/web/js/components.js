@@ -345,6 +345,14 @@ export function emptyState(icon, message) {
   </div>`;
 }
 
+export function richEmptyState(icon, title, description) {
+  return `<div class="card rich-empty-state">
+    <div class="rich-empty-state-icon">${icon}</div>
+    <h3 class="rich-empty-state-title">${title}</h3>
+    <p class="rich-empty-state-desc">${description}</p>
+  </div>`;
+}
+
 export function cardHeader(title, rightHtml = '') {
   return `<div class="card-header"><h2>${title}</h2><div class="card-header-actions">${rightHtml}</div></div>`;
 }

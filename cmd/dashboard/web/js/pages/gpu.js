@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, utilBar, errorMsg, escapeHtml, esc, badge, timeAgo, fmtCPUm, podStatusColor } from '../utils.js';
-import { skeleton, makeSortable, exportCSV, cardHeader } from '../components.js';
+import { skeleton, makeSortable, exportCSV, cardHeader, richEmptyState } from '../components.js';
 
 const GPU_TABS = [
   { id: 'nodes', label: 'Nodes' },
@@ -53,12 +53,8 @@ async function renderNodesTab(contentEl) {
     const hasGPU = nodeList.length > 0 || (utilData.totalGPUs || 0) > 0;
 
     if (!hasGPU) {
-      contentEl.innerHTML = `
-        <div class="card" style="text-align:center;padding:48px 24px">
-          <div style="font-size:48px;margin-bottom:16px;opacity:0.3">GPU</div>
-          <h3 style="margin-bottom:8px">No GPU Nodes Detected</h3>
-          <p style="color:var(--text-muted);max-width:480px;margin:0 auto;line-height:1.6">This cluster does not have any GPU-enabled nodes. GPU monitoring will automatically activate when GPU nodes (e.g., NVIDIA T4, A100, L4) are added to the cluster.</p>
-        </div>`;
+      contentEl.innerHTML = richEmptyState('GPU', 'No GPU Nodes Detected',
+        'This cluster does not have any GPU-enabled nodes. GPU monitoring will automatically activate when GPU nodes (e.g., NVIDIA T4, A100, L4) are added to the cluster.');
       return;
     }
 
@@ -114,8 +110,8 @@ async function renderNodesTab(contentEl) {
 
 function renderConfigCard(cfg) {
   if (!cfg || !cfg.enabled) {
-    return `<div class="card" style="padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
-      ${badge('Disabled', 'gray')} <span style="color:var(--text-muted)">GPU optimizer is not enabled</span>
+    return `<div class="card config-card mb-4 flex-center">
+      ${badge('Disabled', 'gray')} <span class="text-small-muted">GPU optimizer is not enabled</span>
     </div>`;
   }
   const items = [
@@ -125,14 +121,14 @@ function renderConfigCard(cfg) {
     { label: 'Reclaim', on: cfg.reclaimEnabled },
   ];
   const modeColor = cfg.mode === 'active' ? 'green' : cfg.mode === 'recommend' ? 'blue' : 'gray';
-  return `<div class="card" style="padding:12px 16px;margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <strong style="margin-right:4px">Config</strong>
+  return `<div class="card config-card mb-4">
+    <div class="config-card-row">
+      <strong>Config</strong>
       ${badge('Mode: ' + (cfg.mode || 'unknown'), modeColor)}
       ${items.map(i => badge(i.label, i.on ? 'green' : 'gray')).join('')}
-      ${cfg.idleThresholdPct ? `<span style="color:var(--text-muted);font-size:0.85em">Idle &lt; ${cfg.idleThresholdPct}% for ${cfg.idleDuration || '?'}</span>` : ''}
-      ${cfg.scavengingCPUThresholdMillis ? `<span style="color:var(--text-muted);font-size:0.85em">Scavenge &ge; ${cfg.scavengingCPUThresholdMillis}m</span>` : ''}
-      ${cfg.reclaimGracePeriod ? `<span style="color:var(--text-muted);font-size:0.85em">Reclaim grace: ${cfg.reclaimGracePeriod}</span>` : ''}
+      ${cfg.idleThresholdPct ? `<span class="text-small-muted">Idle &lt; ${cfg.idleThresholdPct}% for ${cfg.idleDuration || '?'}</span>` : ''}
+      ${cfg.scavengingCPUThresholdMillis ? `<span class="text-small-muted">Scavenge &ge; ${cfg.scavengingCPUThresholdMillis}m</span>` : ''}
+      ${cfg.reclaimGracePeriod ? `<span class="text-small-muted">Reclaim grace: ${cfg.reclaimGracePeriod}</span>` : ''}
     </div>
   </div>`;
 }

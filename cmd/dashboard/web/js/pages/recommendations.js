@@ -69,10 +69,10 @@ export async function renderRecsTab(targetEl) {
       </div>
       ${_isComputed ? '<div class="info-banner">These recommendations are computed from live cluster data. Switch to OPTIMIZE mode to enable automatic execution.</div>' : ''}
       ${autoApproveRightsizer ? '<div class="info-banner" style="border-color:var(--green)">Auto-approve is ON for: Rightsizing (once per workload).</div>' : ''}
-      <details class="debug-panel" id="debug-panel" style="margin-bottom:16px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);padding:8px 0">Data Validation (click to expand)</summary>
-        <div class="card" id="debug-panel-content" style="font-size:12px;line-height:1.8;padding:16px;margin-top:8px">
-          <div style="color:var(--text-muted)">Loading debug data...</div>
+      <details class="debug-panel mb-4" id="debug-panel">
+        <summary class="debug-summary">Data Validation (click to expand)</summary>
+        <div class="card debug-content" id="debug-panel-content">
+          <div class="text-small-muted">Loading debug data...</div>
         </div>
       </details>
       <div class="card">
@@ -142,7 +142,7 @@ export async function renderRecsTab(targetEl) {
           const content = document.getElementById('debug-panel-content');
           if (content) {
             content.innerHTML = `
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
+              <div class="debug-grid">
                 <div><strong>Data Source:</strong> ${debugSrc}</div>
                 <div><strong>Summary API:</strong> ${summary ? escapeHtml(JSON.stringify(summary)) : 'null/empty'}</div>
                 <div><strong>Nodes:</strong> ${nodeList.length} total, ${emptyNodes} empty, ${gpuNodes} GPU</div>
@@ -152,12 +152,12 @@ export async function renderRecsTab(targetEl) {
                 <div><strong>Workloads:</strong> ${wlList.length}</div>
                 <div><strong>Savings as % of cost:</strong> ${totalNodeCost > 0 ? (totalSavings / totalNodeCost * 100).toFixed(1) : 0}%</div>
               </div>
-              <div style="margin-top:12px"><strong>Recs by type:</strong> ${Object.entries(recsByType).map(([t, c]) => `${t}: ${c}`).join(' | ')}</div>
+              <div class="mt-3"><strong>Recs by type:</strong> ${Object.entries(recsByType).map(([t, c]) => `${t}: ${c}`).join(' | ')}</div>
               <div><strong>Savings by type:</strong> ${Object.entries(savingsByType).map(([t, s]) => `${t}: ${fmt$(s)}`).join(' | ')}</div>
-              <div style="margin-top:8px;color:var(--text-muted)">Top 5 nodes by cost: ${nodeList.sort((a, b) => (b.hourlyCostUSD || 0) - (a.hourlyCostUSD || 0)).slice(0, 5).map(n => `${esc(n.name)}: $${((n.hourlyCostUSD || 0) * 730.5).toFixed(0)}/mo (CPU: ${((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100).toFixed(0)}%, Mem: ${((n.memUsed || 0) / (n.memCapacity || 1) * 100).toFixed(0)}%)`).join(' | ')}</div>
-              ${debugData ? `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+              <div class="mt-3 text-small-muted">Top 5 nodes by cost: ${nodeList.sort((a, b) => (b.hourlyCostUSD || 0) - (a.hourlyCostUSD || 0)).slice(0, 5).map(n => `${esc(n.name)}: $${((n.hourlyCostUSD || 0) * 730.5).toFixed(0)}/mo (CPU: ${((n.cpuUsed || 0) / (n.cpuCapacity || 1) * 100).toFixed(0)}%, Mem: ${((n.memUsed || 0) / (n.memCapacity || 1) * 100).toFixed(0)}%)`).join(' | ')}</div>
+              ${debugData ? `<div class="mt-3" style="border-top:1px solid var(--border);padding-top:12px">
                 <strong>Backend Engine Debug (/api/v1/recommendations/debug):</strong>
-                <pre style="font-size:11px;overflow-x:auto;margin-top:4px;color:var(--text-muted)">${escapeHtml(JSON.stringify(debugData, null, 2))}</pre>
+                <pre class="text-xs-muted" style="overflow-x:auto;margin-top:4px">${escapeHtml(JSON.stringify(debugData, null, 2))}</pre>
               </div>` : ''}`;
           }
         } catch (err) {
