@@ -31,7 +31,7 @@ export async function renderNodes(targetEl) {
   container().innerHTML = skeleton(5);
   try {
     const [ngs, nodes, empty] = await Promise.all([
-      api('/nodegroups'), api('/nodes?pageSize=1000'), api('/nodegroups/empty').catch(() => null),
+      api('/nodegroups?pageSize=1000'), api('/nodes?pageSize=1000'), api('/nodegroups/empty').catch(() => null),
     ]);
     const ngList = toArray(ngs, 'nodeGroups');
     const nodeList = toArray(nodes, 'nodes');

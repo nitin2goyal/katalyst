@@ -20,7 +20,7 @@ export async function computeRecommendations() {
   const [nodes, workloads, nodeGroups] = await Promise.all([
     api('/nodes?pageSize=1000').catch(() => []),
     api('/workloads?pageSize=1000').catch(() => []),
-    api('/nodegroups').catch(() => []),
+    api('/nodegroups?pageSize=1000').catch(() => []),
   ]);
 
   const nodeList = Array.isArray(nodes) ? nodes : (nodes?.data || nodes?.nodes || []);

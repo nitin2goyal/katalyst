@@ -23,7 +23,7 @@ export async function renderOverview() {
       api('/cluster/efficiency').catch(() => null),
       api('/cluster/score').catch(() => null),
       api('/cost/summary').catch(() => null),
-      api('/nodegroups').catch(() => []),
+      api('/nodegroups?pageSize=1000').catch(() => []),
     ]);
     const s = summary || {};
     // Fallback chain for potentialSavings:
