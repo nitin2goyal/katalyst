@@ -13,7 +13,8 @@ import (
 
 // NewProvider creates a CloudProvider for the given cloud.
 // The db parameter is optional; if non-nil it enables SQLite-backed pricing caching.
-func NewProvider(cloud, region string, db *sql.DB) (cloudprovider.CloudProvider, error) {
+// clusterName is used to filter cloud resources (e.g., ASGs) to the current cluster.
+func NewProvider(cloud, region, clusterName string, db *sql.DB) (cloudprovider.CloudProvider, error) {
 	var pCache *store.PricingCache
 	if db != nil {
 		pCache = store.NewPricingCache(db)
@@ -21,7 +22,7 @@ func NewProvider(cloud, region string, db *sql.DB) (cloudprovider.CloudProvider,
 
 	switch cloud {
 	case "aws":
-		return aws.NewProvider(region, pCache)
+		return aws.NewProvider(region, clusterName, pCache)
 	case "gcp":
 		return gcp.NewProvider(region, pCache)
 	case "azure":

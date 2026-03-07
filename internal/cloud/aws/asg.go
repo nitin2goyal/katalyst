@@ -13,8 +13,9 @@ import (
 	"github.com/koptimizer/koptimizer/pkg/familylock"
 )
 
-// discoverASGs finds all EKS-managed Auto Scaling Groups.
-func discoverASGs(ctx context.Context, client *autoscaling.Client) ([]*cloudprovider.NodeGroup, error) {
+// discoverASGs finds Auto Scaling Groups belonging to the specified EKS cluster.
+// If clusterName is empty, all EKS-tagged ASGs in the account are returned.
+func discoverASGs(ctx context.Context, client *autoscaling.Client, clusterName string) ([]*cloudprovider.NodeGroup, error) {
 	var groups []*cloudprovider.NodeGroup
 
 	const maxPages = 100 // safety limit to prevent unbounded pagination
@@ -27,6 +28,10 @@ func discoverASGs(ctx context.Context, client *autoscaling.Client) ([]*cloudprov
 
 		for _, asg := range page.AutoScalingGroups {
 			if !isEKSNodeGroup(asg) {
+				continue
+			}
+			// Filter to only ASGs belonging to the configured cluster.
+			if clusterName != "" && !asgBelongsToCluster(asg, clusterName) {
 				continue
 			}
 
@@ -189,6 +194,23 @@ func isEKSNodeGroup(asg astypes.AutoScalingGroup) bool {
 		}
 		if tag.Key != nil && *tag.Key == "eks:cluster-name" {
 			return true
+		}
+	}
+	return false
+}
+
+// asgBelongsToCluster checks if an ASG belongs to a specific EKS cluster
+// by matching the kubernetes.io/cluster/<name> tag or eks:cluster-name tag.
+func asgBelongsToCluster(asg astypes.AutoScalingGroup, clusterName string) bool {
+	expectedTag := "kubernetes.io/cluster/" + clusterName
+	for _, tag := range asg.Tags {
+		if tag.Key != nil {
+			if *tag.Key == expectedTag {
+				return true
+			}
+			if *tag.Key == "eks:cluster-name" && tag.Value != nil && *tag.Value == clusterName {
+				return true
+			}
 		}
 	}
 	return false

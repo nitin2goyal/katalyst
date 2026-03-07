@@ -222,7 +222,7 @@ func main() {
 	}
 
 	// Initialize cloud provider (pass sqlDBRef for SQLite-backed pricing cache)
-	provider, err := cloud.NewProvider(cfg.CloudProvider, cfg.Region, sqlDBRef)
+	provider, err := cloud.NewProvider(cfg.CloudProvider, cfg.Region, cfg.ClusterName, sqlDBRef)
 	if err != nil {
 		setupLog.Error(err, "Unable to create cloud provider")
 		os.Exit(1)

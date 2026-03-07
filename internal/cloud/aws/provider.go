@@ -18,24 +18,26 @@ import (
 
 // Provider implements cloudprovider.CloudProvider for AWS EKS.
 type Provider struct {
-	region    string
-	ec2Client *ec2.Client
-	asgClient *autoscaling.Client
-	spClient  *savingsplans.Client
-	pricing   *PricingService
+	region      string
+	clusterName string
+	ec2Client   *ec2.Client
+	asgClient   *autoscaling.Client
+	spClient    *savingsplans.Client
+	pricing     *PricingService
 }
 
-func NewProvider(region string, pricingCache *store.PricingCache) (*Provider, error) {
+func NewProvider(region, clusterName string, pricingCache *store.PricingCache) (*Provider, error) {
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
 	return &Provider{
-		region:    region,
-		ec2Client: ec2.NewFromConfig(cfg),
-		asgClient: autoscaling.NewFromConfig(cfg),
-		spClient:  savingsplans.NewFromConfig(cfg),
-		pricing:   NewPricingService(cfg, pricingCache),
+		region:      region,
+		clusterName: clusterName,
+		ec2Client:   ec2.NewFromConfig(cfg),
+		asgClient:   autoscaling.NewFromConfig(cfg),
+		spClient:    savingsplans.NewFromConfig(cfg),
+		pricing:     NewPricingService(cfg, pricingCache),
 	}, nil
 }
 
@@ -136,7 +138,7 @@ func (p *Provider) GetNodeZone(ctx context.Context, node *corev1.Node) (string, 
 }
 
 func (p *Provider) DiscoverNodeGroups(ctx context.Context) ([]*cloudprovider.NodeGroup, error) {
-	groups, err := discoverASGs(ctx, p.asgClient)
+	groups, err := discoverASGs(ctx, p.asgClient, p.clusterName)
 	if err != nil {
 		return nil, err
 	}
