@@ -1,6 +1,6 @@
 import { api } from '../api.js';
-import { $, $$, badge, fmtPct, fmt$, utilBar, escapeHtml, timeAgo, errorMsg } from '../utils.js';
-import { skeleton, makeSortable, attachPagination, cardHeader, filterBar, attachFilterHandlers } from '../components.js';
+import { $, $$, badge, fmtPct, fmt$, utilBar, escapeHtml, timeAgo, errorMsg, esc, fmtCPU, fmtMem } from '../utils.js';
+import { skeleton, makeSortable, attachPagination, cardHeader, filterBar, attachFilterHandlers, exportCSV } from '../components.js';
 import { addCleanup } from '../router.js';
 
 const container = () => $('#page-container');
@@ -8,11 +8,13 @@ const container = () => $('#page-container');
 const tabDefs = [
   { id: 'status', label: 'Status' },
   { id: 'events', label: 'Events' },
+  { id: 'overscaled', label: 'Over-Scaled' },
 ];
 
 const subRenderers = {
   status: renderStatus,
   events: renderEvents,
+  overscaled: renderOverscaled,
 };
 
 export async function renderAutoscaler(params) {
@@ -179,11 +181,11 @@ async function renderStatus(targetEl) {
 // --- Events Tab ---
 
 function actionBadgeClass(action) {
-  if (action.includes('failed') || action.includes('unready')) return 'red';
-  if (action.includes('scale-down') || action.includes('delete-unneeded') || action.includes('delete-unregistered')) return 'green';
-  if (action.includes('scale-up') || action.includes('triggered-scale-up')) return 'blue';
+  if (action.includes('failed') || action.includes('unready') || action.includes('blocked')) return 'red';
+  if (action.includes('scale-down') || action.includes('delete-unneeded') || action.includes('delete-unregistered') || action.includes('disrupting')) return 'green';
+  if (action.includes('scale-up') || action.includes('triggered-scale-up') || action.includes('provisioned')) return 'blue';
   if (action.includes('drain') && !action.includes('failed')) return 'green';
-  if (action.includes('not-needed') || action.includes('deferred')) return 'gray';
+  if (action.includes('not-needed') || action.includes('deferred') || action.includes('unconsolidatable')) return 'gray';
   if (action.includes('uncordon')) return 'amber';
   if (action.includes('dry-run')) return 'purple';
   if (action.includes('cordon')) return 'blue';
@@ -191,9 +193,10 @@ function actionBadgeClass(action) {
 }
 
 function sourceBadge(source) {
-  return source === 'GKE'
-    ? badge('GKE', 'blue')
-    : badge('KOptimizer', 'purple');
+  if (source === 'ClusterAutoscaler') return badge('Autoscaler', 'blue');
+  if (source === 'Karpenter') return badge('Karpenter', 'blue');
+  if (source === 'KOptimizer') return badge('KOptimizer', 'purple');
+  return badge(source || 'Unknown', 'gray');
 }
 
 async function renderEvents(targetEl) {
@@ -258,6 +261,113 @@ async function renderEvents(targetEl) {
         cell.style.wordBreak = 'break-word';
         cell.title = 'Click to collapse';
       }
+    });
+  }
+}
+
+// --- Over-Scaled Tab ---
+
+function severityBadge(severity) {
+  switch (severity) {
+    case 'critical': return badge('Critical', 'red');
+    case 'warning': return badge('Warning', 'amber');
+    default: return badge('Info', 'blue');
+  }
+}
+
+async function renderOverscaled(targetEl) {
+  targetEl.innerHTML = skeleton(5);
+  let data;
+  try {
+    data = await api('/autoscaler/overscaled');
+  } catch (err) {
+    targetEl.innerHTML = errorMsg('Failed to load over-scaled data: ' + err.message);
+    return;
+  }
+
+  const summary = data.summary || {};
+  const workloads = data.workloads || [];
+
+  targetEl.innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="label">Over-Scaled Workloads</div><div class="value ${summary.overscaledCount > 0 ? 'red' : 'green'}">${summary.overscaledCount || 0}</div></div>
+      <div class="kpi-card"><div class="label">Excess Replicas</div><div class="value ${summary.totalExcessReplicas > 0 ? 'amber' : ''}">${summary.totalExcessReplicas || 0}</div></div>
+      <div class="kpi-card"><div class="label">Wasted Cost/mo</div><div class="value red">${fmt$(summary.totalWastedCostUSD || 0)}</div><div class="sub">from over-scaling</div></div>
+    </div>
+
+    <div class="card">
+      ${cardHeader('Over-Scaled Workloads', '<button class="btn btn-gray btn-sm" id="export-overscaled-csv">Export CSV</button>')}
+      ${workloads.length === 0
+        ? '<div style="padding: 2rem; text-align: center; color: var(--text-muted);">No over-scaled workloads detected. All autoscaled workloads are sized appropriately.</div>'
+        : `
+        ${filterBar({ placeholder: 'Search workloads...' })}
+        <div class="table-wrap"><table id="overscaled-table">
+          <thead><tr>
+            <th>Severity</th>
+            <th>Namespace</th>
+            <th>Name</th>
+            <th>Replicas</th>
+            <th>Optimal</th>
+            <th>Excess</th>
+            <th>CPU Req/Pod</th>
+            <th>Total CPU</th>
+            <th>CPU Used</th>
+            <th>CPU Eff.</th>
+            <th>Mem Eff.</th>
+            <th>Autoscaler</th>
+            <th>Min</th>
+            <th>Max</th>
+            <th>Wasted/mo</th>
+            <th>Reason</th>
+          </tr></thead>
+          <tbody>
+            ${workloads.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+              <td>${severityBadge(w.severity)}</td>
+              <td>${esc(w.namespace)}</td>
+              <td>${esc(w.name)}</td>
+              <td><strong>${w.currentReplicas}</strong></td>
+              <td>${badge(String(w.optimalReplicas), 'green')}</td>
+              <td>${badge('+' + w.excessReplicas, 'red')}</td>
+              <td>${fmtCPU(parseInt(w.cpuRequestPerPod))}</td>
+              <td>${fmtCPU(parseInt(w.totalCPURequest))}</td>
+              <td>${fmtCPU(parseInt(w.totalCPUUsage))}</td>
+              <td>${badge(fmtPct(w.cpuEfficiencyPct), w.cpuEfficiencyPct < 5 ? 'red' : w.cpuEfficiencyPct < 20 ? 'amber' : 'green')}</td>
+              <td>${badge(fmtPct(w.memEfficiencyPct), w.memEfficiencyPct < 5 ? 'red' : w.memEfficiencyPct < 20 ? 'amber' : 'green')}</td>
+              <td>${badge(w.autoscaler, 'blue')}</td>
+              <td>${w.minReplicas}</td>
+              <td>${w.maxReplicas}</td>
+              <td><span class="red">${fmt$(w.wastedCostUSD)}</span></td>
+              <td style="max-width:300px;font-size:11px;color:var(--text-muted)">${esc(w.reason)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`
+      }
+    </div>`;
+
+  if (workloads.length > 0) {
+    const table = $('#overscaled-table');
+    makeSortable(table);
+    const pag = attachPagination(table);
+
+    const fb = targetEl.querySelector('.filter-bar');
+    if (fb) attachFilterHandlers(fb, table, pag);
+
+    document.getElementById('export-overscaled-csv')?.addEventListener('click', () => {
+      exportCSV(
+        ['Severity', 'Namespace', 'Kind', 'Name', 'Current Replicas', 'Optimal Replicas',
+         'Excess Replicas', 'CPU Req/Pod', 'Total CPU Req', 'Total CPU Used',
+         'CPU Eff %', 'Mem Eff %', 'Autoscaler', 'HPA Name', 'Min', 'Max',
+         'Monthly Cost', 'Wasted Cost', 'Reason'],
+        workloads.map(w => [
+          w.severity, w.namespace, w.kind, w.name,
+          w.currentReplicas, w.optimalReplicas, w.excessReplicas,
+          w.cpuRequestPerPod, w.totalCPURequest, w.totalCPUUsage,
+          fmtPct(w.cpuEfficiencyPct), fmtPct(w.memEfficiencyPct),
+          w.autoscaler, w.autoscalerName, w.minReplicas, w.maxReplicas,
+          fmt$(w.monthlyCostUSD), fmt$(w.wastedCostUSD), w.reason
+        ]),
+        'katalyst-overscaled-workloads.csv'
+      );
     });
   }
 }
