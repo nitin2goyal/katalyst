@@ -356,14 +356,17 @@ func ValidateDownsizeTargets(currentCPU, suggestedCPU, currentMem, suggestedMem 
 }
 
 // --- Cost estimation ---
+
+// vCPUHourlyCostByCloud returns an approximate per-vCPU hourly cost for the cloud provider.
+// AWS uses 3-year convertible reserved pricing (~50% of on-demand).
 func vCPUHourlyCostByCloud(cloudProvider string) float64 {
 	switch cloudProvider {
 	case "gcp":
 		return 0.031611
 	case "azure":
 		return 0.043
-	default:
-		return 0.04
+	default: // aws
+		return 0.02 // m5 rate at ~50% of on-demand (3yr convertible reserved)
 	}
 }
 
@@ -372,14 +375,16 @@ func estimateCPUSavings(currentMilli, suggestedMilli int64, cloudProvider string
 	return cpuSaved * vCPUHourlyCostByCloud(cloudProvider) * cost.HoursPerMonth
 }
 
+// memGiBHourlyCostByCloud returns an approximate per-GiB-RAM hourly cost.
+// AWS uses 3-year convertible reserved pricing (~50% of on-demand).
 func memGiBHourlyCostByCloud(cloudProvider string) float64 {
 	switch cloudProvider {
 	case "gcp":
 		return 0.004237
 	case "azure":
 		return 0.005
-	default:
-		return 0.00643
+	default: // aws
+		return 0.00322 // m5 rate at ~50% of on-demand (3yr convertible reserved)
 	}
 }
 

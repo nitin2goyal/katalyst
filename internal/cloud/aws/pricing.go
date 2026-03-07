@@ -23,43 +23,43 @@ import (
 )
 
 // awsComponentRates maps instance family prefixes to per-vCPU and per-GiB-RAM hourly rates.
-// Based on published us-east-1 on-demand pricing (as of 2024-Q4).
+// Based on approximate 3-year convertible reserved pricing (~50% of on-demand, us-east-1).
 // Used as FALLBACK when the AWS Pricing API is unavailable. These rates may
 // become stale; when live pricing is available (the normal case), these are NOT used.
 var awsComponentRates = map[string]struct{ cpuRate, memRate float64 }{
-	"m5":   {0.048, 0.00643},
-	"m5a":  {0.0432, 0.00579},
-	"m5n":  {0.0594, 0.00796},
-	"m5zn": {0.0826, 0.01108},
-	"m6i":  {0.048, 0.00643},
-	"m6a":  {0.0432, 0.00579},
-	"m6g":  {0.0385, 0.00514},
-	"m7i":  {0.0504, 0.00675},
-	"m7a":  {0.0463, 0.00620},
-	"m7g":  {0.0408, 0.00547},
-	"c5":   {0.0425, 0.00569},
-	"c5a":  {0.0383, 0.00513},
-	"c5n":  {0.054, 0.00724},
-	"c6i":  {0.0425, 0.00569},
-	"c6a":  {0.0383, 0.00513},
-	"c6g":  {0.034, 0.00456},
-	"c7i":  {0.04462, 0.00598},
-	"c7a":  {0.04089, 0.00548},
-	"c7g":  {0.0361, 0.00484},
-	"r5":   {0.063, 0.00844},
-	"r5a":  {0.0567, 0.0076},
-	"r5n":  {0.0744, 0.00998},
-	"r6i":  {0.063, 0.00844},
-	"r6a":  {0.0567, 0.0076},
-	"r6g":  {0.0504, 0.00675},
-	"r7i":  {0.06615, 0.00886},
-	"r7a":  {0.06066, 0.00813},
-	"r7g":  {0.0535, 0.00717},
-	"t3":   {0.0416, 0.00557},
-	"t3a":  {0.0374, 0.00502},
-	"t4g":  {0.0336, 0.0045},
-	"i3":   {0.156, 0.0209},
-	"d3":   {0.1499, 0.02009},
+	"m5":   {0.024, 0.00322},
+	"m5a":  {0.0216, 0.0029},
+	"m5n":  {0.0297, 0.00398},
+	"m5zn": {0.0413, 0.00554},
+	"m6i":  {0.024, 0.00322},
+	"m6a":  {0.0216, 0.0029},
+	"m6g":  {0.0193, 0.00257},
+	"m7i":  {0.0252, 0.00338},
+	"m7a":  {0.0232, 0.0031},
+	"m7g":  {0.0204, 0.00274},
+	"c5":   {0.0213, 0.00285},
+	"c5a":  {0.0192, 0.00257},
+	"c5n":  {0.027, 0.00362},
+	"c6i":  {0.0213, 0.00285},
+	"c6a":  {0.0192, 0.00257},
+	"c6g":  {0.017, 0.00228},
+	"c7i":  {0.0223, 0.00299},
+	"c7a":  {0.0204, 0.00274},
+	"c7g":  {0.0181, 0.00242},
+	"r5":   {0.0315, 0.00422},
+	"r5a":  {0.0284, 0.0038},
+	"r5n":  {0.0372, 0.00499},
+	"r6i":  {0.0315, 0.00422},
+	"r6a":  {0.0284, 0.0038},
+	"r6g":  {0.0252, 0.00338},
+	"r7i":  {0.0331, 0.00443},
+	"r7a":  {0.0303, 0.00407},
+	"r7g":  {0.0268, 0.00359},
+	"t3":   {0.0208, 0.00279},
+	"t3a":  {0.0187, 0.00251},
+	"t4g":  {0.0168, 0.00225},
+	"i3":   {0.078, 0.01045},
+	"d3":   {0.075, 0.01005},
 }
 
 // awsGPURates maps GPU types to per-GPU hourly rates.
@@ -242,10 +242,12 @@ func (s *PricingService) GetCurrentPricing(ctx context.Context, region string) (
 	return info, nil
 }
 
-// fetchRealPricing calls the AWS Pricing API GetProducts to get real per-instance-type
-// hourly on-demand prices for the given region.
+// fetchRealPricing calls the AWS Pricing API GetProducts to get per-instance-type
+// hourly prices for the given region. It prefers 3-year convertible no-upfront
+// reserved pricing; if unavailable for a type, it halves the on-demand price.
 func (s *PricingService) fetchRealPricing(ctx context.Context, region string) (map[string]float64, error) {
-	prices := make(map[string]float64)
+	onDemandPrices := make(map[string]float64)
+	reservedPrices := make(map[string]float64) // 3yr convertible
 
 	filters := []pricingtypes.Filter{
 		{Type: pricingtypes.FilterTypeTermMatch, Field: awscfg.String("ServiceCode"), Value: awscfg.String("AmazonEC2")},
@@ -275,23 +277,46 @@ func (s *PricingService) fetchRealPricing(ctx context.Context, region string) (m
 		}
 
 		for _, priceListJSON := range pageResult.PriceList {
-			instanceType, hourlyPrice, ok := parseAWSPriceListItem(priceListJSON)
+			instanceType, onDemand, reserved, ok := parseAWSPriceListItemFull(priceListJSON)
 			if !ok {
 				continue
 			}
-			// Keep the first (or lowest) price per instance type.
-			if existing, found := prices[instanceType]; !found || hourlyPrice < existing {
-				prices[instanceType] = hourlyPrice
+			if onDemand > 0 {
+				if existing, found := onDemandPrices[instanceType]; !found || onDemand < existing {
+					onDemandPrices[instanceType] = onDemand
+				}
 			}
+			if reserved > 0 {
+				if existing, found := reservedPrices[instanceType]; !found || reserved < existing {
+					reservedPrices[instanceType] = reserved
+				}
+			}
+		}
+	}
+
+	// Build effective prices: prefer 3yr convertible reserved, else on-demand / 2
+	prices := make(map[string]float64, len(onDemandPrices))
+	for it, od := range onDemandPrices {
+		if rp, ok := reservedPrices[it]; ok {
+			prices[it] = rp
+		} else {
+			prices[it] = od / 2
+		}
+	}
+	// Include any reserved-only entries (unlikely but safe)
+	for it, rp := range reservedPrices {
+		if _, ok := prices[it]; !ok {
+			prices[it] = rp
 		}
 	}
 
 	return prices, nil
 }
 
-// parseAWSPriceListItem parses a single PriceList JSON string from the AWS Pricing API
-// and extracts the instance type and hourly on-demand USD price.
-func parseAWSPriceListItem(priceJSON string) (instanceType string, price float64, ok bool) {
+// parseAWSPriceListItemFull parses a single PriceList JSON string from the AWS Pricing API
+// and extracts the instance type, hourly on-demand price, and 3-year convertible
+// no-upfront reserved hourly price (if available).
+func parseAWSPriceListItemFull(priceJSON string) (instanceType string, onDemandPrice, reservedPrice float64, ok bool) {
 	var item struct {
 		Product struct {
 			Attributes struct {
@@ -305,18 +330,30 @@ func parseAWSPriceListItem(priceJSON string) (instanceType string, price float64
 					PricePerUnit map[string]string `json:"pricePerUnit"`
 				} `json:"priceDimensions"`
 			} `json:"OnDemand"`
+			Reserved map[string]struct {
+				TermAttributes struct {
+					LeaseContractLength string `json:"LeaseContractLength"`
+					OfferingClass       string `json:"OfferingClass"`
+					PurchaseOption      string `json:"PurchaseOption"`
+				} `json:"termAttributes"`
+				PriceDimensions map[string]struct {
+					Unit         string            `json:"unit"`
+					PricePerUnit map[string]string `json:"pricePerUnit"`
+				} `json:"priceDimensions"`
+			} `json:"Reserved"`
 		} `json:"terms"`
 	}
 
 	if err := json.Unmarshal([]byte(priceJSON), &item); err != nil {
-		return "", 0, false
+		return "", 0, 0, false
 	}
 
 	instanceType = item.Product.Attributes.InstanceType
 	if instanceType == "" {
-		return "", 0, false
+		return "", 0, 0, false
 	}
 
+	// Extract on-demand hourly price
 	for _, offer := range item.Terms.OnDemand {
 		for _, dim := range offer.PriceDimensions {
 			if dim.Unit != "Hrs" {
@@ -330,11 +367,44 @@ func parseAWSPriceListItem(priceJSON string) (instanceType string, price float64
 			if err != nil || p <= 0 {
 				continue
 			}
-			return instanceType, p, true
+			onDemandPrice = p
+			break
+		}
+		if onDemandPrice > 0 {
+			break
 		}
 	}
 
-	return "", 0, false
+	// Extract 3-year convertible no-upfront reserved hourly price
+	for _, offer := range item.Terms.Reserved {
+		attrs := offer.TermAttributes
+		if attrs.LeaseContractLength != "3yr" ||
+			attrs.OfferingClass != "convertible" ||
+			attrs.PurchaseOption != "No Upfront" {
+			continue
+		}
+		for _, dim := range offer.PriceDimensions {
+			if dim.Unit != "Hrs" {
+				continue
+			}
+			usdStr, exists := dim.PricePerUnit["USD"]
+			if !exists {
+				continue
+			}
+			p, err := strconv.ParseFloat(usdStr, 64)
+			if err != nil || p <= 0 {
+				continue
+			}
+			if reservedPrice == 0 || p < reservedPrice {
+				reservedPrice = p
+			}
+		}
+	}
+
+	if onDemandPrice == 0 && reservedPrice == 0 {
+		return "", 0, 0, false
+	}
+	return instanceType, onDemandPrice, reservedPrice, true
 }
 
 func (s *PricingService) GetInstanceTypes(ctx context.Context, region string) ([]*cloudprovider.InstanceType, error) {
@@ -443,8 +513,8 @@ func extractAWSFamily(instanceType string) string {
 func computeAWSPrice(family string, cpuCores, memMiB, gpus int, gpuType string) float64 {
 	rates, ok := awsComponentRates[family]
 	if !ok {
-		// Fallback for unknown families
-		rates = struct{ cpuRate, memRate float64 }{0.048, 0.00643} // m5 rates as default
+		// Fallback for unknown families (m5 3yr convertible reserved rates)
+		rates = struct{ cpuRate, memRate float64 }{0.024, 0.00322}
 	}
 	price := float64(cpuCores)*rates.cpuRate + float64(memMiB)/1024*rates.memRate
 	if gpus > 0 {
