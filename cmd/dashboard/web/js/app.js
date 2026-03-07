@@ -3,6 +3,7 @@ import { api, apiPut } from './api.js';
 import { $ } from './utils.js';
 import { store } from './store.js';
 import { addRoute, initRouter, handleNavigation } from './router.js';
+import { checkAuth, showLogin } from './auth.js';
 
 // Pages
 import { renderOverview } from './pages/overview.js';
@@ -166,9 +167,20 @@ document.querySelector('.sidebar-header')?.addEventListener('click', () => {
   localStorage.setItem('kopt-sidebar-collapsed', String(collapsed));
 });
 
-// Init
-initSidebarCollapse();
-initTheme();
-updateModeBadge();
-initRouter();
-lastUpdated = Date.now();
+// Init — check auth before loading the app
+async function init() {
+  const authed = await checkAuth();
+  if (!authed) {
+    showLogin(() => init());
+    return;
+  }
+  document.getElementById('sidebar').style.display = '';
+  document.getElementById('content').style.display = '';
+  initSidebarCollapse();
+  initTheme();
+  updateModeBadge();
+  initRouter();
+  lastUpdated = Date.now();
+}
+
+init();

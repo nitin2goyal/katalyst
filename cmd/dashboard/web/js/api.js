@@ -10,6 +10,11 @@ async function fetchWithRetry(url, opts, retries = MAX_RETRIES) {
     try {
       const res = await fetch(url, opts);
       if (!res.ok) {
+        // Session expired — reload to show login
+        if (res.status === 401) {
+          window.location.reload();
+          throw new Error('Session expired');
+        }
         // Retry on server errors (5xx), not client errors (4xx)
         if (res.status >= 500 && attempt < retries) {
           await new Promise(r => setTimeout(r, RETRY_DELAY * attempt));
