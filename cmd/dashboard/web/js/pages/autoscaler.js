@@ -275,6 +275,22 @@ function severityBadge(severity) {
   }
 }
 
+function causeIcon(cause) {
+  const cl = cause.toLowerCase();
+  if (cl.includes('metrics') || cl.includes('unavailable')) return 'Metrics';
+  if (cl.includes('fallback')) return 'Fallback';
+  if (cl.includes('pdb') || cl.includes('blocked')) return 'PDB';
+  if (cl.includes('stuck') || cl.includes('last hpa scale')) return 'Stuck';
+  if (cl.includes('paused')) return 'Paused';
+  if (cl.includes('max replicas') || cl.includes('at max')) return 'At Max';
+  if (cl.includes('minreplicas') || cl.includes('too high')) return 'Min High';
+  if (cl.includes('not ready')) return 'Not Ready';
+  if (cl.includes('inactive')) return 'Inactive';
+  if (cl.includes('scalinglimited')) return 'Limited';
+  if (cl.includes('cooldown') || cl.includes('dropped')) return 'Cooldown';
+  return 'Config';
+}
+
 async function renderOverscaled(targetEl) {
   targetEl.innerHTML = skeleton(5);
   let data;
@@ -318,10 +334,21 @@ async function renderOverscaled(targetEl) {
             <th>Min</th>
             <th>Max</th>
             <th>Wasted/mo</th>
-            <th>Reason</th>
+            <th>Root Cause</th>
           </tr></thead>
           <tbody>
-            ${workloads.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+            ${workloads.map(w => {
+              const causes = w.rootCauses || [];
+              const causeHtml = causes.length > 0
+                ? causes.map(c => {
+                    const cls = c.includes('metrics') || c.includes('unavailable') || c.includes('failing') ? 'red'
+                      : c.includes('fallback') || c.includes('stuck') || c.includes('blocked') ? 'amber'
+                      : c.includes('paused') || c.includes('too high') ? 'amber'
+                      : 'gray';
+                    return `<div style="margin:2px 0">${badge(causeIcon(c), cls)} <span style="font-size:11px">${esc(c)}</span></div>`;
+                  }).join('')
+                : '<span style="color:var(--text-muted);font-size:11px">Load dropped after scale-up</span>';
+              return `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
               <td>${severityBadge(w.severity)}</td>
               <td>${esc(w.namespace)}</td>
               <td>${esc(w.name)}</td>
@@ -337,8 +364,9 @@ async function renderOverscaled(targetEl) {
               <td>${w.minReplicas}</td>
               <td>${w.maxReplicas}</td>
               <td><span class="red">${fmt$(w.wastedCostUSD)}</span></td>
-              <td style="max-width:300px;font-size:11px;color:var(--text-muted)">${esc(w.reason)}</td>
-            </tr>`).join('')}
+              <td style="max-width:400px">${causeHtml}</td>
+            </tr>`;
+            }).join('')}
           </tbody>
         </table></div>`
       }
@@ -357,14 +385,15 @@ async function renderOverscaled(targetEl) {
         ['Severity', 'Namespace', 'Kind', 'Name', 'Current Replicas', 'Optimal Replicas',
          'Excess Replicas', 'CPU Req/Pod', 'Total CPU Req', 'Total CPU Used',
          'CPU Eff %', 'Mem Eff %', 'Autoscaler', 'HPA Name', 'Min', 'Max',
-         'Monthly Cost', 'Wasted Cost', 'Reason'],
+         'Monthly Cost', 'Wasted Cost', 'Reason', 'Root Causes'],
         workloads.map(w => [
           w.severity, w.namespace, w.kind, w.name,
           w.currentReplicas, w.optimalReplicas, w.excessReplicas,
           w.cpuRequestPerPod, w.totalCPURequest, w.totalCPUUsage,
           fmtPct(w.cpuEfficiencyPct), fmtPct(w.memEfficiencyPct),
           w.autoscaler, w.autoscalerName, w.minReplicas, w.maxReplicas,
-          fmt$(w.monthlyCostUSD), fmt$(w.wastedCostUSD), w.reason
+          fmt$(w.monthlyCostUSD), fmt$(w.wastedCostUSD), w.reason,
+          (w.rootCauses || []).join(' | ')
         ]),
         'katalyst-overscaled-workloads.csv'
       );
