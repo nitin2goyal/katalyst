@@ -195,15 +195,15 @@ func TestEmptyNodeRecs(t *testing.T) {
 }
 
 func TestUnderutilizedNodeRecs(t *testing.T) {
-	// Node at 5% CPU, 3% mem → high priority
-	lowNode := makeNode("low-1", 16000, 64e9, 800, int64(1.92e9), 0.50,
+	// Node at 4% CPU, 3% mem → high priority (both < 5%)
+	lowNode := makeNode("low-1", 16000, 64e9, 640, int64(1.92e9), 0.50,
 		withPods(makeWorkloadPod("default", "pod-1", "200m")))
 
-	// Node at 15% CPU, 12% mem → medium priority
-	medNode := makeNode("med-1", 4000, 8e9, 600, int64(0.96e9), 0.10,
+	// Node at 10% CPU, 8% mem → medium priority (under 15%, but not both < 5%)
+	medNode := makeNode("med-1", 8000, 16e9, 800, int64(1.28e9), 0.10,
 		withPods(makeWorkloadPod("default", "pod-2", "600m")))
 
-	// Node at 50% CPU → above threshold
+	// Node at 50% CPU → above threshold, no rec
 	highNode := makeNode("high-1", 4000, 8e9, 2000, 4e9, 0.10,
 		withPods(makeWorkloadPod("default", "pod-3", "2000m")))
 
@@ -226,7 +226,7 @@ func TestUnderutilizedNodeRecs(t *testing.T) {
 		t.Fatal("expected underutil rec for low-1")
 	}
 	if lowRec.Priority != "high" {
-		t.Errorf("low-1 priority: got %s, want high", lowRec.Priority)
+		t.Errorf("low-1 priority: got %s, want high (CPU 4%%, mem 3%%)", lowRec.Priority)
 	}
 
 	if medRec == nil {
@@ -247,10 +247,11 @@ func TestPodRightsizingRecs(t *testing.T) {
 	node := makeNode("n1", 16000, 64e9, 1000, 2e9, 1.00,
 		withPods(makeWorkloadPod("app", "web-1", "4000m")))
 
-	// Pod requesting 4000m CPU but only using 400m (10% efficiency) → overprovisioned
+	// Pod requesting 4000m CPU, 16GiB memory, only using 10% CPU, 6% mem
+	// Needs enough memory that the 2 GiB minimum delta can be met.
 	pod := makePod("app", "web-1", "n1",
-		4000, 4e9,  // requests
-		400, 400e6, // usage: 10% CPU, 10% mem
+		4000, 16e9,  // requests: 4 CPU, 16 GiB
+		400, 1e9,    // usage: 10% CPU, 6% mem
 		"Deployment", "web-app")
 
 	recs := computeFromData([]*state.NodeState{node}, []*state.PodState{pod}, nil, nil)
@@ -455,18 +456,19 @@ func TestUnderutilizedWithHistoricalP95(t *testing.T) {
 	ms := intmetrics.NewStore(7 * 24 * time.Hour)
 	now := time.Now()
 
-	// Node at 5% P95 CPU, 3% P95 memory (capacity: 16000m CPU, 64GiB mem)
+	// Node at 4% P95 CPU, 3% P95 memory (capacity: 16000m CPU, 64GiB mem)
+	// Both < 5% → high priority
 	// Seed 500 points within last 5h55m (>360 threshold, well within 6h window)
 	for i := 0; i < 500; i++ {
 		ms.RecordNodeMetrics(pkgmetrics.NodeMetrics{
 			Name:        "hist-node-1",
 			Timestamp:   now.Add(-355*time.Minute + time.Duration(i)*43*time.Second),
-			CPUUsage:    800,     // 800m out of 16000m = 5%
+			CPUUsage:    640,     // 640m out of 16000m = 4%
 			MemoryUsage: 1920e6, // ~1.92GB out of 64GB = 3%
 		})
 	}
 
-	node := makeNode("hist-node-1", 16000, 64e9, 800, int64(1.92e9), 0.50,
+	node := makeNode("hist-node-1", 16000, 64e9, 640, int64(1.92e9), 0.50,
 		withPods(makeWorkloadPod("default", "pod-1", "200m")))
 
 	recs := computeFromData([]*state.NodeState{node}, nil, nil, ms)
@@ -486,7 +488,7 @@ func TestUnderutilizedWithHistoricalP95(t *testing.T) {
 		t.Errorf("confidence: got %.2f, want 0.90", found.Confidence)
 	}
 	if found.Priority != "high" {
-		t.Errorf("priority: got %s, want high (CPU 5%%, mem 3%%)", found.Priority)
+		t.Errorf("priority: got %s, want high (CPU 4%%, mem 3%%)", found.Priority)
 	}
 }
 

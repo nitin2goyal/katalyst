@@ -9,6 +9,34 @@ import (
 	"github.com/koptimizer/koptimizer/pkg/optimizer"
 )
 
+// Safety invariant constants — single source of truth for all thresholds.
+// Tests reference these directly so changes are automatically consistent.
+const (
+	// MinCPUFloorMilli is the absolute minimum CPU target. Pods with requests
+	// at or below this are never rightsized — sub-1-CPU savings aren't worth
+	// the disruption.
+	MinCPUFloorMilli = 1000
+
+	// MinMemDeltaBytes is the minimum memory reduction required to emit a
+	// recommendation. Restarting pods for less than 2 GiB of memory savings
+	// isn't worth the disruption.
+	MinMemDeltaBytes = 2 * 1024 * 1024 * 1024
+
+	// MinMemFloorBytes is the absolute minimum memory target (32Mi).
+	MinMemFloorBytes = 32 * 1024 * 1024
+
+	// DefaultMinKeepRatio is the fallback minimum fraction of current resources
+	// to keep per cycle (70% = max 30% reduction).
+	DefaultMinKeepRatio = 0.7
+
+	// UsageHeadroom is the multiplier applied to P95 usage to compute the
+	// minimum safe resource level (20% headroom above P95).
+	UsageHeadroom = 1.2
+
+	// MinCPUAbsolute is the smallest CPU value we'd ever compute (cosmetic floor).
+	MinCPUAbsolute = 10
+)
+
 // Recommender generates CPU/memory rightsizing recommendations.
 type Recommender struct {
 	config *config.Config
@@ -19,11 +47,11 @@ func NewRecommender(cfg *config.Config) *Recommender {
 }
 
 // Recommend generates recommendations based on pod analysis.
+//
+// All returned recommendations are validated against safety invariants before
+// being returned. Even if a bug in the computation produces an unsafe result,
+// the validation catches it.
 func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendation {
-	var recs []optimizer.Recommendation
-
-	// Require at least 6 data points before making recommendations to avoid
-	// acting on insufficient data (e.g., a pod that just started).
 	if analysis.DataPoints < 6 {
 		return nil
 	}
@@ -36,17 +64,16 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 		return nil
 	}
 
-	// Determine replica count for scaling per-pod savings
 	replicaCount := int64(1)
 	if pod.ReplicaCount > 1 {
 		replicaCount = int64(pod.ReplicaCount)
 	}
 
-	// Downsize when CPU is over-provisioned. Memory is adjusted to match the
-	// node's CPU:memory ratio for optimal bin-packing. Memory may increase if
-	// needed to maintain the ratio — that's acceptable.
+	var recs []optimizer.Recommendation
+
+	// Only generate downsizing recommendations when CPU is over-provisioned.
 	if analysis.IsOverProvCPU && analysis.CPUP95 > 0 {
-		rec := r.recommendNodeRatioDownsize(analysis, replicaCount)
+		rec := r.computeDownsize(analysis, replicaCount)
 		if rec != nil {
 			recs = append(recs, *rec)
 		}
@@ -65,101 +92,47 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 	return recs
 }
 
-// recommendNodeRatioDownsize generates a combined CPU+memory recommendation that
-// aligns the pod's CPU:memory ratio to the node's ratio for optimal bin-packing.
+// computeDownsize generates a combined CPU+memory recommendation that aligns
+// the pod's CPU:memory ratio to the node's ratio for optimal bin-packing.
 //
 // Algorithm:
-//  1. Compute CPU floor from usage (P95 * 1.2, clamped by MinKeepRatio)
+//  1. Compute CPU target from usage (P95 * headroom, clamped by MinKeepRatio
+//     and 1 CPU floor)
 //  2. Compute memory to match node's CPU:memory ratio for the target CPU
-//  3. Clamp memory to usage floor (P95 * 1.2) — never go below actual usage
-//  4. Memory MAY increase if the node ratio or usage floor requires it — this
-//     improves bin-packing and prevents OOM.
-//  5. Only emit if CPU decreases and net savings are positive.
-func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaCount int64) *optimizer.Recommendation {
+//  3. Clamp memory: never below usage floor, never above current request
+//  4. Validate all safety invariants before emitting
+func (r *Recommender) computeDownsize(analysis *PodAnalysis, replicaCount int64) *optimizer.Recommendation {
 	pod := analysis.PodInfo
 
 	minKeepRatio := r.config.Rightsizer.MinKeepRatio
 	if minKeepRatio <= 0 {
-		minKeepRatio = 0.7 // fallback default
+		minKeepRatio = DefaultMinKeepRatio
 	}
 
-	// CPU floor: max of usage-based and minKeepRatio-based
-	cpuFloor := int64(float64(analysis.CPUP95) * 1.2)
-	cpuMinKeep := int64(float64(analysis.CPURequestMilli) * minKeepRatio)
-	if cpuFloor < cpuMinKeep {
-		cpuFloor = cpuMinKeep
-	}
-	if cpuFloor < 10 {
-		cpuFloor = 10
-	}
+	// --- CPU target ---
+	suggestedCPU := computeCPUTarget(analysis.CPUP95, analysis.CPURequestMilli, minKeepRatio)
 
-	// Never downsize below 1 CPU (1000m). For pods already under 1 CPU,
-	// this clamp makes suggestedCPU >= CPURequestMilli, so no rec is
-	// generated (the "never increase CPU" check below catches it).
-	if cpuFloor < 1000 {
-		cpuFloor = 1000
-	}
+	// --- Memory target ---
+	memFloor := computeMemFloor(analysis.MemP95)
+	suggestedMem := computeMemTarget(suggestedCPU, analysis, memFloor)
 
-	suggestedCPU := cpuFloor
-
-	// Never increase CPU
-	if suggestedCPU >= analysis.CPURequestMilli {
-		return nil
-	}
-
-	// Memory floor: never go below actual usage
-	memFloor := int64(float64(analysis.MemP95) * 1.2)
-	minMem := int64(32 * 1024 * 1024) // 32Mi
-	if memFloor < minMem {
-		memFloor = minMem
-	}
-
-	var suggestedMem int64
-
-	if analysis.NodeCPUCapMilli > 0 && analysis.NodeMemCapBytes > 0 {
-		// Match the node's CPU:memory ratio so the pod consumes resources
-		// proportionally — optimal for bin-packing.
-		bytesPerMilli := float64(analysis.NodeMemCapBytes) / float64(analysis.NodeCPUCapMilli)
-		suggestedMem = int64(float64(suggestedCPU) * bytesPerMilli)
-	} else if analysis.CPURequestMilli > 0 {
-		// No node info — reduce memory proportionally to CPU
-		cpuKeepRatio := float64(suggestedCPU) / float64(analysis.CPURequestMilli)
-		suggestedMem = int64(float64(analysis.MemRequestBytes) * cpuKeepRatio)
-	} else {
-		suggestedMem = memFloor
-	}
-
-	// Never go below actual usage
-	if suggestedMem < memFloor {
-		suggestedMem = memFloor
-	}
-
-	// Never increase memory during a cost-saving downsize — the disruption
-	// of restarting pods to increase memory while reducing CPU is confusing
-	// and rarely worth it. Cap memory at its current value.
+	// Cap memory at current — never increase memory during a cost-saving
+	// downsize. Restarting pods to increase memory while reducing CPU is
+	// confusing and rarely worth it.
 	if suggestedMem > analysis.MemRequestBytes {
 		suggestedMem = analysis.MemRequestBytes
 	}
 
-	// Skip if nothing changes
-	if suggestedCPU == analysis.CPURequestMilli && suggestedMem == analysis.MemRequestBytes {
+	// --- Safety validation (catches bugs in the computation above) ---
+	if err := ValidateDownsizeTargets(analysis.CPURequestMilli, suggestedCPU, analysis.MemRequestBytes, suggestedMem); err != nil {
 		return nil
 	}
 
-	// Skip if memory reduction is less than 2 GiB — the disruption from
-	// restarting pods isn't worth a small memory savings.
-	const minMemDelta = 2 * 1024 * 1024 * 1024 // 2 GiB
-	memDelta := analysis.MemRequestBytes - suggestedMem
-	if memDelta > 0 && memDelta < minMemDelta {
-		return nil
-	}
-
+	// --- Savings ---
 	cpuSavings := estimateCPUSavings(analysis.CPURequestMilli, suggestedCPU, r.config.CloudProvider)
 	memSavings := estimateMemorySavings(analysis.MemRequestBytes, suggestedMem, r.config.CloudProvider)
-	perPodSavings := cpuSavings + memSavings
-	totalSavings := perPodSavings * float64(replicaCount)
+	totalSavings := (cpuSavings + memSavings) * float64(replicaCount)
 
-	// Only emit if net savings are positive (CPU savings must outweigh any memory increase cost)
 	if totalSavings <= 0 {
 		return nil
 	}
@@ -307,15 +280,90 @@ func (r *Recommender) recommendUpsize(analysis *PodAnalysis, replicaCount int64)
 	}
 }
 
-// vCPUHourlyCostByCloud returns an approximate per-vCPU hourly cost for the cloud provider.
+// computeCPUTarget determines the suggested CPU in millicores.
+// Result is clamped to: max(P95 * headroom, request * minKeepRatio, 1 CPU floor).
+func computeCPUTarget(cpuP95, cpuRequest int64, minKeepRatio float64) int64 {
+	usageBased := int64(float64(cpuP95) * UsageHeadroom)
+	ratioBased := int64(float64(cpuRequest) * minKeepRatio)
+
+	target := usageBased
+	if target < ratioBased {
+		target = ratioBased
+	}
+	if target < MinCPUAbsolute {
+		target = MinCPUAbsolute
+	}
+	if target < MinCPUFloorMilli {
+		target = MinCPUFloorMilli
+	}
+	return target
+}
+
+// computeMemFloor returns the minimum safe memory target based on P95 usage.
+func computeMemFloor(memP95 int64) int64 {
+	floor := int64(float64(memP95) * UsageHeadroom)
+	if floor < MinMemFloorBytes {
+		floor = MinMemFloorBytes
+	}
+	return floor
+}
+
+// computeMemTarget computes the suggested memory based on node ratio or
+// proportional fallback. The result is clamped to at least memFloor but
+// NOT capped at current — the caller handles that.
+func computeMemTarget(suggestedCPU int64, analysis *PodAnalysis, memFloor int64) int64 {
+	var mem int64
+
+	if analysis.NodeCPUCapMilli > 0 && analysis.NodeMemCapBytes > 0 {
+		// Match the node's CPU:memory ratio for optimal bin-packing.
+		bytesPerMilli := float64(analysis.NodeMemCapBytes) / float64(analysis.NodeCPUCapMilli)
+		mem = int64(float64(suggestedCPU) * bytesPerMilli)
+	} else if analysis.CPURequestMilli > 0 {
+		// No node info — reduce memory proportionally to CPU.
+		cpuKeepRatio := float64(suggestedCPU) / float64(analysis.CPURequestMilli)
+		mem = int64(float64(analysis.MemRequestBytes) * cpuKeepRatio)
+	} else {
+		mem = memFloor
+	}
+
+	if mem < memFloor {
+		mem = memFloor
+	}
+	return mem
+}
+
+// ValidateDownsizeTargets checks all safety invariants on computed targets.
+// Returns nil if valid, or an error describing the violation.
+//
+// This is the safety net — even if the computation has a bug, this function
+// prevents unsafe recommendations from being emitted. Tests also call this
+// directly to verify invariants.
+func ValidateDownsizeTargets(currentCPU, suggestedCPU, currentMem, suggestedMem int64) error {
+	if suggestedCPU >= currentCPU {
+		return fmt.Errorf("CPU not decreasing: %dm -> %dm", currentCPU, suggestedCPU)
+	}
+	if suggestedMem > currentMem {
+		return fmt.Errorf("memory increasing: %s -> %s", formatBytes(currentMem), formatBytes(suggestedMem))
+	}
+	if suggestedCPU < MinCPUFloorMilli {
+		return fmt.Errorf("CPU %dm below %dm floor", suggestedCPU, MinCPUFloorMilli)
+	}
+	memDelta := currentMem - suggestedMem
+	if memDelta < MinMemDeltaBytes {
+		return fmt.Errorf("memory delta %s below %s minimum", formatBytes(memDelta), formatBytes(MinMemDeltaBytes))
+	}
+	return nil
+}
+
+// --- Cost estimation ---
 func vCPUHourlyCostByCloud(cloudProvider string) float64 {
 	switch cloudProvider {
 	case "gcp":
-		return 0.031611 // n2 rate (most common GCP family)
+		return 0.031611
 	case "azure":
-		return 0.043 // Standard_D rate (most common Azure family)
-	default: // aws
-		return 0.04 // m5 rate (most common AWS family)
+		return 0.043
+	default:
+		return 0.04
 	}
 }
 
@@ -324,15 +372,14 @@ func estimateCPUSavings(currentMilli, suggestedMilli int64, cloudProvider string
 	return cpuSaved * vCPUHourlyCostByCloud(cloudProvider) * cost.HoursPerMonth
 }
 
-// memGiBHourlyCostByCloud returns an approximate per-GiB-RAM hourly cost.
 func memGiBHourlyCostByCloud(cloudProvider string) float64 {
 	switch cloudProvider {
 	case "gcp":
-		return 0.004237 // n2 rate
+		return 0.004237
 	case "azure":
-		return 0.005 // Standard_D rate
-	default: // aws
-		return 0.00643 // m5 rate
+		return 0.005
+	default:
+		return 0.00643
 	}
 }
 
@@ -349,9 +396,6 @@ func formatBytes(b int64) string {
 	)
 	switch {
 	case b >= gi && b%gi == 0:
-		// Only use GiB for exact multiples to avoid truncation.
-		// 4.8Gi truncated to "4Gi" would lose 800Mi — the actuator parses
-		// this string back, so precision matters.
 		return fmt.Sprintf("%dGi", b/gi)
 	case b >= mi:
 		return fmt.Sprintf("%dMi", b/mi)

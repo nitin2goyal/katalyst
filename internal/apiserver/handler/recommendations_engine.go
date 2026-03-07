@@ -45,6 +45,13 @@ const (
 	minNodeDataPoints = 360  // 6h at 60s intervals
 	minPodDataPoints  = 1440 // 24h at 60s intervals
 
+	// engineMinCPUFloorMilli matches the rightsizer's 1 CPU floor — never
+	// suggest downsizing below 1000m. Keeps engine and controller consistent.
+	engineMinCPUFloorMilli = 1000
+
+	// engineMinMemDeltaBytes matches the rightsizer's 2 GiB minimum —
+	// don't surface recommendations with less than 2 GiB memory reduction.
+	engineMinMemDeltaBytes = 2 * 1024 * 1024 * 1024
 )
 
 var systemNamespaces = map[string]bool{
@@ -341,6 +348,10 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		if cpuFloor < 10 {
 			cpuFloor = 10
 		}
+		// 1 CPU floor — matches rightsizer controller
+		if cpuFloor < engineMinCPUFloorMilli {
+			cpuFloor = engineMinCPUFloorMilli
+		}
 
 		suggestedCPU := cpuFloor
 
@@ -375,6 +386,10 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			if suggestedMem < memFloor {
 				suggestedMem = memFloor
 			}
+			// Never increase memory beyond current request
+			if suggestedMem > avgMemReq {
+				suggestedMem = avgMemReq
+			}
 		}
 
 		// Per-vCPU / per-GiB savings (matches rightsizer cost model)
@@ -385,6 +400,13 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 		totalSavings := perPodSavings * float64(og.podCount)
 
 		if totalSavings < minSavingsThreshold {
+			continue
+		}
+
+		// Require at least 2 GiB memory reduction per pod — RAM-intensive
+		// workloads shouldn't be disrupted for small or zero memory savings.
+		perPodMemDelta := avgMemReq - suggestedMem
+		if perPodMemDelta < int64(engineMinMemDeltaBytes) {
 			continue
 		}
 
@@ -404,20 +426,15 @@ func appendPodRightsizingRecs(recs []ComputedRecommendation, nodes []*state.Node
 			confidence = 0.90
 		}
 
-		memDirection := "→"
-		if suggestedMem > avgMemReq {
-			memDirection = "↑"
-		}
-
 		recs = append(recs, ComputedRecommendation{
 			ID:               computedID("rightsizing", key),
 			Type:             "rightsizing",
 			Target:           target,
-			Description: fmt.Sprintf("%s %s/%s: %d pod(s) using %.0f%% CPU, %.0f%% memory. Reduce CPU %dm→%dm, memory %s%s%s to save $%.0f/mo.",
+			Description: fmt.Sprintf("%s %s/%s: %d pod(s) using %.0f%% CPU, %.0f%% memory. Reduce CPU %dm→%dm, memory %s→%s to save $%.0f/mo.",
 				og.ownerKind, og.namespace, og.ownerName, og.podCount,
 				avgCPUPct, avgMemPct,
 				avgCPUReq, suggestedCPU,
-				engineFormatBytes(avgMemReq), memDirection, engineFormatBytes(suggestedMem),
+				engineFormatBytes(avgMemReq), engineFormatBytes(suggestedMem),
 				totalSavings),
 			EstimatedSavings: roundCents(totalSavings),
 			Status:           "pending",
