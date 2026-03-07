@@ -52,6 +52,16 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 		}
 	}
 
+	// Upsize when under-provisioned, but only if usage is near the limit.
+	// If the limit is high, the pod can burst beyond its request — no need
+	// to increase the request (and cost) when burst headroom exists.
+	if analysis.IsUnderProvCPU || analysis.IsUnderProvMem {
+		rec := r.recommendUpsize(analysis, replicaCount)
+		if rec != nil {
+			recs = append(recs, *rec)
+		}
+	}
+
 	return recs
 }
 
@@ -183,6 +193,112 @@ func (r *Recommender) recommendNodeRatioDownsize(analysis *PodAnalysis, replicaC
 			"suggestedCPURequest": fmt.Sprintf("%dm", suggestedCPU),
 			"currentMemRequest":   formatBytes(analysis.MemRequestBytes),
 			"suggestedMemRequest": formatBytes(suggestedMem),
+			"p95CPU":              fmt.Sprintf("%dm", analysis.CPUP95),
+			"p95Mem":              formatBytes(analysis.MemP95),
+			"replicaCount":        fmt.Sprintf("%d", replicaCount),
+		},
+		CreatedAt: time.Now(),
+	}
+}
+
+// recommendUpsize generates a request increase recommendation for under-provisioned pods.
+// It skips the increase if the pod has a high limit that provides burst headroom — the pod
+// can already burst beyond its request without needing a permanent request increase.
+func (r *Recommender) recommendUpsize(analysis *PodAnalysis, replicaCount int64) *optimizer.Recommendation {
+	pod := analysis.PodInfo
+
+	needCPUUpsize := analysis.IsUnderProvCPU
+	needMemUpsize := analysis.IsUnderProvMem
+
+	// Skip CPU upsize if limit provides burst headroom (usage < 70% of limit).
+	if needCPUUpsize && analysis.CPULimitMilli > 0 {
+		usageToLimit := float64(analysis.CPUP95) / float64(analysis.CPULimitMilli)
+		if usageToLimit < 0.7 {
+			needCPUUpsize = false
+		}
+	}
+
+	// Skip memory upsize if limit provides headroom (usage < 70% of limit).
+	if needMemUpsize && analysis.MemLimitBytes > 0 {
+		usageToLimit := float64(analysis.MemP95) / float64(analysis.MemLimitBytes)
+		if usageToLimit < 0.7 {
+			needMemUpsize = false
+		}
+	}
+
+	if !needCPUUpsize && !needMemUpsize {
+		return nil
+	}
+
+	suggestedCPU := analysis.CPURequestMilli
+	suggestedMem := analysis.MemRequestBytes
+
+	if needCPUUpsize {
+		// Set request to P95 * 1.2 headroom
+		suggestedCPU = int64(float64(analysis.CPUP95) * 1.2)
+		if suggestedCPU <= analysis.CPURequestMilli {
+			suggestedCPU = analysis.CPURequestMilli // no-op, don't decrease
+			needCPUUpsize = false
+		}
+	}
+
+	if needMemUpsize {
+		suggestedMem = int64(float64(analysis.MemP95) * 1.2)
+		if suggestedMem <= analysis.MemRequestBytes {
+			suggestedMem = analysis.MemRequestBytes
+			needMemUpsize = false
+		}
+	}
+
+	if !needCPUUpsize && !needMemUpsize {
+		return nil
+	}
+
+	var summary string
+	resource := ""
+	if needCPUUpsize && needMemUpsize {
+		resource = "cpu+memory"
+		summary = fmt.Sprintf("Upsize %s/%s: CPU %dm→%dm, memory %s→%s (%d replicas)",
+			pod.Pod.Namespace, pod.OwnerName,
+			analysis.CPURequestMilli, suggestedCPU,
+			formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem),
+			replicaCount)
+	} else if needCPUUpsize {
+		resource = "cpu"
+		summary = fmt.Sprintf("Upsize %s/%s: CPU %dm→%dm (%d replicas)",
+			pod.Pod.Namespace, pod.OwnerName,
+			analysis.CPURequestMilli, suggestedCPU, replicaCount)
+	} else {
+		resource = "memory"
+		summary = fmt.Sprintf("Upsize %s/%s: memory %s→%s (%d replicas)",
+			pod.Pod.Namespace, pod.OwnerName,
+			formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem),
+			replicaCount)
+	}
+
+	return &optimizer.Recommendation{
+		ID:              fmt.Sprintf("rightsize-upsize-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
+		Type:            optimizer.RecommendationPodRightsize,
+		Priority:        optimizer.PriorityHigh,
+		AutoExecutable:  false, // upsizing should be reviewed, not auto-applied
+		TargetKind:      pod.OwnerKind,
+		TargetName:      pod.OwnerName,
+		TargetNamespace: pod.Pod.Namespace,
+		Summary:         summary,
+		ActionSteps: []string{
+			fmt.Sprintf("Increase requests: CPU %dm→%dm, memory %s→%s",
+				analysis.CPURequestMilli, suggestedCPU,
+				formatBytes(analysis.MemRequestBytes), formatBytes(suggestedMem)),
+		},
+		Details: map[string]string{
+			"resource":            resource,
+			"direction":           "upsize",
+			"currentCPURequest":   fmt.Sprintf("%dm", analysis.CPURequestMilli),
+			"suggestedCPURequest": fmt.Sprintf("%dm", suggestedCPU),
+			"currentMemRequest":   formatBytes(analysis.MemRequestBytes),
+			"suggestedMemRequest": formatBytes(suggestedMem),
+			"cpuLimit":            fmt.Sprintf("%dm", analysis.CPULimitMilli),
+			"memLimit":            formatBytes(analysis.MemLimitBytes),
 			"p95CPU":              fmt.Sprintf("%dm", analysis.CPUP95),
 			"p95Mem":              formatBytes(analysis.MemP95),
 			"replicaCount":        fmt.Sprintf("%d", replicaCount),

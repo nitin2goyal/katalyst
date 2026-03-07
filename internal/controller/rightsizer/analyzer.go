@@ -31,6 +31,10 @@ type PodAnalysis struct {
 	IsUnderProvCPU  bool
 	IsUnderProvMem  bool
 
+	// Limits for burst-capacity detection (0 if no limit set)
+	CPULimitMilli int64
+	MemLimitBytes int64
+
 	// Node capacity for ratio-based rightsizing (0 if unknown)
 	NodeCPUCapMilli int64
 	NodeMemCapBytes int64
@@ -58,6 +62,8 @@ func (a *Analyzer) AnalyzePod(ctx context.Context, pod optimizer.PodInfo) *PodAn
 		PodInfo:         pod,
 		CPURequestMilli: pod.CPURequest,
 		MemRequestBytes: pod.MemoryRequest,
+		CPULimitMilli:   pod.CPULimit,
+		MemLimitBytes:   pod.MemoryLimit,
 	}
 
 	// Try to get real percentile data from the metrics store for each container.
