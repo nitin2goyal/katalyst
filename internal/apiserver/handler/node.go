@@ -30,11 +30,15 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 				appCount++
 			}
 		}
-		// Get disk info from the node group
+		// Get disk info and display name from the node group
 		diskType, diskSizeGB := "", 0
+		nodeGroupName := n.NodeGroupID
 		if ng, ok := h.state.GetNodeGroups().Get(n.NodeGroupID); ok {
 			diskType = ng.DiskType
 			diskSizeGB = ng.DiskSizeGB
+			if ng.Name != "" {
+				nodeGroupName = ng.Name
+			}
 		}
 		// Build drain status for cordoned nodes
 		drainStatus := ""
@@ -48,7 +52,7 @@ func (h *NodeHandler) List(w http.ResponseWriter, r *http.Request) {
 			"name":           n.Node.Name,
 			"instanceType":   n.InstanceType,
 			"instanceFamily": n.InstanceFamily,
-			"nodeGroup":      n.NodeGroupID,
+			"nodeGroup":      nodeGroupName,
 			"cpuCapacity":    n.CPUCapacity,
 			"memCapacity":    n.MemoryCapacity,
 			"cpuRequested":   n.CPURequested,
@@ -84,18 +88,22 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get disk info from the node group
+	// Get disk info and display name from the node group
 	diskType, diskSizeGB := "", 0
+	nodeGroupName := node.NodeGroupID
 	if ng, ok := h.state.GetNodeGroups().Get(node.NodeGroupID); ok {
 		diskType = ng.DiskType
 		diskSizeGB = ng.DiskSizeGB
+		if ng.Name != "" {
+			nodeGroupName = ng.Name
+		}
 	}
 
 	resp := map[string]interface{}{
 		"name":           node.Node.Name,
 		"instanceType":   node.InstanceType,
 		"instanceFamily": node.InstanceFamily,
-		"nodeGroup":      node.NodeGroupID,
+		"nodeGroup":      nodeGroupName,
 		"cpuCapacity":    node.CPUCapacity,
 		"memCapacity":    node.MemoryCapacity,
 		"cpuRequested":   node.CPURequested,

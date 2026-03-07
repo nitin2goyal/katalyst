@@ -115,7 +115,7 @@ func (h *AutoscalerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"config": map[string]interface{}{
 			"mode":    h.config.GetMode(),
-			"message": "Node lifecycle managed by GKE cluster autoscaler",
+			"message": "Node lifecycle managed by cluster autoscaler",
 		},
 		"summary": map[string]interface{}{
 			"totalNodes":       totalNodes,
@@ -150,8 +150,9 @@ func isEvictablePod(pod *corev1.Pod) bool {
 	return true
 }
 
-// gkeAutoscalerReasons maps GKE cluster-autoscaler event reasons to readable actions.
-var gkeAutoscalerReasons = map[string]string{
+// autoscalerReasons maps cluster-autoscaler and Karpenter event reasons to readable actions.
+var autoscalerReasons = map[string]string{
+	// Cluster Autoscaler (GKE, EKS, AKS)
 	"ScaleDown":            "scale-down",
 	"ScaleDownEmpty":       "scale-down-empty",
 	"ScaleDownUnneeded":    "scale-down-unneeded",
@@ -164,13 +165,27 @@ var gkeAutoscalerReasons = map[string]string{
 	"DeleteUnneeded":       "delete-unneeded",
 	"DeleteUnregistered":   "delete-unregistered",
 	"ScaleDownDeferral":    "scale-down-deferred",
+	// Karpenter (AWS)
+	"Disrupting":           "disrupting",
+	"DisruptionBlocked":    "disruption-blocked",
+	"Provisioned":          "provisioned",
+	"Deprovisioning":       "deprovisioning",
+	"SpotInterrupted":      "spot-interrupted",
+	"Unconsolidatable":     "unconsolidatable",
+	"NominateFailed":       "nominate-failed",
+}
+
+// autoscalerComponents are k8s event source components for autoscaler providers.
+var autoscalerComponents = map[string]string{
+	"cluster-autoscaler": "ClusterAutoscaler",
+	"karpenter":          "Karpenter",
 }
 
 // GetEvents returns autoscaler-related events: GKE cluster-autoscaler k8s events + KOptimizer audit.
 func (h *AutoscalerHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 	var merged []map[string]interface{}
 
-	// Fetch GKE cluster-autoscaler events from the Kubernetes API
+	// Fetch autoscaler events (Cluster Autoscaler, Karpenter) from the Kubernetes API
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -179,13 +194,14 @@ func (h *AutoscalerHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		for i := range eventList.Items {
 			ev := &eventList.Items[i]
 
-			// Filter: only cluster-autoscaler events
-			if ev.Source.Component != "cluster-autoscaler" {
+			// Filter: only autoscaler-related events
+			sourceName, isAutoscaler := autoscalerComponents[ev.Source.Component]
+			if !isAutoscaler {
 				continue
 			}
 
 			action := ev.Reason
-			if mapped, ok := gkeAutoscalerReasons[ev.Reason]; ok {
+			if mapped, ok := autoscalerReasons[ev.Reason]; ok {
 				action = mapped
 			}
 
@@ -209,10 +225,10 @@ func (h *AutoscalerHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 
 			merged = append(merged, map[string]interface{}{
 				"timestamp": ts.Format(time.RFC3339),
-				"source":    "GKE",
+				"source":    sourceName,
 				"action":    action,
 				"target":    target,
-				"user":      "cluster-autoscaler",
+				"user":      ev.Source.Component,
 				"details":   ev.Message,
 			})
 		}

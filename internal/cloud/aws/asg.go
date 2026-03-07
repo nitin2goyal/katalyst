@@ -34,9 +34,15 @@ func discoverASGs(ctx context.Context, client *autoscaling.Client) ([]*cloudprov
 			family, _ := familylock.ExtractFamily(instanceType)
 
 			labels := make(map[string]string)
+			nodegroupName := ""
 			for _, tag := range asg.Tags {
 				if tag.Key != nil && tag.Value != nil {
 					labels[*tag.Key] = *tag.Value
+					// EKS managed node groups have this tag matching the
+					// eks.amazonaws.com/nodegroup label on nodes.
+					if *tag.Key == "eks:nodegroup-name" {
+						nodegroupName = *tag.Value
+					}
 				}
 			}
 
@@ -45,9 +51,24 @@ func discoverASGs(ctx context.Context, client *autoscaling.Client) ([]*cloudprov
 				zone = asg.AvailabilityZones[0]
 			}
 
+			// Collect instance IDs for fallback node-to-group matching
+			var instanceIDs []string
+			for _, inst := range asg.Instances {
+				if inst.InstanceId != nil {
+					instanceIDs = append(instanceIDs, *inst.InstanceId)
+				}
+			}
+
+			// Use EKS managed nodegroup name for display/matching,
+			// keep ASG name as ID for scaling API calls.
+			displayName := aws.ToString(asg.AutoScalingGroupName)
+			if nodegroupName != "" {
+				displayName = nodegroupName
+			}
+
 			ng := &cloudprovider.NodeGroup{
 				ID:             aws.ToString(asg.AutoScalingGroupName),
-				Name:           aws.ToString(asg.AutoScalingGroupName),
+				Name:           displayName,
 				InstanceType:   instanceType,
 				InstanceFamily: family,
 				CurrentCount:   len(asg.Instances),
@@ -56,6 +77,7 @@ func discoverASGs(ctx context.Context, client *autoscaling.Client) ([]*cloudprov
 				DesiredCount:   int(aws.ToInt32(asg.DesiredCapacity)),
 				Zone:           zone,
 				Labels:         labels,
+				InstanceIDs:    instanceIDs,
 			}
 			groups = append(groups, ng)
 		}
@@ -81,9 +103,13 @@ func getASG(ctx context.Context, client *autoscaling.Client, id string) (*cloudp
 	family, _ := familylock.ExtractFamily(instanceType)
 
 	labels := make(map[string]string)
+	nodegroupName := ""
 	for _, tag := range asg.Tags {
 		if tag.Key != nil && tag.Value != nil {
 			labels[*tag.Key] = *tag.Value
+			if *tag.Key == "eks:nodegroup-name" {
+				nodegroupName = *tag.Value
+			}
 		}
 	}
 
@@ -92,9 +118,21 @@ func getASG(ctx context.Context, client *autoscaling.Client, id string) (*cloudp
 		zone = asg.AvailabilityZones[0]
 	}
 
+	var instanceIDs []string
+	for _, inst := range asg.Instances {
+		if inst.InstanceId != nil {
+			instanceIDs = append(instanceIDs, *inst.InstanceId)
+		}
+	}
+
+	displayName := aws.ToString(asg.AutoScalingGroupName)
+	if nodegroupName != "" {
+		displayName = nodegroupName
+	}
+
 	return &cloudprovider.NodeGroup{
 		ID:             aws.ToString(asg.AutoScalingGroupName),
-		Name:           aws.ToString(asg.AutoScalingGroupName),
+		Name:           displayName,
 		InstanceType:   instanceType,
 		InstanceFamily: family,
 		CurrentCount:   len(asg.Instances),
@@ -103,6 +141,7 @@ func getASG(ctx context.Context, client *autoscaling.Client, id string) (*cloudp
 		DesiredCount:   int(aws.ToInt32(asg.DesiredCapacity)),
 		Zone:           zone,
 		Labels:         labels,
+		InstanceIDs:    instanceIDs,
 	}, nil
 }
 

@@ -721,6 +721,10 @@ func buildNodeGroupMapping(nodes *corev1.NodeList, groups []*cloudprovider.NodeG
 			poolLabel = v
 		} else if v, ok := node.Labels["eks.amazonaws.com/nodegroup"]; ok {
 			poolLabel = v
+		} else if v, ok := node.Labels["alpha.eksctl.io/nodegroup-name"]; ok {
+			poolLabel = v
+		} else if v, ok := node.Labels["karpenter.sh/nodepool"]; ok {
+			poolLabel = v
 		} else if v, ok := node.Labels["kubernetes.azure.com/agentpool"]; ok {
 			poolLabel = v
 		}
@@ -734,32 +738,45 @@ func buildNodeGroupMapping(nodes *corev1.NodeList, groups []*cloudprovider.NodeG
 		}
 	}
 
-	// Pass 2: Fallback — match unmatched nodes by node group labels.
-	for i := range nodes.Items {
-		node := &nodes.Items[i]
-		if _, matched := result[node.Name]; matched {
-			continue
+	// Pass 2: Fallback — match unmatched nodes by instance ID from providerID.
+	// providerID format: aws:///az/i-xxx, gce:///project/zone/name, azure:///subscriptions/...
+	instanceIDToGroup := make(map[string]string)
+	for _, ng := range groups {
+		for _, id := range ng.InstanceIDs {
+			instanceIDToGroup[id] = ng.ID
 		}
-		if node.Labels == nil {
-			continue
-		}
-		for _, ng := range groups {
-			if len(ng.Labels) == 0 {
+	}
+	if len(instanceIDToGroup) > 0 {
+		for i := range nodes.Items {
+			node := &nodes.Items[i]
+			if _, matched := result[node.Name]; matched {
 				continue
 			}
-			allMatch := true
-			for k, v := range ng.Labels {
-				if nodeVal, ok := node.Labels[k]; !ok || nodeVal != v {
-					allMatch = false
-					break
+			instanceID := extractInstanceID(node.Spec.ProviderID)
+			if instanceID != "" {
+				if ngID, ok := instanceIDToGroup[instanceID]; ok {
+					result[node.Name] = ngID
 				}
-			}
-			if allMatch {
-				result[node.Name] = ng.ID
-				break
 			}
 		}
 	}
 
 	return result
+}
+
+// extractInstanceID extracts the cloud instance ID from a node's providerID.
+// AWS format: aws:///us-east-1a/i-0123456789abcdef0
+func extractInstanceID(providerID string) string {
+	if providerID == "" {
+		return ""
+	}
+	// Find the last "/" and take everything after it
+	lastSlash := len(providerID) - 1
+	for lastSlash >= 0 && providerID[lastSlash] != '/' {
+		lastSlash--
+	}
+	if lastSlash >= 0 && lastSlash < len(providerID)-1 {
+		return providerID[lastSlash+1:]
+	}
+	return ""
 }

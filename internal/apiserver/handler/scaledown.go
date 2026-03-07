@@ -160,13 +160,23 @@ func (h *ScaleDownBlockersHandler) getScaleDownFailedEvents(ctx context.Context)
 		return []map[string]interface{}{}
 	}
 
+	// Autoscaler components that emit scale-down failure events
+	autoscalerSources := map[string]bool{
+		"cluster-autoscaler": true,
+		"karpenter":          true,
+	}
+	failureReasons := map[string]bool{
+		"ScaleDownFailed":   true,
+		"DisruptionBlocked": true, // Karpenter equivalent
+	}
+
 	var result []map[string]interface{}
 	for i := range eventList.Items {
 		ev := &eventList.Items[i]
-		if ev.Source.Component != "cluster-autoscaler" {
+		if !autoscalerSources[ev.Source.Component] {
 			continue
 		}
-		if ev.Reason != "ScaleDownFailed" {
+		if !failureReasons[ev.Reason] {
 			continue
 		}
 

@@ -86,6 +86,7 @@ type NodeGroup struct {
 	InstanceTypes  []string // Multiple instance types for spot diversity
 	DiskType       string   // e.g. "pd-balanced", "hyperdisk-balanced", "gp3"
 	DiskSizeGB     int      // boot disk size in GiB
+	InstanceIDs    []string // Cloud instance IDs (e.g., EC2 instance IDs) for node matching
 }
 
 // SpotInstanceInfo provides spot-specific pricing and reliability data.
