@@ -72,18 +72,10 @@ func (r *Recommender) Recommend(analysis *PodAnalysis) []optimizer.Recommendatio
 	var recs []optimizer.Recommendation
 
 	// Only generate downsizing recommendations when CPU is over-provisioned.
+	// Upsize recommendations are intentionally disabled — all scaling decisions
+	// must be human-reviewed via the bulk approval UI.
 	if analysis.IsOverProvCPU && analysis.CPUP95 > 0 {
 		rec := r.computeDownsize(analysis, replicaCount)
-		if rec != nil {
-			recs = append(recs, *rec)
-		}
-	}
-
-	// Upsize when under-provisioned, but only if usage is near the limit.
-	// If the limit is high, the pod can burst beyond its request — no need
-	// to increase the request (and cost) when burst headroom exists.
-	if analysis.IsUnderProvCPU || analysis.IsUnderProvMem {
-		rec := r.recommendUpsize(analysis, replicaCount)
 		if rec != nil {
 			recs = append(recs, *rec)
 		}
@@ -141,7 +133,7 @@ func (r *Recommender) computeDownsize(analysis *PodAnalysis, replicaCount int64)
 		ID:              fmt.Sprintf("rightsize-combined-%s-%s-%d", pod.Pod.Namespace, pod.Pod.Name, time.Now().Unix()),
 		Type:            optimizer.RecommendationPodRightsize,
 		Priority:        optimizer.PriorityMedium,
-		AutoExecutable:  true,
+		AutoExecutable:  false,
 		TargetKind:      pod.OwnerKind,
 		TargetName:      pod.OwnerName,
 		TargetNamespace: pod.Pod.Namespace,

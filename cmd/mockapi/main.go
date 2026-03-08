@@ -214,6 +214,15 @@ func main() {
 			writeJSON(w, recSummary())
 		} else if strings.HasSuffix(path, "/debug") {
 			writeJSON(w, recDebug())
+		} else if strings.HasSuffix(path, "/bulk-approve") || strings.HasSuffix(path, "/bulk-dismiss") {
+			var body map[string][]string
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]string{"error": "invalid JSON"})
+				return
+			}
+			ids := body["ids"]
+			writeJSON(w, map[string]any{"processed": len(ids), "failed": 0, "errors": []string{}})
 		} else if strings.Contains(path, "/approve") || strings.Contains(path, "/dismiss") {
 			writeJSON(w, map[string]string{"status": "ok"})
 		} else {

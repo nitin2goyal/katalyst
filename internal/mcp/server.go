@@ -202,6 +202,27 @@ func (s *MCPServer) executeTool(name string, args map[string]interface{}) (json.
 		return str, nil
 	}
 
+	// Helper to extract a string array argument.
+	getStringArray := func(key string) ([]string, error) {
+		v, ok := args[key]
+		if !ok {
+			return nil, fmt.Errorf("missing required argument: %s", key)
+		}
+		arr, ok := v.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("argument %s must be an array", key)
+		}
+		result := make([]string, 0, len(arr))
+		for i, item := range arr {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("argument %s[%d] must be a string", key, i)
+			}
+			result = append(result, s)
+		}
+		return result, nil
+	}
+
 	switch name {
 	// ── Cluster ──
 	case "get_cluster_summary":
@@ -282,6 +303,18 @@ func (s *MCPServer) executeTool(name string, args map[string]interface{}) (json.
 		return s.client.DismissRecommendation(id)
 	case "get_recommendations_summary":
 		return s.client.GetRecommendationsSummary()
+	case "bulk_approve_recommendations":
+		ids, err := getStringArray("ids")
+		if err != nil {
+			return nil, err
+		}
+		return s.client.BulkApproveRecommendations(ids)
+	case "bulk_dismiss_recommendations":
+		ids, err := getStringArray("ids")
+		if err != nil {
+			return nil, err
+		}
+		return s.client.BulkDismissRecommendations(ids)
 
 	// ── Workloads ──
 	case "list_workloads":

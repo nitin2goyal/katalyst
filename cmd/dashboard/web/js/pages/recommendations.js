@@ -10,8 +10,30 @@ const REC_STATUS_KEY = 'kopt-rec-statuses';
 function loadRecStatuses() { try { return JSON.parse(localStorage.getItem(REC_STATUS_KEY)) || {}; } catch { return {}; } }
 function saveRecStatus(id, status) { const s = loadRecStatuses(); s[id] = status; localStorage.setItem(REC_STATUS_KEY, JSON.stringify(s)); }
 
+// Track selected recommendation IDs for bulk actions
+let _selectedIds = new Set();
+
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-actions-bar');
+  if (!bar) return;
+  const n = _selectedIds.size;
+  if (n === 0) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  bar.querySelector('.bulk-count').textContent = n;
+}
+
+function toggleSelection(id, checked) {
+  if (checked) _selectedIds.add(id);
+  else _selectedIds.delete(id);
+  updateBulkBar();
+}
+
 export async function renderRecsTab(targetEl) {
   targetEl.innerHTML = skeleton(5);
+  _selectedIds = new Set();
   try {
     const [recs, summary, configData] = await Promise.all([
       api('/recommendations?pageSize=1000'),
@@ -69,6 +91,12 @@ export async function renderRecsTab(targetEl) {
       </div>
       ${_isComputed ? '<div class="info-banner">These recommendations are computed from live cluster data. Switch to OPTIMIZE mode to enable automatic execution.</div>' : ''}
       ${autoApproveRightsizer ? '<div class="info-banner" style="border-color:var(--green)">Auto-approve is ON for: Rightsizing (once per workload).</div>' : ''}
+      <div class="bulk-actions-bar" id="bulk-actions-bar" style="display:none">
+        <span><strong><span class="bulk-count">0</span></strong> selected</span>
+        <button class="btn btn-green btn-sm" id="bulk-approve-btn">Approve Selected</button>
+        <button class="btn btn-gray btn-sm" id="bulk-dismiss-btn">Dismiss Selected</button>
+        <button class="btn btn-sm" id="bulk-deselect-btn" style="background:transparent;color:var(--text-muted)">Deselect All</button>
+      </div>
       <details class="debug-panel mb-4" id="debug-panel">
         <summary class="debug-summary">Data Validation (click to expand)</summary>
         <div class="card debug-content" id="debug-panel-content">
@@ -80,12 +108,12 @@ export async function renderRecsTab(targetEl) {
         ${filterBar({
           placeholder: 'Search recommendations...',
           filters: [
-            { key: '0', label: 'Type', options: types },
-            { key: '5', label: 'Status', options: statuses },
+            { key: '1', label: 'Type', options: types },
+            { key: '6', label: 'Status', options: statuses },
           ]
         })}
         <div class="table-wrap"><table id="rec-table">
-          <thead><tr><th>Type</th><th>Target</th><th>Description</th><th>Savings</th><th>Confidence</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th class="bulk-check-col"><input type="checkbox" id="select-all-recs" title="Select all pending"></th><th>Type</th><th>Target</th><th>Description</th><th>Savings</th><th>Confidence</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="rec-body"></tbody>
         </table></div>
       </div>`;
@@ -97,8 +125,29 @@ export async function renderRecsTab(targetEl) {
     const fb = targetEl.querySelector('.filter-bar');
     if (fb) attachFilterHandlers(fb, $('#rec-table'), pag);
 
-    // Handle button clicks (approve/dismiss) and row expand via event delegation
+    // Select All checkbox
+    const selectAllCb = document.getElementById('select-all-recs');
+    if (selectAllCb) {
+      // Prevent click from bubbling to <th> which would trigger makeSortable
+      selectAllCb.addEventListener('click', (e) => e.stopPropagation());
+      selectAllCb.addEventListener('change', () => {
+        const checked = selectAllCb.checked;
+        document.querySelectorAll('#rec-body input.rec-checkbox').forEach(cb => {
+          cb.checked = checked;
+          toggleSelection(cb.dataset.recId, checked);
+        });
+      });
+    }
+
+    // Handle checkbox clicks, button clicks, and row expand via event delegation
     targetEl.querySelector('#rec-body')?.addEventListener('click', (e) => {
+      // Checkbox change
+      const cb = e.target.closest('input.rec-checkbox');
+      if (cb) {
+        e.stopPropagation();
+        toggleSelection(cb.dataset.recId, cb.checked);
+        return;
+      }
       const btn = e.target.closest('button[data-action]');
       if (btn) {
         e.stopPropagation();
@@ -108,9 +157,19 @@ export async function renderRecsTab(targetEl) {
         return;
       }
       const row = e.target.closest('tr');
-      if (!row || e.target.closest('button')) return;
+      if (!row || e.target.closest('button') || e.target.closest('input')) return;
       const descCell = row.querySelector('.rec-desc');
       if (descCell) descCell.classList.toggle('rec-desc-expanded');
+    });
+
+    // Bulk action buttons
+    document.getElementById('bulk-approve-btn')?.addEventListener('click', () => bulkAction('approve'));
+    document.getElementById('bulk-dismiss-btn')?.addEventListener('click', () => bulkAction('dismiss'));
+    document.getElementById('bulk-deselect-btn')?.addEventListener('click', () => {
+      _selectedIds.clear();
+      document.querySelectorAll('#rec-body input.rec-checkbox').forEach(cb => cb.checked = false);
+      if (selectAllCb) selectAllCb.checked = false;
+      updateBulkBar();
     });
 
     window.__exportRecsCSV = () => {
@@ -182,17 +241,23 @@ function renderRecTable(recList) {
   $('#rec-body').innerHTML = recList.length ? recList.map(r => {
     const st = r.status || r.Status || 'unknown';
     const isAutoApproved = r._autoApproved;
+    const isPending = st === 'pending' && !isAutoApproved;
     const statusBadge = isAutoApproved ? badge('Auto-Approved', 'green')
       : st === 'pending' ? badge('Pending', 'amber')
       : st === 'approved' ? badge('Approved', 'green')
       : st === 'dismissed' ? badge('Dismissed', 'gray')
       : badge(escapeHtml(st), 'blue');
     const desc = r.description || r.summary || '';
-    const actions = (st === 'pending' && !isAutoApproved) ? `
-      <button class="btn btn-green btn-sm" data-action="approve" data-rec-id="${escapeHtml(r.id || r.ID || '')}">Approve</button>
-      <button class="btn btn-gray btn-sm" data-action="dismiss" data-rec-id="${escapeHtml(r.id || r.ID || '')}" style="margin-left:4px">Dismiss</button>
+    const recId = escapeHtml(r.id || r.ID || '');
+    const checkbox = isPending
+      ? `<input type="checkbox" class="rec-checkbox" data-rec-id="${recId}">`
+      : '';
+    const actions = isPending ? `
+      <button class="btn btn-green btn-sm" data-action="approve" data-rec-id="${recId}">Approve</button>
+      <button class="btn btn-gray btn-sm" data-action="dismiss" data-rec-id="${recId}" style="margin-left:4px">Dismiss</button>
     ` : '';
-    return `<tr class="clickable-row" data-rec-id="${escapeHtml(r.id || r.ID || '')}">
+    return `<tr class="clickable-row" data-rec-id="${recId}">
+      <td class="bulk-check-col">${checkbox}</td>
       <td>${badge(escapeHtml(r.type || r.Type || r.category || ''), 'blue')}</td>
       <td><strong>${escapeHtml(r.target || r.resource || '')}</strong></td>
       <td class="rec-desc"><span class="rec-desc-text">${escapeHtml(desc)}</span><span class="rec-tooltip">${escapeHtml(desc)}</span></td>
@@ -201,7 +266,7 @@ function renderRecTable(recList) {
       <td class="rec-status">${statusBadge}</td>
       <td class="rec-actions" style="white-space:nowrap">${actions}</td>
     </tr>`;
-  }).join('') : '<tr><td colspan="7" style="color:var(--text-muted)">No recommendations</td></tr>';
+  }).join('') : '<tr><td colspan="8" style="color:var(--text-muted)">No recommendations</td></tr>';
 }
 
 function updateRecRow(id, newStatus) {
@@ -209,12 +274,50 @@ function updateRecRow(id, newStatus) {
   if (!row) return;
   const statusCell = row.querySelector('.rec-status');
   const actionsCell = row.querySelector('.rec-actions');
+  const checkCell = row.querySelector('.bulk-check-col');
   if (statusCell) {
     const badgeCls = newStatus === 'approved' ? 'green' : 'gray';
     const label = newStatus === 'approved' ? 'Approved' : 'Dismissed';
     statusCell.innerHTML = `<span class="badge ${badgeCls}">${label}</span>`;
   }
   if (actionsCell) actionsCell.innerHTML = '';
+  if (checkCell) checkCell.innerHTML = '';
+  _selectedIds.delete(id);
+}
+
+async function bulkAction(action) {
+  const ids = [..._selectedIds];
+  if (!ids.length) return;
+
+  const computedIds = ids.filter(id => id.startsWith('computed-'));
+  const apiIds = ids.filter(id => !id.startsWith('computed-'));
+  const status = action === 'approve' ? 'approved' : 'dismissed';
+
+  // Handle computed recs locally
+  computedIds.forEach(id => {
+    saveRecStatus(id, status);
+    updateRecRow(id, status);
+  });
+
+  // Handle API recs via bulk endpoint
+  if (apiIds.length) {
+    try {
+      const endpoint = action === 'approve' ? '/recommendations/bulk-approve' : '/recommendations/bulk-dismiss';
+      await apiPost(endpoint, { ids: apiIds });
+      apiIds.forEach(id => updateRecRow(id, status));
+    } catch (e) {
+      toast(`Bulk ${action} failed: ${e.message}`, 'error');
+      return;
+    }
+  }
+
+  const total = computedIds.length + apiIds.length;
+  toast(`${total} recommendation${total !== 1 ? 's' : ''} ${status}`, action === 'approve' ? 'success' : 'info');
+
+  _selectedIds.clear();
+  const selectAllCb = document.getElementById('select-all-recs');
+  if (selectAllCb) selectAllCb.checked = false;
+  updateBulkBar();
 }
 
 window.__approveRec = async function (id) {

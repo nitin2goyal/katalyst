@@ -137,6 +137,11 @@ func (c *Controller) Execute(ctx context.Context, rec optimizer.Recommendation) 
 		return nil
 	}
 
+	// Defense-in-depth: never execute upsize recommendations regardless of other flags.
+	if rec.Details["direction"] == "upsize" {
+		return nil
+	}
+
 	// Safety actions (OOM memory bumps) always execute immediately.
 	if !isDownsizeRec(rec) {
 		return c.executeWithGate(ctx, rec)
@@ -192,8 +197,9 @@ func (c *Controller) executeWithGate(ctx context.Context, rec optimizer.Recommen
 
 // isDownsizeRec returns true for proportional CPU+memory downsize recommendations.
 // OOM memory bumps are safety actions and return false.
+// Upsize recs (direction == "upsize") are explicitly excluded even if resource == "cpu+memory".
 func isDownsizeRec(rec optimizer.Recommendation) bool {
-	return rec.Details["resource"] == "cpu+memory"
+	return rec.Details["resource"] == "cpu+memory" && rec.Details["direction"] != "upsize"
 }
 
 func (c *Controller) isExcluded(namespace string) bool {

@@ -94,9 +94,10 @@ type InputSchema struct {
 
 // Property describes a single parameter in a JSON Schema.
 type Property struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description"`
-	Enum        []string `json:"enum,omitempty"`
+	Type        string    `json:"type"`
+	Description string    `json:"description"`
+	Enum        []string  `json:"enum,omitempty"`
+	Items       *Property `json:"items,omitempty"`
 }
 
 // ToolsListResult is the response for tools/list.

@@ -237,6 +237,16 @@ func (c *APIClient) GetRecommendationsSummary() (json.RawMessage, error) {
 	return c.doGet("/api/v1/recommendations/summary")
 }
 
+// BulkApproveRecommendations calls POST /api/v1/recommendations/bulk-approve.
+func (c *APIClient) BulkApproveRecommendations(ids []string) (json.RawMessage, error) {
+	return c.doPost("/api/v1/recommendations/bulk-approve", map[string][]string{"ids": ids})
+}
+
+// BulkDismissRecommendations calls POST /api/v1/recommendations/bulk-dismiss.
+func (c *APIClient) BulkDismissRecommendations(ids []string) (json.RawMessage, error) {
+	return c.doPost("/api/v1/recommendations/bulk-dismiss", map[string][]string{"ids": ids})
+}
+
 // ── Workloads ────────────────────────────────────────────────────────────
 
 // ListWorkloads calls GET /api/v1/workloads.

@@ -160,6 +160,28 @@ func AllTools() []Tool {
 			Description: "Get a summary of all recommendations including total count, breakdown by type, and total potential savings in USD.",
 			InputSchema: emptySchema(),
 		},
+		{
+			Name:        "bulk_approve_recommendations",
+			Description: "Approve multiple recommendations at once by their IDs. Returns the count of successfully approved and failed items.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"ids": {Type: "array", Description: "Array of recommendation IDs to approve.", Items: &Property{Type: "string"}},
+				},
+				Required: []string{"ids"},
+			},
+		},
+		{
+			Name:        "bulk_dismiss_recommendations",
+			Description: "Dismiss multiple recommendations at once by their IDs. Returns the count of successfully dismissed and failed items.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"ids": {Type: "array", Description: "Array of recommendation IDs to dismiss.", Items: &Property{Type: "string"}},
+				},
+				Required: []string{"ids"},
+			},
+		},
 
 		// ── Workloads ───────────────────────────────────────────────
 		{

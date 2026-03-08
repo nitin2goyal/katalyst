@@ -140,7 +140,7 @@ func TestRecommend_SafetyInvariants(t *testing.T) {
 	}{
 		// --- Never increase CPU ---
 		{
-			name: "under-provisioned CPU: upsize rec only (not auto-executable)",
+			name: "under-provisioned CPU: no upsize recs generated",
 			analysis: &PodAnalysis{
 				PodInfo:         podInfo("a", "prod", "Deployment", "api", 100, gi),
 				CPURequestMilli: 100, MemRequestBytes: gi,
@@ -148,7 +148,7 @@ func TestRecommend_SafetyInvariants(t *testing.T) {
 				IsOverProvCPU: false, IsUnderProvCPU: true,
 				DataPoints: 500,
 			},
-			wantN: 1,
+			wantN: 0,
 		},
 		{
 			name: "CPU P95 near request: floor exceeds current",
@@ -187,7 +187,7 @@ func TestRecommend_SafetyInvariants(t *testing.T) {
 			wantN: 0,
 		},
 		{
-			name: "under-provisioned memory only: upsize rec only (not auto-executable)",
+			name: "under-provisioned memory only: no upsize recs generated",
 			analysis: &PodAnalysis{
 				PodInfo:         podInfo("a", "prod", "StatefulSet", "worker", 500, 512*mi),
 				CPURequestMilli: 500, MemRequestBytes: 512 * mi,
@@ -195,7 +195,7 @@ func TestRecommend_SafetyInvariants(t *testing.T) {
 				IsOverProvCPU:  false, IsUnderProvMem: true,
 				DataPoints: 800,
 			},
-			wantN: 1,
+			wantN: 0,
 		},
 
 		// --- 1 CPU (1000m) floor ---
@@ -488,8 +488,8 @@ func TestRecommend_MetadataFields(t *testing.T) {
 	if rec.TargetNamespace != "staging" {
 		t.Errorf("TargetNamespace = %q, want staging", rec.TargetNamespace)
 	}
-	if !rec.AutoExecutable {
-		t.Error("AutoExecutable should be true")
+	if rec.AutoExecutable {
+		t.Error("AutoExecutable should be false — all recs require manual approval")
 	}
 	if rec.Type != optimizer.RecommendationPodRightsize {
 		t.Errorf("Type = %q, want %q", rec.Type, optimizer.RecommendationPodRightsize)
@@ -546,8 +546,8 @@ func TestRecommend_ProductionRegressions(t *testing.T) {
 	}{
 		{
 			// Audit: "Upsize spr-apps/spr-confluence-plugin: CPU 23m→270m"
-			// Now generates upsize rec with AutoExecutable=false (safe, not auto-applied)
-			name: "prod: 23m CPU pod upsize is recommend-only",
+			// Upsize recs are no longer generated
+			name: "prod: 23m CPU pod — no upsize rec",
 			analysis: &PodAnalysis{
 				PodInfo:         podInfo("a", "spr-apps", "ReplicaSet", "spr-confluence", 23, 4*gi),
 				CPURequestMilli: 23, MemRequestBytes: 4 * gi,
@@ -555,7 +555,7 @@ func TestRecommend_ProductionRegressions(t *testing.T) {
 				IsOverProvCPU: false, IsUnderProvCPU: true,
 				DataPoints: 500,
 			},
-			wantN: 1,
+			wantN: 0,
 		},
 		{
 			// Audit: "Upsize spr-apps/standalone-monitoring-log: CPU 200m→282m"
@@ -571,8 +571,8 @@ func TestRecommend_ProductionRegressions(t *testing.T) {
 		},
 		{
 			// Audit: "Upsize spr-apps/standalone-dialer: CPU 460m→5624m"
-			// Now generates upsize rec with AutoExecutable=false (safe, not auto-applied)
-			name: "prod: 460m CPU pod upsize is recommend-only",
+			// Upsize recs are no longer generated
+			name: "prod: 460m CPU pod — no upsize rec",
 			analysis: &PodAnalysis{
 				PodInfo:         podInfo("a", "spr-apps", "ReplicaSet", "dialer", 460, 16*gi),
 				CPURequestMilli: 460, MemRequestBytes: 16 * gi,
@@ -580,7 +580,7 @@ func TestRecommend_ProductionRegressions(t *testing.T) {
 				IsOverProvCPU: false, IsUnderProvCPU: true,
 				DataPoints: 500,
 			},
-			wantN: 1,
+			wantN: 0,
 		},
 		{
 			// Audit: "Upsize spr-apps/icx-vxml-browser: memory 6724Mi→15413Mi"
@@ -597,8 +597,8 @@ func TestRecommend_ProductionRegressions(t *testing.T) {
 		},
 		{
 			// Audit: "Upsize spr-apps/automation-test-tracker: CPU 10m→694m"
-			// Now generates upsize rec with AutoExecutable=false (safe, not auto-applied)
-			name: "prod: 10m CPU pod upsize is recommend-only",
+			// Upsize recs are no longer generated
+			name: "prod: 10m CPU pod — no upsize rec",
 			analysis: &PodAnalysis{
 				PodInfo:         podInfo("a", "spr-apps", "ReplicaSet", "test-tracker", 10, 4*gi),
 				CPURequestMilli: 10, MemRequestBytes: 4 * gi,
@@ -606,12 +606,12 @@ func TestRecommend_ProductionRegressions(t *testing.T) {
 				IsOverProvCPU: false, IsUnderProvCPU: true,
 				DataPoints: 500,
 			},
-			wantN: 1,
+			wantN: 0,
 		},
 		{
 			// Audit: "Upsize monitoring/prometheus-server: CPU 300m→2132m, memory 16640Mi→49197Mi"
-			// Now generates upsize rec with AutoExecutable=false (safe, not auto-applied)
-			name: "prod: prometheus upsize is recommend-only",
+			// Upsize recs are no longer generated
+			name: "prod: prometheus — no upsize rec",
 			analysis: &PodAnalysis{
 				PodInfo:         podInfo("a", "monitoring", "ReplicaSet", "prometheus-server", 300, 16640*mi),
 				CPURequestMilli: 300, MemRequestBytes: 16640 * mi,
@@ -619,7 +619,7 @@ func TestRecommend_ProductionRegressions(t *testing.T) {
 				IsOverProvCPU: false, IsUnderProvCPU: true, IsUnderProvMem: true,
 				DataPoints: 500,
 			},
-			wantN: 1,
+			wantN: 0,
 		},
 	}
 
@@ -799,6 +799,152 @@ func TestAllContainersReady(t *testing.T) {
 			got := allContainersReady(tt.pod)
 			if got != tt.expected {
 				t.Errorf("allContainersReady() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// No upsize ever — verify under-provisioned pods produce zero recs
+// ---------------------------------------------------------------------------
+
+func TestRecommend_NoUpsizeEver(t *testing.T) {
+	tests := []struct {
+		name     string
+		analysis *PodAnalysis
+	}{
+		{
+			name: "under-provisioned CPU only",
+			analysis: &PodAnalysis{
+				PodInfo:         podInfo("a", "prod", "Deployment", "api", 100, gi),
+				CPURequestMilli: 100, MemRequestBytes: gi,
+				CPUP95: 400, CPUMax: 500,
+				IsOverProvCPU: false, IsUnderProvCPU: true,
+				DataPoints: 500,
+			},
+		},
+		{
+			name: "under-provisioned memory only",
+			analysis: &PodAnalysis{
+				PodInfo:         podInfo("a", "prod", "StatefulSet", "worker", 500, 512*mi),
+				CPURequestMilli: 500, MemRequestBytes: 512 * mi,
+				MemP95: 500 * mi,
+				IsOverProvCPU: false, IsUnderProvMem: true,
+				DataPoints: 800,
+			},
+		},
+		{
+			name: "under-provisioned CPU and memory",
+			analysis: &PodAnalysis{
+				PodInfo:         podInfo("a", "monitoring", "Deployment", "prometheus", 300, 16640*mi),
+				CPURequestMilli: 300, MemRequestBytes: 16640 * mi,
+				CPUP95: 1800, MemP95: 40000 * mi,
+				IsOverProvCPU: false, IsUnderProvCPU: true, IsUnderProvMem: true,
+				DataPoints: 500,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recs := NewRecommender(defaultCfg()).Recommend(tt.analysis)
+			if len(recs) != 0 {
+				t.Fatalf("got %d recs, want 0 (no upsize recs should be generated)", len(recs))
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Never auto-executable — all downsize recs must have AutoExecutable=false
+// ---------------------------------------------------------------------------
+
+func TestRecommend_NeverAutoExecutable(t *testing.T) {
+	tests := []struct {
+		name     string
+		analysis *PodAnalysis
+	}{
+		{
+			name: "standard downsize",
+			analysis: &PodAnalysis{
+				PodInfo:         podInfo("a", "prod", "Deployment", "app", 4000, 32*gi),
+				CPURequestMilli: 4000, MemRequestBytes: 32 * gi,
+				CPUP95: 400, MemP95: 6 * gi,
+				IsOverProvCPU: true,
+				DataPoints: 5000,
+			},
+		},
+		{
+			name: "node-ratio downsize",
+			analysis: &PodAnalysis{
+				PodInfo:         podInfo("a", "jobs", "Deployment", "batch", 2000, 8*gi),
+				CPURequestMilli: 2000, MemRequestBytes: 8 * gi,
+				CPUP95: 300, MemP95: gi,
+				IsOverProvCPU: true,
+				DataPoints:      2000,
+				NodeCPUCapMilli: 32000, NodeMemCapBytes: 128 * gi,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recs := NewRecommender(defaultCfg()).Recommend(tt.analysis)
+			if len(recs) != 1 {
+				t.Fatalf("got %d recs, want 1", len(recs))
+			}
+			if recs[0].AutoExecutable {
+				t.Error("AutoExecutable should be false — all recs require manual approval")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// isDownsizeRec — verify upsize recs are rejected
+// ---------------------------------------------------------------------------
+
+func TestIsDownsizeRec_RejectsUpsize(t *testing.T) {
+	tests := []struct {
+		name    string
+		rec     optimizer.Recommendation
+		want    bool
+	}{
+		{
+			name: "downsize rec (cpu+memory, no direction)",
+			rec: optimizer.Recommendation{
+				Details: map[string]string{"resource": "cpu+memory"},
+			},
+			want: true,
+		},
+		{
+			name: "upsize rec (cpu+memory, direction=upsize)",
+			rec: optimizer.Recommendation{
+				Details: map[string]string{"resource": "cpu+memory", "direction": "upsize"},
+			},
+			want: false,
+		},
+		{
+			name: "OOM rec (resource=memory)",
+			rec: optimizer.Recommendation{
+				Details: map[string]string{"resource": "memory"},
+			},
+			want: false,
+		},
+		{
+			name: "cpu-only upsize",
+			rec: optimizer.Recommendation{
+				Details: map[string]string{"resource": "cpu", "direction": "upsize"},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isDownsizeRec(tt.rec)
+			if got != tt.want {
+				t.Errorf("isDownsizeRec() = %v, want %v", got, tt.want)
 			}
 		})
 	}

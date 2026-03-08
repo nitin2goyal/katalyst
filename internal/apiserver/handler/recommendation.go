@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -279,5 +281,72 @@ func (h *RecommendationHandler) GetSummary(w http.ResponseWriter, r *http.Reques
 		"approved":              statusCounts["approved"],
 		"dismissed":             statusCounts["dismissed"],
 		"totalEstimatedSavings": totalSavings,
+	})
+}
+
+const maxBulkIDs = 100
+
+type bulkRequest struct {
+	IDs []string `json:"ids"`
+}
+
+func (h *RecommendationHandler) BulkApprove(w http.ResponseWriter, r *http.Request) {
+	h.bulkAction(w, r, "approved")
+}
+
+func (h *RecommendationHandler) BulkDismiss(w http.ResponseWriter, r *http.Request) {
+	h.bulkAction(w, r, "dismissed")
+}
+
+func (h *RecommendationHandler) bulkAction(w http.ResponseWriter, r *http.Request, targetStatus string) {
+	var req bulkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ids array is required"})
+		return
+	}
+	if len(req.IDs) > maxBulkIDs {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("maximum %d IDs per request", maxBulkIDs)})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	processed := 0
+	failed := 0
+	errors := []string{}
+
+	for _, id := range req.IDs {
+		// Computed recommendations are handled locally by the dashboard
+		if len(id) > 9 && id[:9] == "computed-" {
+			processed++
+			continue
+		}
+		var rec koptv1alpha1.Recommendation
+		if err := h.client.Get(ctx, types.NamespacedName{
+			Namespace: "koptimizer-system",
+			Name:      id,
+		}, &rec); err != nil {
+			failed++
+			errors = append(errors, fmt.Sprintf("%s: not found", id))
+			continue
+		}
+		rec.Status.State = targetStatus
+		if err := h.client.Status().Update(ctx, &rec); err != nil {
+			failed++
+			errors = append(errors, fmt.Sprintf("%s: %s", id, err.Error()))
+			continue
+		}
+		processed++
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"processed": processed,
+		"failed":    failed,
+		"errors":    errors,
 	})
 }

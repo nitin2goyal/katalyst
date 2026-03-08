@@ -656,6 +656,17 @@ strong.high, .text-high { color: #ef4444; }
 /* Info banner for computed recommendations */
 .info-banner { padding: 10px 16px; background: rgba(99,102,241,0.15); color: #a5b4fc; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
 
+/* Bulk actions bar */
+.bulk-actions-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; margin-bottom: 16px; border-radius: 8px;
+  background: rgba(0, 212, 255, 0.1); border: 1px solid rgba(0, 212, 255, 0.25);
+  font-size: 13px;
+}
+.bulk-check-col { width: 36px; text-align: center; cursor: default; }
+.bulk-check-col input[type="checkbox"] { cursor: pointer; }
+th.bulk-check-col::after { content: none !important; }
+
 /* Pagination */
 .pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; font-size: 12px; }
 .pag-info { color: var(--text-muted); }
