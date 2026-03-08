@@ -307,14 +307,12 @@ func (s *Store) cleanupLocked() {
 			}
 		}
 
-		// Release lock during the expensive sort, then re-acquire for deletion.
-		s.mu.Unlock()
+		// Sort under lock — the slice is local and cheap to sort relative to
+		// the risk of another goroutine mutating podSeries between unlock/lock.
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].ts.Before(entries[j].ts)
 		})
-		s.mu.Lock()
 
-		// Re-check count after re-acquiring lock — another goroutine may have cleaned up.
 		toRemove := len(s.podSeries) - maxPodSeriesKeys
 		if toRemove > len(entries) {
 			toRemove = len(entries)

@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -293,38 +294,37 @@ func (f *FallbackManager) Execute(ctx context.Context, rec optimizer.Recommendat
 }
 
 func (f *FallbackManager) enableCPUFallback(ctx context.Context, node *corev1.Node, logger interface{ Info(string, ...interface{}) }) error {
-	// Remove GPU NoSchedule taint to allow CPU workloads
-	var newTaints []corev1.Taint
-	for _, t := range node.Spec.Taints {
-		if t.Key == GPUFallbackTaint && t.Effect == corev1.TaintEffectNoSchedule {
-			continue // Remove this taint
+	var headroomMillis int64
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		fresh := &corev1.Node{}
+		if err := f.client.Get(ctx, types.NamespacedName{Name: node.Name}, fresh); err != nil {
+			return err
 		}
-		newTaints = append(newTaints, t)
-	}
-	node.Spec.Taints = newTaints
 
-	// Add fallback annotation
-	if node.Annotations == nil {
-		node.Annotations = make(map[string]string)
-	}
-	node.Annotations[GPUFallbackAnnotation] = "true"
+		// Remove GPU NoSchedule taint to allow CPU workloads
+		var newTaints []corev1.Taint
+		for _, t := range fresh.Spec.Taints {
+			if t.Key == GPUFallbackTaint && t.Effect == corev1.TaintEffectNoSchedule {
+				continue // Remove this taint
+			}
+			newTaints = append(newTaints, t)
+		}
+		fresh.Spec.Taints = newTaints
 
-	// Add annotation with CPU headroom guidance for admission webhooks or schedulers.
-	// CPU pods on GPU nodes should set conservative resource requests to avoid
-	// competing with GPU workloads during data-loading CPU bursts.
-	allocCPU := node.Status.Allocatable[corev1.ResourceCPU]
-	headroomMillis := allocCPU.MilliValue() * (100 - CPUHeadroomReservePct) / 100
-	node.Annotations["koptimizer.io/cpu-headroom-millis"] = fmt.Sprintf("%d", headroomMillis)
+		// Add fallback annotation
+		if fresh.Annotations == nil {
+			fresh.Annotations = make(map[string]string)
+		}
+		fresh.Annotations[GPUFallbackAnnotation] = "true"
 
-	// Safety notes for CPU pods on GPU nodes:
-	// - Set resource requests conservatively; GPU pods need CPU during data loading phases
-	// - Monitor node_cpu_seconds_total minus GPU pod usage in Prometheus for actual headroom
-	// - Use ResourceQuotas per namespace to cap scavenger pod resource claims
-	// - NEVER let CPU pods request nvidia.com/gpu (even 0 causes scheduler issues)
-	// - Java pods using -XX:MaxRAMPercentage may over-claim memory on high-memory GPU nodes
-	// - GPU nodes are always amd64 — no arm64 pods will land here
+		// Add annotation with CPU headroom guidance for admission webhooks or schedulers.
+		allocCPU := fresh.Status.Allocatable[corev1.ResourceCPU]
+		headroomMillis = allocCPU.MilliValue() * (100 - CPUHeadroomReservePct) / 100
+		fresh.Annotations["koptimizer.io/cpu-headroom-millis"] = fmt.Sprintf("%d", headroomMillis)
 
-	if err := f.client.Update(ctx, node); err != nil {
+		return f.client.Update(ctx, fresh)
+	})
+	if err != nil {
 		return fmt.Errorf("enabling CPU fallback on %s: %w", node.Name, err)
 	}
 
@@ -341,26 +341,34 @@ func (f *FallbackManager) enableCPUFallback(ctx context.Context, node *corev1.No
 }
 
 func (f *FallbackManager) disableCPUFallback(ctx context.Context, node *corev1.Node, logger interface{ Info(string, ...interface{}) }) error {
-	// Re-add GPU NoSchedule taint
-	hasTaint := false
-	for _, t := range node.Spec.Taints {
-		if t.Key == GPUFallbackTaint && t.Effect == corev1.TaintEffectNoSchedule {
-			hasTaint = true
-			break
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		fresh := &corev1.Node{}
+		if err := f.client.Get(ctx, types.NamespacedName{Name: node.Name}, fresh); err != nil {
+			return err
 		}
-	}
-	if !hasTaint {
-		node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
-			Key:    GPUFallbackTaint,
-			Value:  "present",
-			Effect: corev1.TaintEffectNoSchedule,
-		})
-	}
 
-	// Remove fallback annotation
-	delete(node.Annotations, GPUFallbackAnnotation)
+		// Re-add GPU NoSchedule taint
+		hasTaint := false
+		for _, t := range fresh.Spec.Taints {
+			if t.Key == GPUFallbackTaint && t.Effect == corev1.TaintEffectNoSchedule {
+				hasTaint = true
+				break
+			}
+		}
+		if !hasTaint {
+			fresh.Spec.Taints = append(fresh.Spec.Taints, corev1.Taint{
+				Key:    GPUFallbackTaint,
+				Value:  "present",
+				Effect: corev1.TaintEffectNoSchedule,
+			})
+		}
 
-	if err := f.client.Update(ctx, node); err != nil {
+		// Remove fallback annotation
+		delete(fresh.Annotations, GPUFallbackAnnotation)
+
+		return f.client.Update(ctx, fresh)
+	})
+	if err != nil {
 		return fmt.Errorf("disabling CPU fallback on %s: %w", node.Name, err)
 	}
 

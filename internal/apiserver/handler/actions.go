@@ -208,6 +208,33 @@ func formatAge(now, created time.Time) string {
 	}
 }
 
+// isBadReplicaSet returns true if the ReplicaSet is orphaned, stale, or stuck.
+func isBadReplicaSet(rs *appsv1.ReplicaSet) bool {
+	desired := int32(0)
+	if rs.Spec.Replicas != nil {
+		desired = *rs.Spec.Replicas
+	}
+
+	hasDeploymentOwner := false
+	for _, ref := range rs.OwnerReferences {
+		if ref.Kind == "Deployment" {
+			hasDeploymentOwner = true
+			break
+		}
+	}
+
+	switch {
+	case !hasDeploymentOwner:
+		return true // Orphaned
+	case desired == 0 && rs.Status.Replicas == 0:
+		return true // Stale
+	case desired > 0 && rs.Status.ReadyReplicas == 0:
+		return true // Stuck
+	default:
+		return false
+	}
+}
+
 // --- Bad ReplicaSets ---
 
 type badRSEntry struct {
@@ -346,6 +373,16 @@ func (h *ActionsHandler) DeleteReplicaSets(w http.ResponseWriter, r *http.Reques
 				Name:      ref.Name,
 				Namespace: ref.Namespace,
 				Error:     "replicaset not found",
+			})
+			continue
+		}
+
+		// Verify the RS is still in a "bad" state before deleting
+		if !isBadReplicaSet(rs) {
+			errors = append(errors, deleteError{
+				Name:      ref.Name,
+				Namespace: ref.Namespace,
+				Error:     "replicaset is no longer in a bad state",
 			})
 			continue
 		}

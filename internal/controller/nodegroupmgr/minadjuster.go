@@ -3,6 +3,7 @@ package nodegroupmgr
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/koptimizer/koptimizer/internal/config"
@@ -19,6 +20,8 @@ type MinAdjuster struct {
 	guard    *familylock.FamilyLockGuard
 	gate     *aigate.AIGate
 	config   *config.Config
+	// mu protects lowSince from concurrent access.
+	mu sync.Mutex
 	// lowSince tracks when each node group first went below the utilization
 	// threshold. A recommendation is only generated after the node group has
 	// been below threshold for at least ObservationPeriod.
@@ -36,6 +39,9 @@ func NewMinAdjuster(provider cloudprovider.CloudProvider, guard *familylock.Fami
 }
 
 func (m *MinAdjuster) Analyze(ctx context.Context, nodeGroupState *state.NodeGroupState) ([]optimizer.Recommendation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var recs []optimizer.Recommendation
 	threshold := m.config.NodeGroupMgr.MinAdjustment.MinUtilizationPct
 	observationPeriod := m.config.NodeGroupMgr.MinAdjustment.ObservationPeriod
@@ -106,7 +112,9 @@ func (m *MinAdjuster) Analyze(ctx context.Context, nodeGroupState *state.NodeGro
 func (m *MinAdjuster) Execute(ctx context.Context, rec optimizer.Recommendation) error {
 	nodeGroupID := rec.Details["nodeGroupID"]
 	var newMin int
-	fmt.Sscanf(rec.Details["newMin"], "%d", &newMin)
+	if n, err := fmt.Sscanf(rec.Details["newMin"], "%d", &newMin); n != 1 || err != nil {
+		return fmt.Errorf("invalid newMin value %q: %w", rec.Details["newMin"], err)
+	}
 
 	if err := m.guard.ValidateNodeGroupAction(familylock.NodeGroupModifyMin); err != nil {
 		return err

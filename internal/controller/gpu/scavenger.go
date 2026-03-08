@@ -247,7 +247,10 @@ func (s *Scavenger) enableScavenging(ctx context.Context, node *corev1.Node, hea
 
 		// Persist removed taints so disableScavenging can restore them
 		if len(savedTaints) > 0 {
-			data, _ := json.Marshal(savedTaints)
+			data, err := json.Marshal(savedTaints)
+			if err != nil {
+				return fmt.Errorf("marshaling saved taints: %w", err)
+			}
 			fresh.Annotations[GPUScavengerSavedTaints] = string(data)
 		}
 

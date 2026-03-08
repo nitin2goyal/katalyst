@@ -197,11 +197,11 @@ func (h *OverscaledHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 		targetUtil := 0.7
 		optimalByCPU := 1
-		if wl.CPUReqPod > 0 {
+		if wl.CPUReqPod > 0 && wl.CPUUsed > 0 {
 			optimalByCPU = int(math.Ceil(float64(wl.CPUUsed) / float64(wl.CPUReqPod) / targetUtil))
 		}
 		optimalByMem := 1
-		if wl.MemReqPod > 0 {
+		if wl.MemReqPod > 0 && wl.MemUsed > 0 {
 			optimalByMem = int(math.Ceil(float64(wl.MemUsed) / float64(wl.MemReqPod) / targetUtil))
 		}
 		optimal := optimalByCPU
@@ -450,7 +450,11 @@ func (h *OverscaledHandler) fetchHPADiagnostics(ctx context.Context) map[string]
 			switch m.Type {
 			case autoscalingv2.ResourceMetricSourceType:
 				if m.Resource != nil {
-					metricStr = fmt.Sprintf("resource/%s: %s", m.Resource.Name, m.Resource.Current.AverageUtilization)
+					if m.Resource.Current.AverageUtilization != nil {
+						metricStr = fmt.Sprintf("resource/%s: %d%%", m.Resource.Name, *m.Resource.Current.AverageUtilization)
+					} else {
+						metricStr = fmt.Sprintf("resource/%s: %s", m.Resource.Name, m.Resource.Current.AverageValue.String())
+					}
 				}
 			case autoscalingv2.ExternalMetricSourceType:
 				if m.External != nil {
