@@ -35,11 +35,14 @@ export function showLogin(onSuccess) {
     <div class="login-card">
       <div class="login-icon-wrap">
         <div class="login-icon-ring">
-          <svg width="32" height="32" viewBox="0 0 28 28" fill="none">
-            <rect width="28" height="28" rx="6" fill="url(#logo-grad)"/>
-            <path d="M7 14l4 4 10-10" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <svg width="36" height="36" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="8" fill="url(#logo-grad)"/>
+            <path d="M9 6v20" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M12 16l8.5-9" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M12 16l8.5 9" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <circle cx="23.5" cy="5.5" r="2.2" fill="#00d4ff" opacity="0.9"/>
             <defs>
-              <linearGradient id="logo-grad" x1="0" y1="0" x2="28" y2="28">
+              <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32">
                 <stop offset="0%" stop-color="#7c3aed"/>
                 <stop offset="100%" stop-color="#00d4ff"/>
               </linearGradient>
