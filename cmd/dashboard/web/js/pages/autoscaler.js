@@ -203,7 +203,7 @@ async function renderEvents(targetEl) {
   targetEl.innerHTML = skeleton(5);
   let data;
   try {
-    data = await api('/autoscaler/events?pageSize=50');
+    data = await api('/autoscaler/events?pageSize=200');
   } catch (err) {
     targetEl.innerHTML = errorMsg('Failed to load autoscaler events: ' + err.message);
     return;
@@ -214,7 +214,11 @@ async function renderEvents(targetEl) {
 
   targetEl.innerHTML = `
     <div class="card">
-      ${cardHeader('Autoscaler Events (' + total + ' total)')}
+      ${cardHeader('Autoscaler Events (' + total + ' total)', `
+        <div style="display:flex;gap:0.5rem">
+          <button class="btn btn-gray btn-sm" id="export-events-csv">Export CSV</button>
+          <button class="btn btn-gray btn-sm" id="copy-events-json">Copy JSON</button>
+        </div>`)}
       ${events.length === 0
         ? '<div style="padding: 2rem; text-align: center; color: var(--text-muted);">No autoscaler events found</div>'
         : `<div class="table-wrap"><table id="events-table">
@@ -244,6 +248,25 @@ async function renderEvents(targetEl) {
     const table = $('#events-table');
     makeSortable(table);
     attachPagination(table);
+    // Export CSV
+    document.getElementById('export-events-csv')?.addEventListener('click', () => {
+      exportCSV(
+        ['Time', 'Source', 'Action', 'Target', 'User', 'Details'],
+        events.map(e => [e.timestamp, e.source, e.action, e.target || '', e.user || '', e.details || '']),
+        'katalyst-autoscaler-events.csv'
+      );
+    });
+
+    // Copy JSON to clipboard
+    document.getElementById('copy-events-json')?.addEventListener('click', () => {
+      const btn = document.getElementById('copy-events-json');
+      navigator.clipboard.writeText(JSON.stringify(events, null, 2)).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 2000);
+      });
+    });
+
     // Click to expand/collapse details cells
     table.addEventListener('click', (e) => {
       const cell = e.target.closest('.expandable-cell');
