@@ -12,6 +12,24 @@ export async function renderGPU(targetEl) {
   const container = () => targetEl || $('#page-container');
   const activeTab = 'nodes';
 
+  // Check if cluster has any GPUs before showing sub-tabs
+  try {
+    const [nodesResp, util] = await Promise.all([
+      api('/gpu/nodes').catch(() => ({})),
+      api('/gpu/utilization').catch(() => null),
+    ]);
+    const nodeList = toArray(nodesResp, 'nodes', 'gpuNodes');
+    const hasGPU = nodeList.length > 0 || ((util?.totalGPUs) || 0) > 0;
+
+    if (!hasGPU) {
+      container().innerHTML = `
+        ${!targetEl ? '<div class="page-header"><h1>GPU Management</h1><p>GPU node utilization and optimization</p></div>' : ''}
+        ${richEmptyState('GPU', 'No GPU Nodes Detected',
+          'This cluster does not have any GPU-enabled nodes. GPU monitoring will automatically activate when GPU nodes (e.g., NVIDIA T4, A100, L4) are added to the cluster.')}`;
+      return;
+    }
+  } catch (_) { /* proceed with tabs on error */ }
+
   container().innerHTML = `
     ${!targetEl ? '<div class="page-header"><h1>GPU Management</h1><p>GPU node utilization and optimization</p></div>' : ''}
     <div class="tabs" id="gpu-tabs">
