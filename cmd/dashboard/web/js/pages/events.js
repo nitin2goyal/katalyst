@@ -101,7 +101,7 @@ export async function renderEvents(targetEl) {
                 <span class="audit-event-desc">${escapeHtml(e.details || '')}</span>
               </div>
               <div class="audit-event-meta">
-                <span>User: ${e.user || 'system'}</span>
+                <span>User: ${escapeHtml(e.user || 'system')}</span>
                 <span>${e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}</span>
                 ${applyBtn}
                 <button class="btn btn-gray btn-sm event-json-toggle">JSON</button>

@@ -52,7 +52,7 @@ export async function renderAudit(targetEl) {
             ${ev.details ? `<span class="audit-event-desc">${escapeHtml(ev.details)}</span>` : ''}
           </div>
           <div class="audit-event-meta">
-            <span>by ${ev.user || 'system'}</span>
+            <span>by ${escapeHtml(ev.user || 'system')}</span>
             ${ev.timestamp ? `<span>${new Date(ev.timestamp).toLocaleString()}</span>` : ''}
           </div>
         </div>

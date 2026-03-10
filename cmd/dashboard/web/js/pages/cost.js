@@ -115,7 +115,7 @@ async function renderCostDashboard(targetEl) {
           <div class="chart-container" id="mom-chart"></div>
           <div>
             <div class="table-wrap"><table id="mom-table">
-              <thead><tr><th>Namespace</th><th>${comparison.previousPeriod || 'Last month'}</th><th>${comparison.currentPeriod || 'This month'}</th><th>Change</th></tr></thead>
+              <thead><tr><th>Namespace</th><th>${esc(comparison.previousPeriod || 'Last month')}</th><th>${esc(comparison.currentPeriod || 'This month')}</th><th>Change</th></tr></thead>
               <tbody id="mom-body"></tbody>
             </table></div>
           </div>

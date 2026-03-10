@@ -154,7 +154,7 @@ async function renderStatus(targetEl) {
           </tr></thead>
           <tbody>
             ${nodes.map(n => `<tr>
-              <td><a href="#/nodes/${escapeHtml(n.name)}">${escapeHtml(n.name)}</a></td>
+              <td><a href="#/nodes/${encodeURIComponent(n.name)}">${escapeHtml(n.name)}</a></td>
               <td>${escapeHtml(n.nodeGroup || '-')}</td>
               <td>${statusBadges(n)}</td>
               <td>${n.appPodCount}</td>
@@ -235,7 +235,7 @@ async function renderEvents(targetEl) {
               <td title="${escapeHtml(e.timestamp)}">${timeAgo(e.timestamp)}</td>
               <td>${sourceBadge(e.source)}</td>
               <td>${badge(e.action, actionBadgeClass(e.action))}</td>
-              <td>${e.target ? `<a href="#/nodes/${escapeHtml(e.target)}">${escapeHtml(e.target)}</a>` : '-'}</td>
+              <td>${e.target ? `<a href="#/nodes/${encodeURIComponent(e.target)}">${escapeHtml(e.target)}</a>` : '-'}</td>
               <td>${escapeHtml(e.user || '-')}</td>
               <td class="expandable-cell" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Click to expand">${escapeHtml(e.details || '-')}</td>
             </tr>`).join('')}

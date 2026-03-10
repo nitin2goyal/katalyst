@@ -142,7 +142,7 @@ async function renderOverview(targetEl) {
         </tr></thead>
         <tbody>
           ${nodeList.map(n => `<tr>
-            <td>${n.node ? `<a href="#/nodes/${escapeHtml(n.node)}">${escapeHtml(shortNodeName(n.node))}</a>` : badge('unknown', 'gray')}</td>
+            <td>${n.node ? `<a href="#/nodes/${encodeURIComponent(n.node)}">${escapeHtml(shortNodeName(n.node))}</a>` : badge('unknown', 'gray')}</td>
             <td>${n.events}</td>
             <td style="max-width:500px">${n.pods.length > 0
               ? n.pods.map(p =>
@@ -373,7 +373,7 @@ async function renderEvents(targetEl) {
           <tbody>
             ${events.map(e => `<tr>
               <td title="${escapeHtml(e.timestamp)}">${timeAgo(e.timestamp)}</td>
-              <td>${e.nodeName ? `<a href="#/nodes/${escapeHtml(e.nodeName)}">${escapeHtml(shortNodeName(e.nodeName))}</a>` : badge('N/A', 'gray')}</td>
+              <td>${e.nodeName ? `<a href="#/nodes/${encodeURIComponent(e.nodeName)}">${escapeHtml(shortNodeName(e.nodeName))}</a>` : badge('N/A', 'gray')}</td>
               <td>${e.count || 1}</td>
               <td>${(e.blockedBy || []).length > 0
                 ? (e.blockedBy || []).map(p =>
@@ -523,7 +523,7 @@ async function renderPods(targetEl) {
           ${problematic.map(p => `<tr>
             <td class="cell-truncate" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
             <td>${escapeHtml(p.namespace)}</td>
-            <td>${p.nodeName ? `<a href="#/nodes/${escapeHtml(p.nodeName)}">${escapeHtml(shortNodeName(p.nodeName))}</a>` : '-'}</td>
+            <td>${p.nodeName ? `<a href="#/nodes/${encodeURIComponent(p.nodeName)}">${escapeHtml(shortNodeName(p.nodeName))}</a>` : '-'}</td>
             <td>${statusBadge(p.status)}</td>
             <td>${escapeHtml(p.readiness)}</td>
             <td>${p.restarts > 10 ? badge(p.restarts, 'red') : p.restarts}</td>
@@ -548,7 +548,7 @@ async function renderPods(targetEl) {
           ${unevictable.map(p => `<tr>
             <td class="cell-truncate" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
             <td>${escapeHtml(p.namespace)}</td>
-            <td>${p.nodeName ? `<a href="#/nodes/${escapeHtml(p.nodeName)}">${escapeHtml(shortNodeName(p.nodeName))}</a>` : '-'}</td>
+            <td>${p.nodeName ? `<a href="#/nodes/${encodeURIComponent(p.nodeName)}">${escapeHtml(shortNodeName(p.nodeName))}</a>` : '-'}</td>
             <td>${unevictableReasonBadge(p.reason)}</td>
             <td>${escapeHtml(p.age)}</td>
           </tr>`).join('')}
