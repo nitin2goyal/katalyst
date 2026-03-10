@@ -22,6 +22,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      automountServiceAccountToken: false
       containers:
         - name: dashboard
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -30,6 +31,21 @@ spec:
           args:
             - --api-url={{ .Values.dashboard.apiUrl }}
             - --port={{ .Values.dashboard.port }}
+          env:
+            {{- if .Values.apiTokenSecretRef.name }}
+            - name: KOPTIMIZER_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiTokenSecretRef.name }}
+                  key: {{ .Values.apiTokenSecretRef.key }}
+            {{- end }}
+            {{- if .Values.dashboard.passwordSecretRef.name }}
+            - name: KOPTIMIZER_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dashboard.passwordSecretRef.name }}
+                  key: {{ .Values.dashboard.passwordSecretRef.key | default "KOPTIMIZER_PASSWORD_HASH" }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.dashboard.port }}
@@ -50,6 +66,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
               drop: ["ALL"]
           resources:

@@ -55,10 +55,21 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           env:
-            {{- if .Values.aiGateApiKey }}
-            - name: ANTHROPIC_API_KEY
-              value: {{ .Values.aiGateApiKey | quote }}
-            {{- else if .Values.aiGateApiKeySecretRef.name }}
+            {{- if .Values.apiTokenSecretRef.name }}
+            - name: KOPTIMIZER_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiTokenSecretRef.name }}
+                  key: {{ .Values.apiTokenSecretRef.key }}
+            {{- end }}
+            {{- if .Values.slackWebhookSecretRef.name }}
+            - name: KOPTIMIZER_SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.slackWebhookSecretRef.name }}
+                  key: {{ .Values.slackWebhookSecretRef.key }}
+            {{- end }}
+            {{- if .Values.aiGateApiKeySecretRef.name }}
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -103,6 +114,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
               drop: ["ALL"]
           volumeMounts:

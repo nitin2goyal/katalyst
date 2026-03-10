@@ -86,7 +86,7 @@ export async function renderEvents(targetEl) {
           const color = eventColor(e.action);
           const actionable = isActionable(e.action);
           const applyBtn = actionable
-            ? `<button class="btn btn-green btn-sm" data-apply-idx="${idx}" onclick="window.__applyEvent(${idx})">Apply</button>`
+            ? `<button class="btn btn-green btn-sm" data-apply-idx="${idx}">Apply</button>`
             : '';
           return `<div class="audit-event" data-category="${eventCategory(e.action)}">
             <div class="audit-event-dot ${color}"></div>
@@ -104,7 +104,7 @@ export async function renderEvents(targetEl) {
                 <span>User: ${e.user || 'system'}</span>
                 <span>${e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}</span>
                 ${applyBtn}
-                <button class="btn btn-gray btn-sm event-json-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">JSON</button>
+                <button class="btn btn-gray btn-sm event-json-toggle">JSON</button>
                 <pre class="event-json" style="display:none">${escapeHtml(JSON.stringify(e, null, 2))}</pre>
               </div>
             </div>
@@ -124,17 +124,21 @@ export async function renderEvents(targetEl) {
       renderPage();
     }
 
-    window.__applyEvent = async function (idx) {
-      const e = events[idx];
-      if (!e) return;
-      // For dry-run-eviction events, attempt to apply via mode switch
-      if (e.action === 'dry-run-eviction') {
-        toast('Dry-run eviction for ' + (e.target || 'node') + '. Switch to OPTIMIZE mode via Settings to enable automatic execution.', 'info');
+    // Event delegation for apply buttons on the timeline
+    const timelineEl = $('#events-timeline');
+    const timelineClickHandler = (e) => {
+      const applyBtn = e.target.closest('[data-apply-idx]');
+      if (!applyBtn) return;
+      const idx = parseInt(applyBtn.dataset.applyIdx, 10);
+      const ev = events[idx];
+      if (!ev) return;
+      if (ev.action === 'dry-run-eviction') {
+        toast('Dry-run eviction for ' + (ev.target || 'node') + '. Switch to OPTIMIZE mode via Settings to enable automatic execution.', 'info');
         return;
       }
       toast('Event action noted. Switch to OPTIMIZE mode to enable automatic execution.', 'info');
     };
-    addCleanup(() => { delete window.__applyEvent; });
+    timelineEl.addEventListener('click', timelineClickHandler);
 
     renderTimeline('all');
 
@@ -163,7 +167,7 @@ export async function renderEvents(targetEl) {
     // Register cleanup
     const cleanup = () => {
       clearTimeout(filterDebounce);
-      delete window.__applyEvent;
+      timelineEl?.removeEventListener('click', timelineClickHandler);
     };
     addCleanup(cleanup);
     return cleanup;

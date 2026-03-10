@@ -1,7 +1,9 @@
 import { api } from '../api.js';
-import { $, fmt$, fmtPct, errorMsg, timeAgo } from '../utils.js';
+import { $, fmt$, fmtPct, errorMsg, timeAgo, esc } from '../utils.js';
 import { skeleton, badge, cardHeader, exportCSV } from '../components.js';
 import { makeChart } from '../charts.js';
+import { registerExport, unregisterExport } from '../app.js';
+import { addCleanup } from '../router.js';
 
 export async function renderImpact(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -46,12 +48,12 @@ export async function renderImpact(targetEl) {
       </div>
 
       <div class="card">
-        ${cardHeader('Recent Optimization Actions', '<button class="btn btn-gray btn-sm" onclick="window.__exportImpactCSV()">Export CSV</button>')}
+        ${cardHeader('Recent Optimization Actions', '<button class="btn btn-gray btn-sm" data-export="impactCSV">Export CSV</button>')}
         <div class="table-wrap"><table id="impact-actions-table">
           <thead><tr><th>Time</th><th>Action</th><th>Category</th><th>Savings</th></tr></thead>
           <tbody>${recentActions.length ? recentActions.map(a => `<tr>
             <td>${timeAgo(a.timestamp)}</td>
-            <td>${a.action}</td>
+            <td>${esc(a.action)}</td>
             <td>${badge(a.category, 'blue')}</td>
             <td class="green">${fmt$(a.savingsUSD)}/mo</td>
           </tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted)">No recent actions</td></tr>'}</tbody>
@@ -138,11 +140,12 @@ export async function renderImpact(targetEl) {
     }
 
     // CSV export
-    window.__exportImpactCSV = () => {
+    registerExport('impactCSV', () => {
       exportCSV(['Time', 'Action', 'Category', 'Monthly Savings USD'],
         recentActions.map(a => [a.timestamp, a.action, a.category, a.savingsUSD]),
         'katalyst-impact-actions.csv');
-    };
+    });
+    addCleanup(() => unregisterExport('impactCSV'));
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load impact data: ' + e.message);
   }

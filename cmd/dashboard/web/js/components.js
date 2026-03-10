@@ -108,9 +108,9 @@ export function attachFilterHandlers(containerEl, tableEl, pagination) {
 }
 
 export function modal(title, body, actions = '') {
-  return `<div class="modal-overlay" onclick="if(event.target===this)this.remove()">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
-      <div class="modal-header"><h3>${title}</h3><button class="modal-close" aria-label="Close" onclick="this.closest('.modal-overlay').remove()">&times;</button></div>
+  return `<div class="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+      <div class="modal-header"><h3>${escapeHtml(title)}</h3><button class="modal-close" aria-label="Close">&times;</button></div>
       <div class="modal-body">${body}</div>
       ${actions ? `<div class="modal-actions">${actions}</div>` : ''}
     </div>
@@ -357,19 +357,9 @@ export function cardHeader(title, rightHtml = '') {
   return `<div class="card-header"><h2>${title}</h2><div class="card-header-actions">${rightHtml}</div></div>`;
 }
 
-export function exportButton(onClick) {
-  const id = 'exp-' + Math.random().toString(36).slice(2, 8);
-  if (typeof onClick === 'function') {
-    // Safe path: attach handler via event listener after render
-    setTimeout(() => {
-      const btn = document.getElementById(id);
-      if (btn) btn.addEventListener('click', onClick);
-    }, 0);
-    return `<button class="btn btn-gray btn-sm" id="${id}">Export CSV</button>`;
-  }
-  // Legacy string path: escape for safe attribute interpolation
-  const escaped = escapeHtml(onClick);
-  return `<button class="btn btn-gray btn-sm" onclick="${escaped}">Export CSV</button>`;
+export function exportButton(exportKey) {
+  // Use data-export attribute for global event delegation (no inline onclick).
+  return `<button class="btn btn-gray btn-sm" data-export="${escapeHtml(String(exportKey))}">Export CSV</button>`;
 }
 
 // ── Pagination ──

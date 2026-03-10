@@ -1,6 +1,8 @@
-import { api, apiPost } from '../api.js';
+import { api, apiPost, auditAction } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg, escapeHtml, esc } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, badge, cardHeader, toast } from '../components.js';
+import { registerExport, unregisterExport } from '../app.js';
+import { addCleanup } from '../router.js';
 import { computeRecommendations } from '../recommendations-engine.js';
 
 let _isComputed = false;
@@ -104,7 +106,7 @@ export async function renderRecsTab(targetEl) {
         </div>
       </details>
       <div class="card">
-        ${cardHeader('All Recommendations', '<button class="btn btn-gray btn-sm" onclick="window.__exportRecsCSV()">Export CSV</button>')}
+        ${cardHeader('All Recommendations', '<button class="btn btn-gray btn-sm" data-export="recsCSV">Export CSV</button>')}
         ${filterBar({
           placeholder: 'Search recommendations...',
           filters: [
@@ -152,8 +154,8 @@ export async function renderRecsTab(targetEl) {
       if (btn) {
         e.stopPropagation();
         const recId = btn.dataset.recId;
-        if (btn.dataset.action === 'approve') window.__approveRec(recId);
-        else if (btn.dataset.action === 'dismiss') window.__dismissRec(recId);
+        if (btn.dataset.action === 'approve') approveRec(recId);
+        else if (btn.dataset.action === 'dismiss') dismissRec(recId);
         return;
       }
       const row = e.target.closest('tr');
@@ -172,11 +174,12 @@ export async function renderRecsTab(targetEl) {
       updateBulkBar();
     });
 
-    window.__exportRecsCSV = () => {
+    registerExport('recsCSV', () => {
       exportCSV(['Type', 'Target', 'Description', 'Savings', 'Confidence %', 'Status'],
         recList.map(r => [r.type || r.Type, r.target || r.resource, r.description || r.summary, r.estimatedSavings, r.confidence ?? '', r.status || r.Status]),
         'katalyst-recommendations.csv');
-    };
+    });
+    addCleanup(() => unregisterExport('recsCSV'));
 
     // Lazy-load debug data only when user expands the panel
     const debugPanel = document.getElementById('debug-panel');
@@ -312,6 +315,7 @@ async function bulkAction(action) {
   }
 
   const total = computedIds.length + apiIds.length;
+  auditAction(`recommendation.bulk-${action}`, `${total} recommendations`, `Bulk ${status} ${total} recommendation(s)`);
   toast(`${total} recommendation${total !== 1 ? 's' : ''} ${status}`, action === 'approve' ? 'success' : 'info');
 
   _selectedIds.clear();
@@ -320,30 +324,34 @@ async function bulkAction(action) {
   updateBulkBar();
 }
 
-window.__approveRec = async function (id) {
+async function approveRec(id) {
   if (id && id.startsWith('computed-')) {
     updateRecRow(id, 'approved');
     saveRecStatus(id, 'approved');
+    auditAction('recommendation.approved', id, 'Recommendation approved (computed)');
     toast('Recommendation approved.', 'success');
     return;
   }
   try {
     await apiPost(`/recommendations/${id}/approve`);
     updateRecRow(id, 'approved');
+    auditAction('recommendation.approved', id, 'Recommendation approved');
     toast('Recommendation approved', 'success');
   } catch (e) { toast('Failed to approve: ' + e.message, 'error'); }
-};
+}
 
-window.__dismissRec = async function (id) {
+async function dismissRec(id) {
   if (id && id.startsWith('computed-')) {
     updateRecRow(id, 'dismissed');
     saveRecStatus(id, 'dismissed');
+    auditAction('recommendation.dismissed', id, 'Recommendation dismissed (computed)');
     toast('Recommendation dismissed.', 'info');
     return;
   }
   try {
     await apiPost(`/recommendations/${id}/dismiss`);
     updateRecRow(id, 'dismissed');
+    auditAction('recommendation.dismissed', id, 'Recommendation dismissed');
     toast('Recommendation dismissed', 'info');
   } catch (e) { toast('Failed to dismiss: ' + e.message, 'error'); }
-};
+}

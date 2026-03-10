@@ -1,6 +1,8 @@
 import { api } from '../api.js';
 import { $, toArray, errorMsg, timeAgo, escapeHtml } from '../utils.js';
 import { skeleton, filterBar, attachFilterHandlers, exportCSV, cardHeader, badge } from '../components.js';
+import { registerExport, unregisterExport } from '../app.js';
+import { addCleanup } from '../router.js';
 
 const actionColors = {
   'recommendation.approved': 'green',
@@ -25,7 +27,7 @@ export async function renderAudit(targetEl) {
         <div class="kpi-card"><div class="label">Total Events</div><div class="value">${events.length}</div></div>
       </div>
       <div class="card">
-        ${cardHeader('Recent Actions', '<button class="btn btn-gray btn-sm" onclick="window.__exportAuditCSV()">Export CSV</button>')}
+        ${cardHeader('Recent Actions', '<button class="btn btn-gray btn-sm" data-export="auditCSV">Export CSV</button>')}
         ${filterBar({
           placeholder: 'Search audit events...',
           filters: [
@@ -81,11 +83,12 @@ export async function renderAudit(targetEl) {
     }
 
     // CSV export
-    window.__exportAuditCSV = () => {
+    registerExport('auditCSV', () => {
       exportCSV(['Timestamp', 'Action', 'Target', 'User', 'Details'],
         events.map(e => [e.timestamp, e.action, e.target, e.user, e.details]),
         'katalyst-audit.csv');
-    };
+    });
+    addCleanup(() => unregisterExport('auditCSV'));
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load audit log: ' + e.message);
   }

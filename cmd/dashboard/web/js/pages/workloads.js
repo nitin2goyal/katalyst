@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, esc } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge, columnToggle, attachColumnToggle } from '../components.js';
 import { addCleanup } from '../router.js';
+import { registerExport, unregisterExport } from '../app.js';
 
 const COLUMNS = [
   { key: 'namespace',       label: 'Namespace',        default: false },
@@ -59,7 +60,7 @@ export async function renderWorkloads(targetEl) {
     const totalPods = effData?.summary?.totalPods || 0;
 
     const headerActions = columnToggle(COLUMNS) +
-      ' <button class="btn btn-gray btn-sm" onclick="window.__exportWlCSV()">Export CSV</button>';
+      ' <button class="btn btn-gray btn-sm" data-export="wlCSV">Export CSV</button>';
 
     container().innerHTML = `
       ${!targetEl ? '<div class="page-header"><h1>Workloads</h1><p>Workload resource usage, efficiency, and scaling status</p></div>' : ''}
@@ -113,7 +114,7 @@ export async function renderWorkloads(targetEl) {
       const pdbMaxUnavail = w.pdbMaxUnavailable != null ? w.pdbMaxUnavailable : '-';
       const pdbDisruptAllow = w.pdbDisruptionsAllowed != null ? w.pdbDisruptionsAllowed : '-';
       const isRightsized = w.rightsized === true;
-      return `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+      return `<tr class="clickable-row" data-href="#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}">
         <td>${esc(w.namespace || '')}</td>
         <td>${esc(w.kind || '')}</td>
         <td>${esc(w.name || '')}</td>
@@ -161,7 +162,7 @@ export async function renderWorkloads(targetEl) {
     if (fb) attachFilterHandlers(fb, tableEl, pag);
 
     // CSV export (includes all columns regardless of visibility)
-    window.__exportWlCSV = () => {
+    registerExport('wlCSV', () => {
       exportCSV(
         ['Namespace', 'Kind', 'Name', 'Rightsized', 'Original CPU', 'Original Mem',
          'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim',
@@ -184,8 +185,8 @@ export async function renderWorkloads(targetEl) {
             eff?.wastedCostUSD != null ? fmt$(eff.wastedCostUSD) : ''];
         }),
         'katalyst-workloads.csv');
-    };
-    addCleanup(() => { delete window.__exportWlCSV; });
+    });
+    addCleanup(() => { unregisterExport('wlCSV'); });
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load workloads: ' + e.message);
   }

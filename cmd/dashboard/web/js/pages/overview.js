@@ -180,7 +180,7 @@ export async function renderOverview() {
     // Node groups mini-table (data pre-fetched in initial Promise.all)
     {
       const list = toArray(ngsData, 'nodeGroups');
-      $('#overview-ng-body').innerHTML = list.length ? list.slice(0, 10).map(ng => `<tr class="clickable-row" onclick="location.hash='#/nodegroups/${encodeURIComponent(ng.id || '')}'">
+      $('#overview-ng-body').innerHTML = list.length ? list.slice(0, 10).map(ng => `<tr class="clickable-row" data-href="#/nodegroups/${encodeURIComponent(ng.id || '')}">
         <td>${esc(ng.name || '')}</td><td>${esc(ng.instanceType || '')}</td>
         <td>${ng.currentCount ?? 0}</td>
         <td>${utilBar(ng.cpuUtilPct)}</td><td>${utilBar(ng.memUtilPct)}</td>

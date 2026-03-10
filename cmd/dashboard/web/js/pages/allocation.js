@@ -1,7 +1,9 @@
 import { api } from '../api.js';
-import { $, fmt$, fmtPct, errorMsg } from '../utils.js';
+import { $, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, cardHeader, exportCSV } from '../components.js';
+import { registerExport, unregisterExport } from '../app.js';
+import { addCleanup } from '../router.js';
 
 export async function renderAllocation(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -37,7 +39,7 @@ export async function renderAllocation(targetEl) {
         </div>
       </div>
       <div class="card">
-        ${cardHeader('Namespace Breakdown', '<button class="btn btn-gray btn-sm" onclick="window.__exportAllocCSV()">Export CSV</button>')}
+        ${cardHeader('Namespace Breakdown', '<button class="btn btn-gray btn-sm" data-export="allocCSV">Export CSV</button>')}
         ${filterBar({ placeholder: 'Search namespaces...' })}
         <div class="table-wrap"><table id="alloc-table">
           <thead><tr><th>Namespace</th><th>Monthly Cost</th><th>% of Total</th><th>Cost Bar</th></tr></thead>
@@ -72,7 +74,7 @@ export async function renderAllocation(targetEl) {
       const pct = totalCost > 0 ? (cost / totalCost * 100) : 0;
       const barW = Math.max(2, cost / maxCost * 100);
       return `<tr>
-        <td><strong>${ns}</strong></td>
+        <td><strong>${esc(ns)}</strong></td>
         <td>${fmt$(cost)}</td>
         <td>${fmtPct(pct)}</td>
         <td><div style="background:rgba(67,97,238,0.15);border-radius:4px;height:8px;width:100%;max-width:200px"><div style="background:#4361ee;height:100%;border-radius:4px;width:${barW}%"></div></div></td>
@@ -83,11 +85,12 @@ export async function renderAllocation(targetEl) {
     const fb = container().querySelector('.filter-bar');
     if (fb) attachFilterHandlers(fb, $('#alloc-table'));
 
-    window.__exportAllocCSV = () => {
+    registerExport('allocCSV', () => {
       exportCSV(['Namespace', 'Monthly Cost', '% of Total'],
         nsEntries.map(([ns, cost]) => [ns, cost, totalCost > 0 ? (cost / totalCost * 100).toFixed(1) : 0]),
         'katalyst-allocation.csv');
-    };
+    });
+    addCleanup(() => unregisterExport('allocCSV'));
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load allocation data: ' + e.message);
   }

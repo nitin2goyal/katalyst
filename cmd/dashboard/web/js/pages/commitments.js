@@ -1,6 +1,8 @@
 import { api } from '../api.js';
-import { $, toArray, fmt$, utilBar, errorMsg } from '../utils.js';
+import { $, toArray, fmt$, utilBar, errorMsg, esc } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, exportCSV, cardHeader, badge, richEmptyState } from '../components.js';
+import { registerExport, unregisterExport } from '../app.js';
+import { addCleanup } from '../router.js';
 
 export async function renderCommitments(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -33,7 +35,7 @@ export async function renderCommitments(targetEl) {
         <div class="kpi-card"><div class="label">Expiring Soon</div><div class="value ${expList.length ? 'red' : ''}">${expList.length}</div></div>
       </div>
       <div class="card">
-        ${cardHeader('All Commitments', '<button class="btn btn-gray btn-sm" onclick="window.__exportCommitmentsCSV()">Export CSV</button>')}
+        ${cardHeader('All Commitments', '<button class="btn btn-gray btn-sm" data-export="commitmentsCSV">Export CSV</button>')}
         ${filterBar({
           placeholder: 'Search commitments...',
           filters: [
@@ -55,9 +57,9 @@ export async function renderCommitments(targetEl) {
         isExp ? badge('Expiring', 'red') : '',
       ].filter(Boolean).join(' ') || '-';
       return `<tr class="${rowClass}">
-        <td>${c.id || ''}</td><td>${c.type || ''}</td><td>${c.instanceType || ''}</td>
+        <td>${esc(c.id || '')}</td><td>${esc(c.type || '')}</td><td>${esc(c.instanceType || '')}</td>
         <td>${utilBar(c.utilizationPct)}</td>
-        <td>${c.expiresAt || ''}</td><td>${fmt$(c.hourlyCostUSD)}</td>
+        <td>${esc(c.expiresAt || '')}</td><td>${fmt$(c.hourlyCostUSD)}</td>
         <td>${flags}</td>
       </tr>`;
     }).join('') : '<tr><td colspan="7" style="color:var(--text-muted)">No commitments found. GCP Committed Use Discounts (CUDs) are managed via the GCP Console. Configure the CUD integration in Settings to import commitment data.</td></tr>';
@@ -69,11 +71,12 @@ export async function renderCommitments(targetEl) {
     if (fb) attachFilterHandlers(fb, $('#commit-table'));
 
     // CSV export
-    window.__exportCommitmentsCSV = () => {
+    registerExport('commitmentsCSV', () => {
       exportCSV(['ID', 'Type', 'Instance Type', 'Utilization %', 'Expires', 'Cost/hr'],
         cList.map(c => [c.id, c.type, c.instanceType, (c.utilizationPct||0).toFixed(1), c.expiresAt, c.hourlyCostUSD]),
         'katalyst-commitments.csv');
-    };
+    });
+    addCleanup(() => unregisterExport('commitmentsCSV'));
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load commitment data: ' + e.message);
   }

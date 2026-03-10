@@ -371,7 +371,7 @@ async function renderOverscaled(targetEl) {
                     return `<div style="margin:2px 0">${badge(causeIcon(c), cls)} <span style="font-size:11px">${esc(c)}</span></div>`;
                   }).join('')
                 : '<span style="color:var(--text-muted);font-size:11px">Load dropped after scale-up</span>';
-              return `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+              return `<tr class="clickable-row" data-href="#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}">
               <td>${severityBadge(w.severity)}</td>
               <td>${esc(w.namespace)}</td>
               <td>${esc(w.name)}</td>

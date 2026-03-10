@@ -16,7 +16,7 @@ serviceAccount:
 
 # KOptimizer configuration
 config:
-  mode: "active"  # monitor | recommend | active
+  mode: "recommend"  # monitor | recommend | active
   cloudProvider: ""  # aws | gcp | azure (required)
   region: ""         # e.g., us-east-1, europe-west1, eastus (required)
   clusterName: ""
@@ -94,7 +94,9 @@ config:
 
   alerts:
     enabled: false
-    slackWebhookURL: ""
+    # SECURITY: Use slackWebhookSecretRef below instead of inline URL.
+    #   kubectl create secret generic koptimizer-slack --from-literal=webhook-url=https://hooks.slack.com/...
+    slackWebhookURL: ""  # DEPRECATED: use slackWebhookSecretRef
     emailRecipients: []
     costAnomalyStdDev: 2.0
     cooldownMinutes: 60
@@ -134,8 +136,24 @@ persistence:
   # existingClaim — set to reuse an existing PVC instead of creating a new one
   existingClaim: ""
 
+# API bearer token for backend-to-dashboard authentication.
+# REQUIRED: The optimizer will refuse to start without this token.
+#   kubectl create secret generic koptimizer-api-token --from-literal=token=$(openssl rand -hex 32)
+# Both the optimizer and dashboard must share the same token.
+apiTokenSecretRef:
+  name: ""   # REQUIRED — e.g. "koptimizer-api-token"
+  key: "token"
+
+# Slack webhook URL secret reference (for alerts).
+# SECURITY: Store webhook URLs in Secrets, not in values.yaml or ConfigMaps.
+#   kubectl create secret generic koptimizer-slack --from-literal=webhook-url=https://hooks.slack.com/...
+slackWebhookSecretRef:
+  name: ""   # e.g. "koptimizer-slack"
+  key: "webhook-url"
+
 # API key for AI Safety Gate (Claude Sonnet)
-aiGateApiKey: ""
+# SECURITY: Always use a Kubernetes Secret reference.
+#   kubectl create secret generic koptimizer-ai-key --from-literal=ANTHROPIC_API_KEY=sk-ant-...
 aiGateApiKeySecretRef:
   name: ""
   key: "ANTHROPIC_API_KEY"
@@ -194,6 +212,11 @@ dashboard:
     limits:
       cpu: 200m
       memory: 128Mi
+  # Dashboard login password hash (bcrypt recommended).
+  # Create secret: kubectl create secret generic koptimizer-dash-pw --from-literal=KOPTIMIZER_PASSWORD_HASH='$2a$12$...'
+  passwordSecretRef:
+    name: ""   # e.g. "koptimizer-dash-pw"
+    key: "KOPTIMIZER_PASSWORD_HASH"
   service:
     type: ClusterIP
     port: 3000

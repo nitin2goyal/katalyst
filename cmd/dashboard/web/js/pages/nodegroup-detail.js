@@ -46,7 +46,7 @@ export async function renderNodeGroupDetail(params) {
         </table></div>
       </div>`;
 
-    $('#ng-nodes-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(n.name || '')}'">
+    $('#ng-nodes-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" data-href="#/nodes/${encodeURIComponent(n.name || '')}">
       <td>${esc(n.name || '')}</td><td>${esc(n.instanceType || '')}</td>
       <td>${utilBar(n.cpuUtilPct)}</td><td>${utilBar(n.memUtilPct)}</td>
       <td><span class="blue">${n.appPodCount ?? ''}</span></td>

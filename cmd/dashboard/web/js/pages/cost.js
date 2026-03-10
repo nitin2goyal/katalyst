@@ -3,6 +3,7 @@ import { $, toArray, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeBarChart, makeAreaChart, makeDonutChart, destroyCharts } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, cardHeader, dateRangePicker, badge, exportCSV } from '../components.js';
 import { addCleanup } from '../router.js';
+import { registerExport, unregisterExport } from '../app.js';
 import { renderSavings } from './savings.js';
 import { computeRecommendations } from '../recommendations-engine.js';
 
@@ -121,11 +122,11 @@ async function renderCostDashboard(targetEl) {
         </div>
       </div>` : ''}
       ${savingsList.length ? `<div class="card">
-        ${cardHeader('Savings opportunities', '<button class="btn btn-gray btn-sm" onclick="window.__exportSavingsCSV()">Export CSV</button>')}
+        ${cardHeader('Savings opportunities', '<button class="btn btn-gray btn-sm" data-export="savingsCSV">Export CSV</button>')}
         <div class="table-wrap"><table id="savings-table"><thead><tr><th>Type</th><th>Description</th><th>Est. savings</th><th>Action</th></tr></thead><tbody id="savings-body"></tbody></table></div>
       </div>` : ''}
       <div class="card">
-        ${cardHeader('Cost by workload', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlCostCSV()">Export CSV</button>')}
+        ${cardHeader('Cost by workload', '<button class="btn btn-gray btn-sm" data-export="wlCostCSV">Export CSV</button>')}
         ${filterBar({ placeholder: 'Search workloads...', filters: [] })}
         <div class="table-wrap"><table id="wl-cost-table">
           <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Monthly cost</th></tr></thead>
@@ -176,7 +177,7 @@ async function renderCostDashboard(targetEl) {
           const changeDisplay = isNew
             ? '<span class="badge badge-blue">New</span>'
             : `${arrow} ${fmtPct(Math.abs(change))}`;
-          return `<tr class="clickable-row" onclick="location.hash='#/cost/workload?ns=${encodeURIComponent(n.namespace)}'">
+          return `<tr class="clickable-row" data-href="#/cost/workload?ns=${encodeURIComponent(n.namespace)}">
             <td><a href="#/cost/workload?ns=${encodeURIComponent(n.namespace)}" class="link"><strong>${esc(n.namespace || '')}</strong></a></td>
             <td>${fmt$(n.previousCost)}</td>
             <td>${fmt$(n.currentCost)}</td>
@@ -210,7 +211,7 @@ async function renderCostDashboard(targetEl) {
 
     // Workload cost table
     const wlList = toArray(byWl, 'workloads');
-    $('#wl-cost-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+    $('#wl-cost-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" data-href="#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}">
       <td>${esc(w.namespace || '')}</td><td>${esc(w.kind || '')}</td><td>${esc(w.name || '')}</td>
       <td><strong>${fmt$(w.monthlyCostUSD)}</strong></td>
     </tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted)">No workload cost data</td></tr>';
@@ -222,17 +223,17 @@ async function renderCostDashboard(targetEl) {
     if (fb) attachFilterHandlers(fb, $('#wl-cost-table'), pag);
 
     // CSV exports
-    window.__exportSavingsCSV = () => {
+    registerExport('savingsCSV', () => {
       exportCSV(['Type', 'Description', 'Est. Savings'],
         savingsList.map(s => [s.type, s.description || s.name, s.estimatedSavings || s.savings]),
         'katalyst-savings.csv');
-    };
-    window.__exportWlCostCSV = () => {
+    });
+    registerExport('wlCostCSV', () => {
       exportCSV(['Namespace', 'Kind', 'Name', 'Monthly Cost'],
         wlList.map(w => [w.namespace, w.kind, w.name, w.monthlyCostUSD]),
         'katalyst-workload-costs.csv');
-    };
-    addCleanup(() => { delete window.__exportSavingsCSV; delete window.__exportWlCostCSV; });
+    });
+    addCleanup(() => { unregisterExport('savingsCSV'); unregisterExport('wlCostCSV'); });
 
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load cost data: ' + e.message);
@@ -263,7 +264,7 @@ async function renderNamespaceBreakdown(targetEl) {
         <div class="chart-container" id="ns-breakdown-chart"></div>
       </div>
       <div class="card">
-        ${cardHeader('Namespace Breakdown', '<button class="btn btn-gray btn-sm" onclick="window.__exportNsCSV()">Export CSV</button>')}
+        ${cardHeader('Namespace Breakdown', '<button class="btn btn-gray btn-sm" data-export="nsCSV">Export CSV</button>')}
         <div class="table-wrap"><table id="ns-cost-table">
           <thead><tr><th>Namespace</th><th>Monthly Cost</th><th>% of Total</th></tr></thead>
           <tbody id="ns-cost-body"></tbody>
@@ -280,7 +281,7 @@ async function renderNamespaceBreakdown(targetEl) {
       });
     }
 
-    $('#ns-cost-body').innerHTML = nsEntries.length ? nsEntries.map(([ns, cost]) => `<tr class="clickable-row" onclick="location.hash='#/cost/workload?ns=${encodeURIComponent(ns)}'">
+    $('#ns-cost-body').innerHTML = nsEntries.length ? nsEntries.map(([ns, cost]) => `<tr class="clickable-row" data-href="#/cost/workload?ns=${encodeURIComponent(ns)}">
       <td><a href="#/cost/workload?ns=${encodeURIComponent(ns)}" class="link"><strong>${esc(ns)}</strong></a></td>
       <td>${fmt$(cost)}</td>
       <td>${fmtPct(total > 0 ? cost / total * 100 : 0)}</td>
@@ -288,11 +289,11 @@ async function renderNamespaceBreakdown(targetEl) {
     makeSortable($('#ns-cost-table'));
     attachPagination($('#ns-cost-table'));
 
-    window.__exportNsCSV = () => {
+    registerExport('nsCSV', () => {
       exportCSV(['Namespace', 'Monthly Cost', '% of Total'],
         nsEntries.map(([ns, cost]) => [ns, cost.toFixed(2), total > 0 ? (cost / total * 100).toFixed(1) : '0']),
         'katalyst-namespace-costs.csv');
-    };
+    });
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load namespace cost data: ' + e.message);
   }
@@ -320,7 +321,7 @@ async function renderWorkloadBreakdown(targetEl) {
         <div class="kpi-card"><div class="label">Workloads</div><div class="value">${wlList.length}</div></div>
       </div>
       <div class="card">
-        ${cardHeader(filterNs ? `Workloads in ${esc(filterNs)}` : 'Cost by Workload', '<button class="btn btn-gray btn-sm" onclick="window.__exportWlBreakdownCSV()">Export CSV</button>')}
+        ${cardHeader(filterNs ? `Workloads in ${esc(filterNs)}` : 'Cost by Workload', '<button class="btn btn-gray btn-sm" data-export="wlBreakdownCSV">Export CSV</button>')}
         ${filterBar({ placeholder: 'Search workloads...', filters: [] })}
         <div class="table-wrap"><table id="wl-breakdown-table">
           <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>Monthly Cost</th><th>% of Total</th></tr></thead>
@@ -328,7 +329,7 @@ async function renderWorkloadBreakdown(targetEl) {
         </table></div>
       </div>`;
 
-    $('#wl-breakdown-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" onclick="location.hash='#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}'">
+    $('#wl-breakdown-body').innerHTML = wlList.length ? wlList.map(w => `<tr class="clickable-row" data-href="#/workloads/${encodeURIComponent(w.namespace)}/${encodeURIComponent(w.kind)}/${encodeURIComponent(w.name)}">
       <td>${esc(w.namespace || '')}</td><td>${esc(w.kind || '')}</td><td>${esc(w.name || '')}</td>
       <td><strong>${fmt$(w.monthlyCostUSD)}</strong></td>
       <td>${fmtPct(total > 0 ? (w.monthlyCostUSD || 0) / total * 100 : 0)}</td>
@@ -339,11 +340,11 @@ async function renderWorkloadBreakdown(targetEl) {
     const fb = targetEl.querySelector('.filter-bar');
     if (fb) attachFilterHandlers(fb, $('#wl-breakdown-table'), wlPag);
 
-    window.__exportWlBreakdownCSV = () => {
+    registerExport('wlBreakdownCSV', () => {
       exportCSV(['Namespace', 'Kind', 'Name', 'Monthly Cost', '% of Total'],
         wlList.map(w => [w.namespace, w.kind, w.name, (w.monthlyCostUSD || 0).toFixed(2), total > 0 ? ((w.monthlyCostUSD || 0) / total * 100).toFixed(1) : '0']),
         'katalyst-workload-costs.csv');
-    };
+    });
   } catch (e) {
     targetEl.innerHTML = errorMsg('Failed to load workload cost data: ' + e.message);
   }

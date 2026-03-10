@@ -1,6 +1,8 @@
 import { api } from '../api.js';
 import { $, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { skeleton, makeSortable, exportCSV, cardHeader, badge } from '../components.js';
+import { registerExport, unregisterExport } from '../app.js';
+import { addCleanup } from '../router.js';
 
 export async function renderIdleResources(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -22,7 +24,7 @@ export async function renderIdleResources(targetEl) {
       </div>
 
       <div class="card">
-        ${cardHeader('Idle Nodes', '<button class="btn btn-gray btn-sm" onclick="window.__exportIdleNodesCSV()">Export CSV</button>')}
+        ${cardHeader('Idle Nodes', '<button class="btn btn-gray btn-sm" data-export="idleNodesCSV">Export CSV</button>')}
         <div class="table-wrap"><table id="idle-nodes-table">
           <thead><tr><th>Node</th><th>Instance Type</th><th>CPU Util</th><th>Mem Util</th><th>Idle Since</th><th>Wasted Cost</th><th>Reason</th></tr></thead>
           <tbody>${nodes.length ? nodes.map(n => `<tr class="warning-row">
@@ -38,7 +40,7 @@ export async function renderIdleResources(targetEl) {
       </div>
 
       <div class="card">
-        ${cardHeader('Idle Workloads', '<button class="btn btn-gray btn-sm" onclick="window.__exportIdleWlCSV()">Export CSV</button>')}
+        ${cardHeader('Idle Workloads', '<button class="btn btn-gray btn-sm" data-export="idleWlCSV">Export CSV</button>')}
         <div class="table-wrap"><table id="idle-wl-table">
           <thead><tr><th>Namespace</th><th>Kind</th><th>Name</th><th>CPU Used</th><th>Mem Used</th><th>Replicas</th><th>Idle Since</th><th>Wasted</th><th>Reason</th></tr></thead>
           <tbody>${workloads.length ? workloads.map(w => `<tr class="warning-row">
@@ -56,7 +58,7 @@ export async function renderIdleResources(targetEl) {
       </div>
 
       <div class="card">
-        ${cardHeader('Orphaned PVCs', '<button class="btn btn-gray btn-sm" onclick="window.__exportPvcCSV()">Export CSV</button>')}
+        ${cardHeader('Orphaned PVCs', '<button class="btn btn-gray btn-sm" data-export="idlePvcCSV">Export CSV</button>')}
         <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Persistent Volume Claims not mounted by any pod</p>
         <div class="table-wrap"><table id="pvc-table">
           <thead><tr><th>Name</th><th>Namespace</th><th>Size</th><th>Age</th><th>Monthly Cost</th></tr></thead>
@@ -75,21 +77,22 @@ export async function renderIdleResources(targetEl) {
     makeSortable($('#pvc-table'));
 
     // CSV exports
-    window.__exportIdleNodesCSV = () => {
+    registerExport('idleNodesCSV', () => {
       exportCSV(['Node', 'Instance Type', 'CPU Util %', 'Mem Util %', 'Idle Hours', 'Wasted Cost', 'Reason'],
         nodes.map(n => [n.name, n.instanceType, n.cpuUtilPct, n.memUtilPct, n.idleSinceHrs, n.wastedCostUSD, n.reason]),
         'katalyst-idle-nodes.csv');
-    };
-    window.__exportIdleWlCSV = () => {
+    });
+    registerExport('idleWlCSV', () => {
       exportCSV(['Namespace', 'Kind', 'Name', 'CPU Used %', 'Mem Used %', 'Replicas', 'Idle Hours', 'Wasted Cost', 'Reason'],
         workloads.map(w => [w.namespace, w.kind, w.name, w.cpuUsedPct, w.memUsedPct, w.replicas, w.idleSinceHrs, w.wastedCostUSD, w.reason]),
         'katalyst-idle-workloads.csv');
-    };
-    window.__exportPvcCSV = () => {
+    });
+    registerExport('idlePvcCSV', () => {
       exportCSV(['Name', 'Namespace', 'Size GB', 'Age Days', 'Monthly Cost'],
         pvcs.map(p => [p.name, p.namespace, p.sizeGB, Math.floor(p.ageHours / 24), p.monthlyCostUSD]),
         'katalyst-orphaned-pvcs.csv');
-    };
+    });
+    addCleanup(() => { unregisterExport('idleNodesCSV'); unregisterExport('idleWlCSV'); unregisterExport('idlePvcCSV'); });
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load idle resources: ' + e.message);
   }

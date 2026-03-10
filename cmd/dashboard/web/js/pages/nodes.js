@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, utilBar, utilClass, badge, errorMsg, esc, GiB, TiB } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, columnToggle, attachColumnToggle } from '../components.js';
 import { addCleanup } from '../router.js';
+import { registerExport, unregisterExport } from '../app.js';
 
 // Format disk type + size as a concise string, e.g. "Hyperdisk Balanced 100G"
 function fmtDisk(type, sizeGB) {
@@ -58,14 +59,14 @@ export async function renderNodes(targetEl) {
         <div class="kpi-card"><div class="label">Empty Groups</div><div class="value ${emptyList.length ? 'amber' : ''}">${emptyList.length}</div></div>
       </div>
       <div class="card" id="ng-card">
-        ${cardHeader('Node Groups', `<label class="toggle-label text-desc" style="margin-right:12px;cursor:pointer"><input type="checkbox" id="show-empty-ng"> Show empty groups</label><button class="btn btn-gray btn-sm" onclick="window.__exportNgCSV()">Export CSV</button>`)}
+        ${cardHeader('Node Groups', `<label class="toggle-label text-desc" style="margin-right:12px;cursor:pointer"><input type="checkbox" id="show-empty-ng"> Show empty groups</label><button class="btn btn-gray btn-sm" data-export="ngCSV">Export CSV</button>`)}
         <div class="table-wrap"><table id="ng-table">
           <thead><tr><th>Name</th><th>Instance Type</th><th>Disk</th><th>Count</th><th>Min</th><th>Max</th><th>GPUs</th><th>Total Cores</th><th>Total Memory</th><th>CPU Util</th><th>Mem Util</th><th>CPU Alloc</th><th>Mem Alloc</th><th>Cluster</th><th>Cost/mo</th></tr></thead>
           <tbody id="ng-body"></tbody>
         </table></div>
       </div>
       <div class="card" id="nodes-card">
-        ${cardHeader('All Nodes', columnToggle(nodeColumns) + '<button class="btn btn-gray btn-sm ml-2" onclick="window.__exportNodesCSV()">Export CSV</button>')}
+        ${cardHeader('All Nodes', columnToggle(nodeColumns) + '<button class="btn btn-gray btn-sm ml-2" data-export="nodesCSV">Export CSV</button>')}
         ${filterBar({
           placeholder: 'Search nodes...',
           filters: [
@@ -85,7 +86,7 @@ export async function renderNodes(targetEl) {
       });
       $('#ng-body').innerHTML = filtered.length ? filtered.map(ng => {
         const isEmpty = ng.isEmpty || emptyNames.has(ng.name) || emptyNames.has(ng.id);
-        return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" onclick="location.hash='#/nodegroups/${encodeURIComponent(ng.id || '')}'">
+        return `<tr class="clickable-row ${isEmpty ? 'warning-row' : ''}" data-href="#/nodegroups/${encodeURIComponent(ng.id || '')}">
           <td>${esc(ng.name || ng.id || '')}${isEmpty ? ' ' + badge('EMPTY', 'amber') : ''}${ng.hasGPU ? ' ' + badge('GPU', 'purple') : ''}</td>
           <td>${esc(ng.instanceType || '')}</td>
           <td class="text-sm">${fmtDisk(ng.diskType, ng.diskSizeGB)}</td>
@@ -116,7 +117,7 @@ export async function renderNodes(targetEl) {
       });
     }
 
-    $('#node-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(n.name || '')}'">
+    $('#node-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" data-href="#/nodes/${encodeURIComponent(n.name || '')}">
       <td>${esc(n.name || '')}</td><td>${esc(n.nodeGroup || '')}</td><td>${esc(n.instanceType || '')}</td>
       <td class="text-sm">${fmtDisk(n.diskType, n.diskSizeGB)}</td>
       <td><strong class="${utilClass(n.diskUtilPct || 0)}">${fmtPct(n.diskUtilPct)}</strong></td>
@@ -126,7 +127,7 @@ export async function renderNodes(targetEl) {
       <td><strong class="${utilClass(n.memAllocPct || 0)}">${fmtPct(n.memAllocPct)}</strong></td>
       <td>${n.appPodCount ?? n.podCount ?? ''}${n.systemPodCount ? ' <span class="sys-count">+ ' + n.systemPodCount + ' sys</span>' : ''}</td>
       <td>${n.unschedulable ? '<span class="badge badge-red">Yes</span>' : '<span class="text-small-muted">No</span>'}</td>
-      <td>${n.drainStatus ? `<span class="badge ${n.drainStatus === 'Drained' ? 'badge-green' : 'badge-amber'}">${n.drainStatus}</span>` : ''}</td>
+      <td>${n.drainStatus ? `<span class="badge ${n.drainStatus === 'Drained' ? 'badge-green' : 'badge-amber'}">${esc(n.drainStatus)}</span>` : ''}</td>
       <td>${fmt$(n.hourlyCostUSD)}</td>
     </tr>`).join('') : '<tr><td colspan="13" style="color:var(--text-muted)">No nodes</td></tr>';
 
@@ -151,17 +152,17 @@ export async function renderNodes(targetEl) {
     if (fb) attachFilterHandlers(fb, $('#node-table'), pag);
 
     // CSV exports
-    window.__exportNgCSV = () => {
+    registerExport('ngCSV', () => {
       exportCSV(['Name', 'Instance Type', 'Disk Type', 'Disk Size (GB)', 'Count', 'Min', 'Max', 'GPUs', 'Total Cores', 'Total Memory (GiB)', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'Cluster', 'Cost/mo'],
         ngList.map(ng => [ng.name, ng.instanceType, ng.diskType || '', ng.diskSizeGB || '', ng.currentCount, ng.minCount, ng.maxCount, ng.totalGPUs || 0, ng.totalCPU ? (ng.totalCPU / 1000).toFixed(0) : 0, ng.totalMemory ? (ng.totalMemory / GiB).toFixed(1) : 0, (ng.cpuUtilPct||0).toFixed(1), (ng.memUtilPct||0).toFixed(1), (ng.cpuAllocPct||0).toFixed(1), (ng.memAllocPct||0).toFixed(1), ng.sprCluster || '', ng.monthlyCostUSD]),
         'katalyst-nodegroups.csv');
-    };
-    window.__exportNodesCSV = () => {
+    });
+    registerExport('nodesCSV', () => {
       exportCSV(['Name', 'Node Group', 'Instance Type', 'Disk Type', 'Disk Size (GB)', 'Disk Util %', 'CPU Util %', 'Mem Util %', 'CPU Alloc %', 'Mem Alloc %', 'App Pods', 'System Pods', 'Total Pods', 'Cost/hr'],
         nodeList.map(n => [n.name, n.nodeGroup, n.instanceType, n.diskType || '', n.diskSizeGB || '', (n.diskUtilPct||0).toFixed(1), (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), (n.cpuAllocPct||0).toFixed(1), (n.memAllocPct||0).toFixed(1), n.appPodCount ?? '', n.systemPodCount ?? '', n.podCount, n.hourlyCostUSD]),
         'katalyst-nodes.csv');
-    };
-    addCleanup(() => { delete window.__exportNgCSV; delete window.__exportNodesCSV; });
+    });
+    addCleanup(() => { unregisterExport('ngCSV'); unregisterExport('nodesCSV'); });
 
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load node data: ' + e.message);

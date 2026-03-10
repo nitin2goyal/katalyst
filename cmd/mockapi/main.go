@@ -287,7 +287,21 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/api/v1/commitments", jsonHandler(allCommitments))
-	mux.HandleFunc("/api/v1/audit", jsonHandler(auditEvents))
+	mux.HandleFunc("/api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body map[string]interface{}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]string{"error": "invalid JSON"})
+				return
+			}
+			log.Printf("[AUDIT] action=%v target=%v user=%v details=%v", body["action"], body["target"], body["user"], body["details"])
+			w.WriteHeader(http.StatusCreated)
+			writeJSON(w, map[string]string{"status": "recorded"})
+			return
+		}
+		writeJSON(w, auditEvents())
+	})
 	mux.HandleFunc("/api/v1/notifications/channels/", func(w http.ResponseWriter, r *http.Request) {
 		idxStr := strings.TrimPrefix(r.URL.Path, "/api/v1/notifications/channels/")
 		idx, err := strconv.Atoi(idxStr)
@@ -419,15 +433,10 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only allow CORS from the dashboard origin (same-host proxy).
-		// In production, the dashboard proxies all API calls so CORS is not needed.
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			w.Header().Set("Vary", "Origin")
-		}
+		// No CORS headers — the dashboard proxies all API calls so
+		// cross-origin requests are never needed. Omitting the
+		// Access-Control-Allow-Origin header means browsers will block
+		// any cross-origin fetch, enforcing same-origin policy.
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -1464,7 +1473,7 @@ func clustersData() any {
 // ── Prometheus Metrics ──
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// No CORS header — same-origin only (dashboard proxies all requests)
 	metrics := `# HELP koptimizer_cluster_nodes_total Total number of nodes in the cluster
 # TYPE koptimizer_cluster_nodes_total gauge
 koptimizer_cluster_nodes_total 12

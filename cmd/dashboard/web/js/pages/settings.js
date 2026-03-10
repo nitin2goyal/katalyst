@@ -1,4 +1,4 @@
-import { api, apiPut, apiPost, apiDelete } from '../api.js';
+import { api, apiPut, apiPost, apiDelete, auditAction } from '../api.js';
 import { $, toArray, timeAgo, errorMsg, esc } from '../utils.js';
 import { skeleton, toast, badge, cardHeader, emptyState, modal, confirmDialog, makeSortable, attachPagination } from '../components.js';
 import { addCleanup } from '../router.js';
@@ -70,6 +70,7 @@ function showAddChannelModal() {
 
     try {
       await apiPost('/notifications/channels', { type, name, url });
+      auditAction('notification.channel-added', name, `Added ${type} channel: ${name}`);
       toast(`${type.charAt(0).toUpperCase() + type.slice(1)} channel "${name}" added`, 'success');
       el.remove();
       renderSettings();
@@ -314,6 +315,7 @@ export async function renderSettings() {
         aaBtn.textContent = '...';
         try {
           await apiPut(`/config/controllers/${name}/auto-approve`, { autoApprove: newState });
+          auditAction('config.auto-approve', name, `${controllerMeta[name]?.label || name} auto-approve ${newState ? 'enabled' : 'disabled'}`);
           if (!config.autoApprove) config.autoApprove = {};
           config.autoApprove[name] = newState;
           aaBtn.className = `btn ${newState ? 'btn-amber' : 'btn-gray'} btn-sm auto-approve-toggle`;
@@ -339,6 +341,7 @@ export async function renderSettings() {
         btn.textContent = '...';
         try {
           await apiPut(`/config/controllers/${name}`, { enabled: newState });
+          auditAction('config.controller', name, `${controllerMeta[name]?.label || name} ${newState ? 'enabled' : 'disabled'}`);
           controllers[name] = newState;
           btn.className = `btn ${newState ? 'btn-green' : 'btn-gray'} btn-sm ctrl-toggle`;
           btn.textContent = newState ? 'ON' : 'OFF';
@@ -382,6 +385,7 @@ export async function renderSettings() {
         seg.querySelectorAll('button').forEach(b => b.className = '');
         segBtn.className = target === 'off' ? 'seg-active-off' : target === 'dryrun' ? 'seg-active-dryrun' : 'seg-active-live';
         const labels = { off: 'disabled', dryrun: 'set to dry-run', live: 'set to LIVE' };
+        auditAction('config.controller', name, `${meta.label} ${labels[target]}`);
         toast(`${meta.label} ${labels[target]}`, target === 'live' ? 'success' : 'info');
       } catch (err) {
         toast('Failed: ' + err.message, 'error');
@@ -437,6 +441,7 @@ export async function renderSettings() {
       const newMode = btn.dataset.mode;
       try {
         await apiPut('/config/mode', { mode: newMode });
+        auditAction('mode.changed', 'cluster', `Mode changed to ${newMode}`);
         const displayLabel = newMode === 'active' ? 'Enforce' : newMode.charAt(0).toUpperCase() + newMode.slice(1);
         toast(`Mode changed to ${displayLabel}`, 'success');
         renderSettings();
@@ -456,6 +461,7 @@ export async function renderSettings() {
       const newState = !controllers.podPurger;
       try {
         await apiPut('/config/pod-purger', { enabled: newState });
+        auditAction('config.pod-purger', 'podPurger', `Pod Purger ${newState ? 'enabled' : 'disabled'}`);
         toast(`Auto Pod Purger ${newState ? 'enabled' : 'disabled'}`, 'success');
         renderSettings();
       } catch (e) {
@@ -468,6 +474,7 @@ export async function renderSettings() {
       const newState = !controllers.gpuReclaim;
       try {
         await apiPut('/config/controllers/gpuReclaim', { enabled: newState });
+        auditAction('config.controller', 'gpuReclaim', `GPU Reclaimer ${newState ? 'enabled' : 'disabled'}`);
         toast(`GPU Node Reclaimer ${newState ? 'enabled' : 'disabled'}`, 'success');
         renderSettings();
       } catch (e) {
@@ -493,6 +500,7 @@ export async function renderSettings() {
         if (!ch) return;
         try {
           await apiPut(`/notifications/channels/${idx}`, { enabled: !ch.enabled });
+          auditAction('notification.channel-toggled', ch.name || idx, `Channel ${ch.enabled ? 'disabled' : 'enabled'}`);
           toast(`Channel ${ch.enabled ? 'disabled' : 'enabled'}`, 'success');
           renderSettings();
         } catch (err) {
@@ -508,6 +516,7 @@ export async function renderSettings() {
         confirmDialog(`Delete channel "${ch?.name || ''}"?`, async () => {
           try {
             await apiDelete(`/notifications/channels/${idx}`);
+            auditAction('notification.channel-deleted', ch?.name || idx, `Notification channel deleted`);
             toast('Channel deleted', 'success');
             renderSettings();
           } catch (err) {

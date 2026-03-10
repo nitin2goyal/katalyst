@@ -1,4 +1,4 @@
-import { api, apiPost } from '../api.js';
+import { api, apiPost, auditAction } from '../api.js';
 import { $, badge, escapeHtml, timeAgo, errorMsg } from '../utils.js';
 import { skeleton, makeSortable, attachPagination, cardHeader, filterBar, attachFilterHandlers, confirmDialog, toast } from '../components.js';
 import { addCleanup } from '../router.js';
@@ -272,6 +272,7 @@ async function renderPDBs(targetEl) {
             const result = await apiPost('/scaledown/delete-pdbs', {
               pdbs: pdbsToDelete.map(p => ({ name: p.name, namespace: p.namespace }))
             });
+            auditAction('pdbs.deleted', `${result.deleted} PDBs`, `Deleted ${result.deleted} PDBs to unblock scale-down`);
             let msg = `Deleted ${result.deleted} PDB${result.deleted !== 1 ? 's' : ''}`;
             if (result.errors?.length) {
               const firstErr = result.errors[0].error || 'unknown';
@@ -410,6 +411,7 @@ async function renderEvents(targetEl) {
             const result = await apiPost('/scaledown/delete-pdbs', {
               pdbs: relevantPDBs.map(p => ({ name: p.name, namespace: p.namespace }))
             });
+            auditAction('pdbs.deleted', `${result.deleted} PDBs`, `Deleted ${result.deleted} PDBs from events view`);
             let msg = `Deleted ${result.deleted} PDB${result.deleted !== 1 ? 's' : ''}`;
             if (result.errors?.length) {
               const firstErr = result.errors[0].error || 'unknown';

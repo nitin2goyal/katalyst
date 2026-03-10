@@ -2,6 +2,8 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, badge, toast, cardHeader } from '../components.js';
+import { addCleanup } from '../router.js';
+import { registerAction, unregisterAction } from '../app.js';
 
 export async function renderMultiCluster(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -53,7 +55,7 @@ export async function renderMultiCluster(targetEl) {
     };
     const effColor = s => s >= 80 ? 'green' : s >= 50 ? 'amber' : 'red';
     $('#cluster-grid').innerHTML = clusters.length ? clusters.map(c => `
-      <div class="cluster-card" onclick="window.__switchCluster('${encodeURIComponent(c.id || c.name)}')">
+      <div class="cluster-card" data-action-key="switchCluster" data-cluster-id="${encodeURIComponent(c.id || c.name)}">
         <div class="cluster-card-header">
           <span class="cluster-name">${esc(c.name || '')}</span>
           ${providerBadge(c.provider)}
@@ -70,9 +72,10 @@ export async function renderMultiCluster(targetEl) {
       </div>
     `).join('') : '<div style="color:var(--text-muted);padding:24px;text-align:center">No clusters registered</div>';
 
-    window.__switchCluster = (id) => {
-      toast('Switched to cluster: ' + id, 'info');
-    };
+    registerAction('switchCluster', (el) => {
+      toast('Switched to cluster: ' + decodeURIComponent(el.dataset.clusterId), 'info');
+    });
+    addCleanup(() => unregisterAction('switchCluster'));
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load cluster data: ' + e.message);
   }

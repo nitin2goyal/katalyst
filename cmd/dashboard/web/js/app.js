@@ -1,5 +1,5 @@
 // Katalyst Dashboard - ES Module Orchestrator
-import { api, apiPut } from './api.js';
+import { api, apiPut, auditAction } from './api.js';
 import { $ } from './utils.js';
 import { store } from './store.js';
 import { addRoute, initRouter, handleNavigation } from './router.js';
@@ -80,6 +80,7 @@ document.getElementById('mode-badge')?.addEventListener('click', async () => {
   const newMode = current === 'active' ? 'recommend' : 'active';
   try {
     await apiPut('/config/mode', { mode: newMode });
+    auditAction('mode.changed', 'cluster', `Mode switched from ${current} to ${newMode}`);
     el.textContent = newMode.charAt(0).toUpperCase() + newMode.slice(1);
     el.className = 'mode-badge ' + newMode;
     store.clear();
@@ -165,6 +166,48 @@ document.querySelector('.sidebar-header')?.addEventListener('click', () => {
   const collapsed = sidebar.classList.toggle('collapsed');
   document.body.classList.toggle('sidebar-collapsed', collapsed);
   localStorage.setItem('kopt-sidebar-collapsed', String(collapsed));
+});
+
+// ── Global event delegation ────────────────────────────────────────────
+// Eliminates all inline onclick handlers, enabling strict CSP (no unsafe-inline).
+
+// Export registry for CSV export buttons: data-export="key" triggers registered fn.
+const _exportHandlers = new Map();
+export function registerExport(key, fn) { _exportHandlers.set(key, fn); }
+export function unregisterExport(key) { _exportHandlers.delete(key); }
+
+// Action registry for custom actions: data-action-key="key" triggers registered fn.
+const _actionHandlers = new Map();
+export function registerAction(key, fn) { _actionHandlers.set(key, fn); }
+export function unregisterAction(key) { _actionHandlers.delete(key); }
+
+document.addEventListener('click', (e) => {
+  // 1. Clickable rows: data-href="#/path" → navigate
+  const hrefEl = e.target.closest('[data-href]');
+  if (hrefEl) { location.hash = hrefEl.dataset.href; return; }
+
+  // 2. Export CSV: data-export="key" → call registered export handler
+  const exportEl = e.target.closest('[data-export]');
+  if (exportEl) { _exportHandlers.get(exportEl.dataset.export)?.(); return; }
+
+  // 3. Modal overlay dismiss: click on overlay background
+  if (e.target.classList.contains('modal-overlay')) { e.target.remove(); return; }
+
+  // 4. Modal close button
+  const closeBtn = e.target.closest('.modal-close');
+  if (closeBtn) { closeBtn.closest('.modal-overlay')?.remove(); return; }
+
+  // 5. JSON toggle: .event-json-toggle → toggle next sibling
+  const jsonToggle = e.target.closest('.event-json-toggle');
+  if (jsonToggle) {
+    const pre = jsonToggle.nextElementSibling;
+    if (pre) pre.style.display = pre.style.display === 'none' ? 'block' : 'none';
+    return;
+  }
+
+  // 6. Custom actions: data-action-key="key" → call registered handler (passes element)
+  const actionEl = e.target.closest('[data-action-key]');
+  if (actionEl) { _actionHandlers.get(actionEl.dataset.actionKey)?.(actionEl); return; }
 });
 
 // Init — check auth before loading the app

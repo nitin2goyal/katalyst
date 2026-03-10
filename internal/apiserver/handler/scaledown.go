@@ -562,7 +562,8 @@ func (h *ScaleDownBlockersHandler) DeletePDBs(w http.ResponseWriter, r *http.Req
 		pdb := &policyv1.PodDisruptionBudget{}
 		key := client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}
 		if err := h.client.Get(ctx, key, pdb); err != nil {
-			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: fmt.Sprintf("PDB not found: %v", err)})
+			slog.Warn("PDB not found for deletion", "name", ref.Name, "namespace", ref.Namespace, "error", err)
+			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: "PDB not found"})
 			continue
 		}
 
@@ -574,7 +575,7 @@ func (h *ScaleDownBlockersHandler) DeletePDBs(w http.ResponseWriter, r *http.Req
 
 		if err := h.client.Delete(ctx, pdb); err != nil {
 			slog.Warn("failed to delete PDB", "name", ref.Name, "namespace", ref.Namespace, "error", err)
-			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: fmt.Sprintf("delete failed: %v", err)})
+			errors = append(errors, deleteError{Name: ref.Name, Namespace: ref.Namespace, Error: "failed to delete PDB"})
 		} else {
 			deleted++
 			slog.Info("deleted blocking PDB", "name", ref.Name, "namespace", ref.Namespace)

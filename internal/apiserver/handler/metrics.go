@@ -121,20 +121,20 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(&b, "# HELP koptimizer_recommendations_total Total recommendations by status\n")
 	fmt.Fprintf(&b, "# TYPE koptimizer_recommendations_total gauge\n")
 	for status, count := range recByStatus {
-		fmt.Fprintf(&b, "koptimizer_recommendations_total{status=\"%s\"} %d\n", status, count)
+		fmt.Fprintf(&b, "koptimizer_recommendations_total{status=\"%s\"} %d\n", escapePromLabel(status), count)
 	}
 
 	// Per-nodegroup metrics
 	fmt.Fprintf(&b, "# HELP koptimizer_nodegroup_nodes Node count per node group\n")
 	fmt.Fprintf(&b, "# TYPE koptimizer_nodegroup_nodes gauge\n")
 	for _, ng := range nodeGroups {
-		fmt.Fprintf(&b, "koptimizer_nodegroup_nodes{name=\"%s\"} %d\n", ng.Name, len(ng.Nodes))
+		fmt.Fprintf(&b, "koptimizer_nodegroup_nodes{name=\"%s\"} %d\n", escapePromLabel(ng.Name), len(ng.Nodes))
 	}
 
 	fmt.Fprintf(&b, "# HELP koptimizer_nodegroup_cpu_utilization_pct CPU utilization per node group\n")
 	fmt.Fprintf(&b, "# TYPE koptimizer_nodegroup_cpu_utilization_pct gauge\n")
 	for _, ng := range nodeGroups {
-		fmt.Fprintf(&b, "koptimizer_nodegroup_cpu_utilization_pct{name=\"%s\"} %g\n", ng.Name, ng.CPUUtilization())
+		fmt.Fprintf(&b, "koptimizer_nodegroup_cpu_utilization_pct{name=\"%s\"} %g\n", escapePromLabel(ng.Name), ng.CPUUtilization())
 	}
 
 	// Commitment utilization
@@ -143,7 +143,7 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(&b, "# HELP koptimizer_commitment_utilization_pct Commitment utilization percentage\n")
 		fmt.Fprintf(&b, "# TYPE koptimizer_commitment_utilization_pct gauge\n")
 		for _, c := range commitments {
-			fmt.Fprintf(&b, "koptimizer_commitment_utilization_pct{id=\"%s\",type=\"%s\"} %g\n", c.ID, c.Type, c.UtilizationPct)
+			fmt.Fprintf(&b, "koptimizer_commitment_utilization_pct{id=\"%s\",type=\"%s\"} %g\n", escapePromLabel(c.ID), escapePromLabel(c.Type), c.UtilizationPct)
 		}
 	}
 
@@ -202,6 +202,15 @@ func collectCommitments(ctx context.Context, provider cloudprovider.CloudProvide
 		all = append(all, res...)
 	}
 	return all
+}
+
+// escapePromLabel escapes a string for use as a Prometheus label value.
+// It handles backslashes, double quotes, and newlines per the exposition format.
+func escapePromLabel(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
 }
 
 func writeProm(b *strings.Builder, name, metricType, help string, value float64) {

@@ -2,6 +2,8 @@ import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, cardHeader, badge, exportCSV } from '../components.js';
+import { registerExport, unregisterExport } from '../app.js';
+import { addCleanup } from '../router.js';
 
 export async function renderNetworkCost(targetEl) {
   const container = () => targetEl || $('#page-container');
@@ -41,7 +43,7 @@ export async function renderNetworkCost(targetEl) {
         </div>
       </div>
       <div class="card">
-        ${cardHeader('Traffic Flows', '<button class="btn btn-gray btn-sm" onclick="window.__exportNetCSV()">Export CSV</button>')}
+        ${cardHeader('Traffic Flows', '<button class="btn btn-gray btn-sm" data-export="netCSV">Export CSV</button>')}
         ${filterBar({ placeholder: 'Search flows...', filters: [
           { key: '0', label: 'Namespace', options: [...new Set(flows.map(f => f.namespace).filter(Boolean))] }
         ] })}
@@ -89,11 +91,12 @@ export async function renderNetworkCost(targetEl) {
     const fb = container().querySelector('.filter-bar');
     if (fb) attachFilterHandlers(fb, $('#net-table'));
 
-    window.__exportNetCSV = () => {
+    registerExport('netCSV', () => {
       exportCSV(['Namespace', 'Workload', 'Source AZ', 'Dest AZ', 'Traffic (GB)', 'Monthly Cost', 'Type'],
         flows.map(f => [f.namespace, f.workload, f.sourceAZ, f.destAZ, f.trafficGB, f.monthlyCostUSD, f.sourceAZ !== f.destAZ ? 'cross-az' : 'in-az']),
         'katalyst-network-costs.csv');
-    };
+    });
+    addCleanup(() => unregisterExport('netCSV'));
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load network cost data: ' + e.message);
   }

@@ -1,5 +1,5 @@
-import { api, apiPost } from '../api.js';
-import { $, $$, badge, escapeHtml } from '../utils.js';
+import { api, apiPost, auditAction } from '../api.js';
+import { $, $$, badge, escapeHtml, esc } from '../utils.js';
 import { skeleton, makeSortable, confirmDialog, toast, cardHeader, attachPagination } from '../components.js';
 
 const BAD_STATUSES = [
@@ -236,7 +236,7 @@ async function renderBadPods(contentEl) {
 
     const nsSummary = {};
     selected.forEach(p => { nsSummary[p.namespace] = (nsSummary[p.namespace] || 0) + 1; });
-    const detail = Object.entries(nsSummary).map(([ns, c]) => `${ns}: ${c}`).join(', ');
+    const detail = Object.entries(nsSummary).map(([ns, c]) => `${esc(ns)}: ${c}`).join(', ');
     confirmDialog(
       `Delete <strong>${selected.length}</strong> pod${selected.length > 1 ? 's' : ''}?<br><br>${detail}`,
       async () => {
@@ -265,6 +265,7 @@ async function renderBadPods(contentEl) {
             if (res.errors) allErrors = allErrors.concat(res.errors);
           }
           overlay.remove();
+          auditAction('pods.deleted', `${totalDeleted} pods`, `Purged ${totalDeleted} bad pods (${allErrors.length} errors)`);
           showPurgeResult(totalDeleted, allErrors, () => renderBadPods(contentEl));
         } catch (err) {
           overlay.remove();
@@ -459,7 +460,7 @@ async function renderBadReplicaSets(contentEl) {
 
     const nsSummary = {};
     selected.forEach(r => { nsSummary[r.namespace] = (nsSummary[r.namespace] || 0) + 1; });
-    const detail = Object.entries(nsSummary).map(([ns, c]) => `${ns}: ${c}`).join(', ');
+    const detail = Object.entries(nsSummary).map(([ns, c]) => `${esc(ns)}: ${c}`).join(', ');
     confirmDialog(
       `Delete <strong>${selected.length}</strong> ReplicaSet${selected.length > 1 ? 's' : ''}?<br><br>${detail}`,
       async () => {
@@ -483,6 +484,7 @@ async function renderBadReplicaSets(contentEl) {
             if (res.errors) allErrors = allErrors.concat(res.errors);
           }
           overlay.remove();
+          auditAction('replicasets.deleted', `${totalDeleted} replicasets`, `Purged ${totalDeleted} bad ReplicaSets (${allErrors.length} errors)`);
           showPurgeResult(totalDeleted, allErrors, () => renderBadReplicaSets(contentEl));
         } catch (err) {
           overlay.remove();
@@ -522,7 +524,7 @@ function showPurgeResult(deleted, allErrors, onDone) {
     ? `<div style="margin-top:12px;font-size:12px;color:var(--red)">${allErrors.map(e => `<div>${escapeHtml(e.namespace)}/${escapeHtml(e.name)}: ${escapeHtml(e.error)}</div>`).join('')}</div>`
     : '';
   resultOverlay.innerHTML = `<div class="modal" style="min-width:360px">
-    <div class="modal-header"><h3>Purge Complete</h3><button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button></div>
+    <div class="modal-header"><h3>Purge Complete</h3><button class="modal-close">&times;</button></div>
     <div class="modal-body">
       <div style="display:flex;gap:16px;margin-bottom:12px">
         <div class="kpi-card" style="flex:1;animation:none;opacity:1"><div class="label">Deleted</div><div class="value green">${deleted}</div></div>

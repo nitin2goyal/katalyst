@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { $, toArray, fmt$, fmtPct, utilBar, errorMsg, escapeHtml, esc, badge, timeAgo, fmtCPUm, podStatusColor } from '../utils.js';
 import { skeleton, makeSortable, exportCSV, cardHeader, richEmptyState } from '../components.js';
+import { registerExport, unregisterExport } from '../app.js';
 
 const GPU_TABS = [
   { id: 'nodes', label: 'Nodes' },
@@ -85,7 +86,7 @@ async function renderNodesTab(contentEl) {
         <div class="kpi-card"><div class="label">GPU Recommendations</div><div class="value">${recList.length}</div></div>
       </div>
       <div class="card">
-        ${cardHeader('GPU Nodes', '<button class="btn btn-gray btn-sm" onclick="window.__exportGpuCSV()">Export CSV</button>')}
+        ${cardHeader('GPU Nodes', '<button class="btn btn-gray btn-sm" data-export="gpuCSV">Export CSV</button>')}
         <div class="table-wrap"><table id="gpu-table">
           <thead><tr><th>Name</th><th>Instance Type</th><th>Status</th><th>GPUs</th><th>GPUs Used</th><th>CPU Headroom</th><th>CPU Util</th><th>Mem Util</th><th>Cost/hr</th></tr></thead>
           <tbody id="gpu-body"></tbody>
@@ -97,7 +98,7 @@ async function renderNodesTab(contentEl) {
           <tbody id="gpu-rec-body"></tbody>
         </table></div></div>` : ''}`;
 
-    $('#gpu-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(n.name || '')}'">
+    $('#gpu-body').innerHTML = nodeList.length ? nodeList.map(n => `<tr class="clickable-row" data-href="#/nodes/${encodeURIComponent(n.name || '')}">
       <td>${esc(n.name || '')}</td><td>${esc(n.instanceType || '')}</td>
       <td>${renderNodeStatusBadges(n)}</td>
       <td>${n.gpuCount ?? 0}</td><td>${n.gpuUsed ?? 0}</td>
@@ -116,11 +117,11 @@ async function renderNodesTab(contentEl) {
 
     makeSortable($('#gpu-table'));
 
-    window.__exportGpuCSV = () => {
+    registerExport('gpuCSV', () => {
       exportCSV(['Name', 'Instance Type', 'GPUs', 'GPUs Used', 'CPU Headroom', 'CPU Util %', 'Mem Util %', 'Cost/hr'],
         nodeList.map(n => [n.name, n.instanceType, n.gpuCount, n.gpuUsed, n.cpuHeadroomMillis || '', (n.cpuUtilPct||0).toFixed(1), (n.memUtilPct||0).toFixed(1), n.hourlyCostUSD]),
         'katalyst-gpu-nodes.csv');
-    };
+    });
   } catch (e) {
     contentEl.innerHTML = errorMsg('Failed to load GPU data: ' + e.message);
   }
@@ -198,7 +199,7 @@ async function renderScavengingTab(contentEl) {
     $('#scav-body').innerHTML = pods.length ? pods.map(p => {
       const readyParts = (p.ready || '').split('/');
       const readyColor = readyParts[0] === readyParts[1] ? 'green' : 'amber';
-      return `<tr class="clickable-row" onclick="location.hash='#/nodes/${encodeURIComponent(p.nodeName)}'">
+      return `<tr class="clickable-row" data-href="#/nodes/${encodeURIComponent(p.nodeName)}">
         <td title="${escapeHtml(p.podName)}">${escapeHtml(p.podName.length > 45 ? p.podName.substring(0, 42) + '...' : p.podName)}</td>
         <td>${escapeHtml(p.namespace)}</td>
         <td title="${escapeHtml(p.nodeName)}">${escapeHtml(p.nodeName.replace(/^gke-intuition-gke-intuition-gke-/, ''))}</td>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -33,7 +34,8 @@ func (h *RecommendationHandler) List(w http.ResponseWriter, r *http.Request) {
 	var recList koptv1alpha1.RecommendationList
 	crdErr := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500))
 	if crdErr != nil && !meta.IsNoMatchError(crdErr) {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": crdErr.Error()})
+		slog.Error("failed to list recommendations", "error", crdErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 
@@ -113,7 +115,8 @@ func (h *RecommendationHandler) Approve(w http.ResponseWriter, r *http.Request) 
 	}
 	rec.Status.State = "approved"
 	if err := h.client.Status().Update(ctx, &rec); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		slog.Error("failed to approve recommendation", "id", id, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, rec)
@@ -141,7 +144,8 @@ func (h *RecommendationHandler) Dismiss(w http.ResponseWriter, r *http.Request) 
 	}
 	rec.Status.State = "dismissed"
 	if err := h.client.Status().Update(ctx, &rec); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		slog.Error("failed to dismiss recommendation", "id", id, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, rec)
@@ -244,7 +248,8 @@ func (h *RecommendationHandler) GetSummary(w http.ResponseWriter, r *http.Reques
 	var recList koptv1alpha1.RecommendationList
 	crdErr := h.client.List(ctx, &recList, client.InNamespace("koptimizer-system"), client.Limit(500))
 	if crdErr != nil && !meta.IsNoMatchError(crdErr) {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": crdErr.Error()})
+		slog.Error("failed to list recommendations for summary", "error", crdErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 
@@ -337,8 +342,9 @@ func (h *RecommendationHandler) bulkAction(w http.ResponseWriter, r *http.Reques
 		}
 		rec.Status.State = targetStatus
 		if err := h.client.Status().Update(ctx, &rec); err != nil {
+			slog.Error("failed to update recommendation status", "id", id, "targetStatus", targetStatus, "error", err)
 			failed++
-			errors = append(errors, fmt.Sprintf("%s: %s", id, err.Error()))
+			errors = append(errors, fmt.Sprintf("%s: update failed", id))
 			continue
 		}
 		processed++

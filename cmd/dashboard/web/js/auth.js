@@ -1,4 +1,5 @@
 // Authentication module
+import { auditAction } from './api.js';
 
 export async function checkAuth() {
   try {
@@ -360,6 +361,7 @@ export function showLogin(onSuccess) {
         body: JSON.stringify({ password: pw }),
       });
       if (res.ok) {
+        auditAction('user.login', 'session', 'User logged in');
         card.style.transition = 'opacity 0.3s, transform 0.3s';
         card.style.opacity = '0';
         card.style.transform = 'scale(0.96)';
@@ -368,6 +370,7 @@ export function showLogin(onSuccess) {
           onSuccess();
         }, 250);
       } else {
+        auditAction('user.login-failed', 'session', 'Failed login attempt');
         btn.classList.remove('loading');
         errEl.textContent = 'Invalid password';
         card.classList.remove('shake');

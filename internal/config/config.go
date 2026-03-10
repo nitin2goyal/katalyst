@@ -353,6 +353,10 @@ func (c *Config) applyEnvOverrides() {
 			c.ClusterName = v
 		}
 	}
+	// Slack webhook URL from Secret (overrides config file value)
+	if v := os.Getenv("KOPTIMIZER_SLACK_WEBHOOK_URL"); v != "" {
+		c.Alerts.SlackWebhookURL = v
+	}
 }
 
 // Validate checks the config for errors.

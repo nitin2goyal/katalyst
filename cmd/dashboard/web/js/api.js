@@ -89,3 +89,13 @@ export async function apiDelete(path) {
   store.clear();
   return res.json();
 }
+
+// Fire-and-forget audit logging for user modification actions.
+// Never throws — failures are silently ignored so audit doesn't block UX.
+export function auditAction(action, target = '', details = '') {
+  fetch('/api/v1/audit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, target, user: 'dashboard', details }),
+  }).catch(() => {});
+}

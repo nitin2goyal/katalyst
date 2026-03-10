@@ -1,7 +1,12 @@
 package apiserver
 
 import (
+	"crypto/subtle"
+	"encoding/json"
+	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -16,6 +21,38 @@ import (
 	"github.com/koptimizer/koptimizer/pkg/familylock"
 )
 
+// bearerTokenAuth returns middleware that validates the Authorization: Bearer <token> header.
+// KOPTIMIZER_API_TOKEN is required. The server refuses to start without it.
+func bearerTokenAuth() func(http.Handler) http.Handler {
+	token := os.Getenv("KOPTIMIZER_API_TOKEN")
+	if token == "" {
+		log.Fatal("FATAL: KOPTIMIZER_API_TOKEN is not set. API authentication is required. " +
+			"Create a secret and configure apiTokenSecretRef in your Helm values, e.g.:\n" +
+			"  kubectl create secret generic koptimizer-api-token --from-literal=token=$(openssl rand -hex 32)")
+	}
+	log.Println("API bearer-token authentication enabled")
+	tokenBytes := []byte(token)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			if !strings.HasPrefix(auth, "Bearer ") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "missing or invalid Authorization header"})
+				return
+			}
+			provided := []byte(strings.TrimPrefix(auth, "Bearer "))
+			if subtle.ConstantTimeCompare(provided, tokenBytes) != 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid API token"})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // NewRouter creates the API router with all endpoints.
 func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cloudprovider.CloudProvider, guard *familylock.FamilyLockGuard, k8sClient client.Client, costStore *store.CostStore, metricsStore *intmetrics.Store, settingsStore *store.SettingsStore) http.Handler {
 	r := chi.NewRouter()
@@ -24,6 +61,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Throttle(100))
+	r.Use(bearerTokenAuth())
 
 	// Limit request body size to 1MB to prevent memory exhaustion.
 	r.Use(func(next http.Handler) http.Handler {
@@ -127,6 +165,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 
 		// Audit
 		r.Get("/audit", auditHandler.List)
+		r.Post("/audit", auditHandler.Record)
 
 		// Diagnostics
 		r.Get("/diagnostics", clusterHandler.GetDiagnostics)

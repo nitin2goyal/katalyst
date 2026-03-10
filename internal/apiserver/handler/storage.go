@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -27,20 +28,23 @@ func (h *StorageHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	if err := h.client.List(ctx, pvcList); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		slog.Error("failed to list PVCs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 
 	pvList := &corev1.PersistentVolumeList{}
 	if err := h.client.List(ctx, pvList); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		slog.Error("failed to list PVs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 
 	// Count running pods with PVC mounts
 	podList := &corev1.PodList{}
 	if err := h.client.List(ctx, podList); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		slog.Error("failed to list pods for storage summary", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 
@@ -102,7 +106,8 @@ func (h *StorageHandler) GetPVCs(w http.ResponseWriter, r *http.Request) {
 
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	if err := h.client.List(ctx, pvcList); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		slog.Error("failed to list PVCs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 

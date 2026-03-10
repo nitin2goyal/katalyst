@@ -3,6 +3,7 @@ import { $, toArray, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { makeChart } from '../charts.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, cardHeader, badge, exportCSV } from '../components.js';
 import { addCleanup } from '../router.js';
+import { registerExport, unregisterExport } from '../app.js';
 import { computeRecommendations } from '../recommendations-engine.js';
 
 export async function renderSavings(targetEl) {
@@ -65,7 +66,7 @@ export async function renderSavings(targetEl) {
         </div>
       </div>
       <div class="card">
-        ${cardHeader('Savings Opportunities', '<button class="btn btn-gray btn-sm" onclick="window.__exportSavingsDetailCSV()">Export CSV</button>')}
+        ${cardHeader('Savings Opportunities', '<button class="btn btn-gray btn-sm" data-export="savingsDetailCSV">Export CSV</button>')}
         ${filterBar({ placeholder: 'Search opportunities...', filters: [
           { key: '0', label: 'Type', options: [...new Set(list.map(s => s.type).filter(Boolean))] }
         ] })}
@@ -144,12 +145,12 @@ export async function renderSavings(targetEl) {
     commitSlider?.addEventListener('input', updateSim);
 
     // CSV
-    window.__exportSavingsDetailCSV = () => {
+    registerExport('savingsDetailCSV', () => {
       exportCSV(['Type', 'Target', 'Description', 'Est. Monthly Savings'],
         list.map(s => [s.type, s.name || s.target, s.description, s.estimatedSavings || s.savings]),
         'katalyst-savings-report.csv');
-    };
-    addCleanup(() => { delete window.__exportSavingsDetailCSV; });
+    });
+    addCleanup(() => { unregisterExport('savingsDetailCSV'); });
   } catch (e) {
     container().innerHTML = errorMsg('Failed to load savings: ' + e.message);
   }
