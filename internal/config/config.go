@@ -184,7 +184,7 @@ type DatabaseConfig struct {
 // Cloud provider and region can be set via CLOUD_PROVIDER and REGION env vars.
 func DefaultConfig() *Config {
 	cfg := &Config{
-		Mode:          "active",
+		Mode:          "recommend",
 		CloudProvider: "gcp",
 		Region:        "asia-south1",
 		ClusterName:   "apps-gke",
@@ -197,7 +197,7 @@ func DefaultConfig() *Config {
 			Enabled: true,
 		},
 		Rightsizer: RightsizingConfig{
-			Enabled:             true,
+			Enabled:             false,
 			LookbackWindow:      7 * 24 * time.Hour,
 			CPUTargetUtilPct:    95.0,
 			MemoryTargetUtilPct: 95.0,

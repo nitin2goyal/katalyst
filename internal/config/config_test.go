@@ -10,8 +10,8 @@ import (
 func TestDefaultConfig_ReturnsExpectedDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Mode != "active" {
-		t.Errorf("Mode = %q, want %q", cfg.Mode, "active")
+	if cfg.Mode != "recommend" {
+		t.Errorf("Mode = %q, want %q", cfg.Mode, "recommend")
 	}
 	if cfg.ReconcileInterval != 60*time.Second {
 		t.Errorf("ReconcileInterval = %v, want %v", cfg.ReconcileInterval, 60*time.Second)
@@ -25,8 +25,8 @@ func TestDefaultConfig_ReturnsExpectedDefaults(t *testing.T) {
 	if cfg.CostMonitor.Enabled != true {
 		t.Error("CostMonitor.Enabled = false, want true")
 	}
-	if cfg.Rightsizer.Enabled != true {
-		t.Error("Rightsizer.Enabled = false, want true")
+	if cfg.Rightsizer.Enabled != false {
+		t.Error("Rightsizer.Enabled = true, want false")
 	}
 	if cfg.APIServer.Port != 8080 {
 		t.Errorf("APIServer.Port = %d, want %d", cfg.APIServer.Port, 8080)
