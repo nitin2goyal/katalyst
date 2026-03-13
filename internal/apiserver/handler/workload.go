@@ -135,6 +135,11 @@ func (h *WorkloadHandler) List(w http.ResponseWriter, r *http.Request) {
 			entry["autoscaler"] = as.Kind
 			entry["autoscalerName"] = as.Name
 		}
+		if vpa, ok := h.state.GetVPA(wl.Namespace, wl.Kind, wl.Name); ok {
+			entry["vpa"] = true
+			entry["vpaName"] = vpa.Name
+			entry["vpaMode"] = vpa.UpdateMode
+		}
 		// Match PDBs to this workload via label selector
 		if wl.Pod != nil {
 			if pdb := matchPDB(wl.Pod, pdbMap[wl.Namespace]); pdb != nil {

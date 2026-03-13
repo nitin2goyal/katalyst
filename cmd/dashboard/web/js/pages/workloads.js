@@ -23,6 +23,7 @@ const COLUMNS = [
   { key: 'min',             label: 'Min',              default: true },
   { key: 'max',             label: 'Max',              default: true },
   { key: 'autoscaler',      label: 'Autoscaler',       default: false },
+  { key: 'vpa',             label: 'VPA',              default: false },
   { key: 'xmx',             label: 'Xmx',             default: false },
   { key: 'image',           label: 'Image',            default: false },
   { key: 'cpuEff',          label: 'CPU Eff.',         default: false },
@@ -133,6 +134,7 @@ export async function renderWorkloads(targetEl) {
         <td>${w.minReplicas ?? '-'}</td>
         <td>${w.maxReplicas ?? '-'}</td>
         <td>${w.autoscaler ? badge(w.autoscaler, 'blue') : '-'}</td>
+        <td>${w.vpa ? badge(w.vpaMode || 'Auto', 'purple') : '<span style="color:var(--text-muted)">-</span>'}</td>
         <td>${esc(w.xmx || '-')}</td>
         <td title="${esc(w.image || '')}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)">${esc(shortImg(w.image))}</td>
         <td>${effBadge(eff?.cpuEfficiencyPct, eff?.hasMetrics)}</td>
@@ -168,7 +170,7 @@ export async function renderWorkloads(targetEl) {
          'Replicas', 'CPU Req', 'CPU Lim', 'Mem Req', 'Mem Lim',
          'Total CPU', 'Total CPU Lim', 'Total Mem',
          'PDB MinAvail', 'PDB MaxUnavail', 'Disruptions OK',
-         'Min Replicas', 'Max Replicas', 'Autoscaler', 'Xmx',
+         'Min Replicas', 'Max Replicas', 'Autoscaler', 'VPA', 'VPA Mode', 'Xmx',
          'Image', 'CPU Eff %', 'Mem Eff %', 'Wasted Cost'],
         wlList.map(w => {
           const eff = effMap[`${w.namespace}/${w.kind}/${w.name}`];
@@ -178,7 +180,8 @@ export async function renderWorkloads(targetEl) {
             fmtCPU(w.cpuRequest), fmtCPU(w.cpuLimit), fmtMem(w.memRequest), fmtMem(w.memLimit),
             fmtCPU(w.totalCPU), fmtCPU(w.totalCPULim), fmtMem(w.totalMem),
             w.pdbMinAvailable ?? '', w.pdbMaxUnavailable ?? '', w.pdbDisruptionsAllowed ?? '',
-            w.minReplicas ?? '', w.maxReplicas ?? '', w.autoscaler || '', w.xmx || '',
+            w.minReplicas ?? '', w.maxReplicas ?? '', w.autoscaler || '',
+            w.vpa ? 'Yes' : '', w.vpaMode || '', w.xmx || '',
             w.image || '',
             eff?.cpuEfficiencyPct != null ? fmtPct(eff.cpuEfficiencyPct) : '',
             eff?.memEfficiencyPct != null ? fmtPct(eff.memEfficiencyPct) : '',

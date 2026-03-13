@@ -32,6 +32,12 @@ type AutoscalerInfo struct {
 	MaxReplicas int32
 }
 
+// VPAInfo holds information about a VerticalPodAutoscaler targeting a workload.
+type VPAInfo struct {
+	Name       string // VPA object name
+	UpdateMode string // "Auto", "Recreate", "Initial", or "Off"
+}
+
 // ClusterState maintains an in-memory cache of the cluster state.
 type ClusterState struct {
 	mu               sync.RWMutex
@@ -42,6 +48,7 @@ type ClusterState struct {
 	nodes            map[string]*NodeState
 	pods             map[string]*PodState // key: namespace/name
 	autoscalers      map[string]*AutoscalerInfo // key: namespace/Kind/targetName
+	vpas             map[string]*VPAInfo        // key: namespace/Kind/targetName
 	nodeGroups       *NodeGroupState
 	AuditLog         *AuditLog
 	NodeLock         *NodeLock
@@ -86,6 +93,7 @@ func NewClusterState(c client.Client, provider cloudprovider.CloudProvider, mc p
 		nodes:        make(map[string]*NodeState),
 		pods:         make(map[string]*PodState),
 		autoscalers:  make(map[string]*AutoscalerInfo),
+		vpas:         make(map[string]*VPAInfo),
 		nodeGroups:   NewNodeGroupState(),
 		AuditLog:     auditLog,
 		NodeLock:     NewNodeLock(),
@@ -363,6 +371,9 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	// Discover autoscalers (HPAs + KEDA ScaledObjects) for workload metadata.
 	autoscalerMap := s.fetchAutoscalers(ctx)
 
+	// Discover VPAs for workload metadata.
+	vpaMap := s.fetchVPAs(ctx)
+
 	// Detect if metrics server is available.
 	metricsAvailable := len(metricsMap) > 0
 	if !metricsAvailable && len(nodeList.Items) > 0 {
@@ -375,6 +386,7 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	s.MetricsAvailable = metricsAvailable
 	s.NodesWithMetrics = len(metricsMap)
 	s.autoscalers = autoscalerMap
+	s.vpas = vpaMap
 	// Cache successful metrics data for reuse across sync cycles.
 	// Replace (not merge) to prevent unbounded growth from deleted nodes.
 	if len(metricsMap) > 0 {
@@ -689,6 +701,63 @@ func (s *ClusterState) fetchAutoscalers(ctx context.Context) map[string]*Autosca
 				MinReplicas: minReplicas,
 				MaxReplicas: maxReplicas,
 			}
+		}
+	}
+
+	return result
+}
+
+// GetVPA returns VPA info for a workload identified by namespace/kind/name.
+func (s *ClusterState) GetVPA(namespace, kind, name string) (*VPAInfo, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.vpas[namespace+"/"+kind+"/"+name]
+	return v, ok
+}
+
+// fetchVPAs discovers VerticalPodAutoscaler objects, returning a map
+// keyed by namespace/Kind/targetName (matching the workload key format).
+// Fails silently if VPA CRDs are not installed.
+func (s *ClusterState) fetchVPAs(ctx context.Context) map[string]*VPAInfo {
+	result := make(map[string]*VPAInfo)
+
+	vpaList := &unstructured.UnstructuredList{}
+	vpaList.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "autoscaling.k8s.io",
+		Version: "v1",
+		Kind:    "VerticalPodAutoscalerList",
+	})
+	if err := s.reader.List(ctx, vpaList); err != nil {
+		return result
+	}
+
+	for _, item := range vpaList.Items {
+		ns := item.GetNamespace()
+		spec, ok := item.Object["spec"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		ref, ok := spec["targetRef"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		targetKind, _ := ref["kind"].(string)
+		targetName, _ := ref["name"].(string)
+		if targetKind == "" || targetName == "" {
+			continue
+		}
+
+		updateMode := "Auto" // default per VPA spec
+		if up, ok := spec["updatePolicy"].(map[string]interface{}); ok {
+			if mode, ok := up["updateMode"].(string); ok {
+				updateMode = mode
+			}
+		}
+
+		key := ns + "/" + targetKind + "/" + targetName
+		result[key] = &VPAInfo{
+			Name:       item.GetName(),
+			UpdateMode: updateMode,
 		}
 	}
 
