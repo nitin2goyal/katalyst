@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -34,10 +35,18 @@ func bearerTokenAuth() func(http.Handler) http.Handler {
 			"For external access, set the token via a Kubernetes secret.")
 		return func(next http.Handler) http.Handler { return next }
 	}
-	log.Println("API bearer-token authentication enabled")
+	log.Println("API bearer-token authentication enabled (localhost exempt for sidecar proxy)")
 	tokenBytes := []byte(token)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip auth for localhost — the dashboard sidecar connects via
+			// 127.0.0.1 in the same pod, and handles its own cookie-based auth.
+			host, _, _ := net.SplitHostPort(r.RemoteAddr)
+			if host == "127.0.0.1" || host == "::1" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			auth := r.Header.Get("Authorization")
 			if !strings.HasPrefix(auth, "Bearer ") {
 				w.Header().Set("Content-Type", "application/json")
