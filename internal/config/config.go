@@ -39,6 +39,7 @@ type Config struct {
 	AIGate         AIGateConfig         `yaml:"aiGate"`
 	APIServer      APIServerConfig      `yaml:"apiServer"`
 	Database       DatabaseConfig       `yaml:"database"`
+	HelmDrift      HelmDriftConfig      `yaml:"helmDrift"`
 }
 
 type CostMonitorConfig struct {
@@ -178,6 +179,23 @@ type APIServerConfig struct {
 type DatabaseConfig struct {
 	Path          string `yaml:"path"`
 	RetentionDays int    `yaml:"retentionDays"`
+}
+
+type HelmDriftConfig struct {
+	Enabled     bool              `yaml:"enabled"`
+	GitLabURL   string            `yaml:"gitlabURL"`   // e.g., "https://prod-gitlab.sprinklr.com"
+	GitLabToken string            `yaml:"gitlabToken"` // or set KATALYST_GITLAB_TOKEN env var
+	ProjectPath string            `yaml:"projectPath"` // e.g., "sprinklr-k8s/helm-charts"
+	Branch      string            `yaml:"branch"`      // e.g., "live"
+	Charts      []HelmChartConfig `yaml:"charts"`
+}
+
+type HelmChartConfig struct {
+	ChartPath    string `yaml:"chartPath"`    // path in repo, e.g., "intuitionx"
+	Release      string `yaml:"release"`      // release dir, e.g., "katalyst-apps"
+	EnvFile      string `yaml:"envFile"`      // env values file, e.g., "prod0-values.yaml"
+	WorkloadName string `yaml:"workloadName"` // K8s workload name prefix to match
+	Namespace    string `yaml:"namespace"`    // optional namespace filter
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -356,6 +374,10 @@ func (c *Config) applyEnvOverrides() {
 	// Slack webhook URL from Secret (overrides config file value)
 	if v := os.Getenv("KOPTIMIZER_SLACK_WEBHOOK_URL"); v != "" {
 		c.Alerts.SlackWebhookURL = v
+	}
+	// GitLab token for Helm drift detection
+	if v := os.Getenv("KATALYST_GITLAB_TOKEN"); v != "" {
+		c.HelmDrift.GitLabToken = v
 	}
 }
 

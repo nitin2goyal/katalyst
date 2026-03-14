@@ -14,6 +14,7 @@ import (
 
 	"github.com/koptimizer/koptimizer/internal/apiserver/handler"
 	"github.com/koptimizer/koptimizer/internal/config"
+	"github.com/koptimizer/koptimizer/internal/helmdrift"
 	intmetrics "github.com/koptimizer/koptimizer/internal/metrics"
 	"github.com/koptimizer/koptimizer/internal/state"
 	"github.com/koptimizer/koptimizer/internal/store"
@@ -91,6 +92,8 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	autoscalerHandler := handler.NewAutoscalerHandler(clusterState, cfg, k8sClient)
 	scaledownHandler := handler.NewScaleDownBlockersHandler(clusterState, k8sClient)
 	overscaledHandler := handler.NewOverscaledHandler(clusterState, k8sClient)
+	helmDriftSvc := helmdrift.NewService(cfg, clusterState)
+	helmDriftHandler := handler.NewHelmDriftHandler(helmDriftSvc)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Cluster
@@ -195,6 +198,9 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		// Scale-Down Blockers
 		r.Get("/scaledown/blockers", scaledownHandler.GetBlockers)
 		r.Post("/scaledown/delete-pdbs", scaledownHandler.DeletePDBs)
+
+		// Helm Drift
+		r.Get("/helm-drift", helmDriftHandler.Get)
 	})
 
 	return r

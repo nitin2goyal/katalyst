@@ -16,6 +16,7 @@ import { renderSettings } from './pages/settings.js';
 import { renderInfrastructure } from './pages/infrastructure.js';
 import { renderAutoscaler } from './pages/autoscaler.js';
 import { renderScaleDown } from './pages/scaledown.js';
+import { renderHelmDrift } from './pages/helmdrift.js';
 
 // Backward-compat redirects for old routes
 const redirectMap = {
@@ -52,6 +53,7 @@ addRoute('/autoscaler', (params) => renderAutoscaler(params));
 addRoute('/autoscaler/{tab}', (params) => renderAutoscaler(params));
 addRoute('/scaledown', (params) => renderScaleDown(params));
 addRoute('/scaledown/{tab}', (params) => renderScaleDown(params));
+addRoute('/helm-drift', renderHelmDrift);
 addRoute('/settings', renderSettings);
 
 // Backward-compat redirects for old routes
