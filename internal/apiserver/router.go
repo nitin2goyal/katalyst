@@ -23,13 +23,16 @@ import (
 )
 
 // bearerTokenAuth returns middleware that validates the Authorization: Bearer <token> header.
-// KOPTIMIZER_API_TOKEN is required. The server refuses to start without it.
+// When KOPTIMIZER_API_TOKEN is set, all requests must present the token.
+// When not set, the API is open (suitable for sidecar deployments where the
+// dashboard proxy runs in the same pod and auth is handled at the ingress layer).
 func bearerTokenAuth() func(http.Handler) http.Handler {
 	token := os.Getenv("KOPTIMIZER_API_TOKEN")
 	if token == "" {
-		log.Fatal("FATAL: KOPTIMIZER_API_TOKEN is not set. API authentication is required. " +
-			"Create a secret and configure apiTokenSecretRef in your Helm values, e.g.:\n" +
-			"  kubectl create secret generic koptimizer-api-token --from-literal=token=$(openssl rand -hex 32)")
+		log.Println("WARNING: KOPTIMIZER_API_TOKEN is not set — API has no bearer-token auth. " +
+			"This is acceptable when the dashboard runs as a sidecar (same pod). " +
+			"For external access, set the token via a Kubernetes secret.")
+		return func(next http.Handler) http.Handler { return next }
 	}
 	log.Println("API bearer-token authentication enabled")
 	tokenBytes := []byte(token)

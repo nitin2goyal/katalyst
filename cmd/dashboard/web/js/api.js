@@ -10,8 +10,14 @@ async function fetchWithRetry(url, opts, retries = MAX_RETRIES) {
     try {
       const res = await fetch(url, opts);
       if (!res.ok) {
-        // Session expired — reload to show login
+        // 401 — check if dashboard session expired vs backend auth error
         if (res.status === 401) {
+          const body = await res.json().catch(() => ({}));
+          if (body.error && body.error.includes('Authorization')) {
+            // Backend bearer token issue — don't reload, surface the error
+            throw new Error('Backend auth error: ' + body.error);
+          }
+          // Dashboard session expired — show login
           window.location.reload();
           throw new Error('Session expired');
         }
