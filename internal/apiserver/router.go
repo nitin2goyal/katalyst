@@ -54,6 +54,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 	autoscalerHandler := handler.NewAutoscalerHandler(clusterState, cfg, k8sClient)
 	scaledownHandler := handler.NewScaleDownBlockersHandler(clusterState, k8sClient)
 	overscaledHandler := handler.NewOverscaledHandler(clusterState, k8sClient)
+	inefficiencyHandler := handler.NewInefficiencyHandler(clusterState, k8sClient)
 	helmDriftSvc := helmdrift.NewService(cfg, clusterState)
 	helmDriftHandler := handler.NewHelmDriftHandler(helmDriftSvc)
 
@@ -160,6 +161,9 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 		// Scale-Down Blockers
 		r.Get("/scaledown/blockers", scaledownHandler.GetBlockers)
 		r.Post("/scaledown/delete-pdbs", scaledownHandler.DeletePDBs)
+
+		// Cluster Inefficiencies
+		r.Get("/inefficiencies", inefficiencyHandler.Get)
 
 		// Helm Drift
 		r.Get("/helm-drift", helmDriftHandler.Get)
