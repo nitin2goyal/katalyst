@@ -131,19 +131,38 @@ type kubeletPodStats struct {
 	EphemeralStorage *struct {
 		UsedBytes int64 `json:"usedBytes"`
 	} `json:"ephemeral-storage"`
+	Network *kubeletNetworkStats `json:"network"`
 }
 
-// fetchDiskStats fetches disk utilization for all nodes via kubelet proxy.
-// Returns node disk stats (nodeName -> [capacityBytes, usedBytes]) and
-// per-pod ephemeral storage usage (namespace/podName -> usedBytes).
-func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) (map[string][2]int64, map[string]int64) {
+type kubeletNetworkStats struct {
+	Interfaces []kubeletInterfaceStats `json:"interfaces"`
+}
+
+type kubeletInterfaceStats struct {
+	Name    string `json:"name"`
+	RxBytes int64  `json:"rxBytes"`
+	TxBytes int64  `json:"txBytes"`
+}
+
+// PodNetworkStats holds cumulative network I/O bytes for a pod.
+type PodNetworkStats struct {
+	RxBytes int64
+	TxBytes int64
+}
+
+// fetchDiskStats fetches disk utilization and network I/O for all nodes via kubelet proxy.
+// Returns node disk stats (nodeName -> [capacityBytes, usedBytes]),
+// per-pod ephemeral storage usage (namespace/podName -> usedBytes),
+// and per-pod network I/O (namespace/podName -> PodNetworkStats).
+func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) (map[string][2]int64, map[string]int64, map[string]*PodNetworkStats) {
 	if s.kubeClientset == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	var mu sync.Mutex
 	diskMap := make(map[string][2]int64, len(nodeNames))
 	podDiskMap := make(map[string]int64)
+	podNetMap := make(map[string]*PodNetworkStats)
 	var firstErr error // capture first error for logging
 
 	var wg sync.WaitGroup
@@ -181,9 +200,19 @@ func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) (
 				diskMap[nodeName] = [2]int64{summary.Node.Fs.CapacityBytes, summary.Node.Fs.UsedBytes}
 			}
 			for _, ps := range summary.Pods {
+				key := ps.PodRef.Namespace + "/" + ps.PodRef.Name
 				if ps.EphemeralStorage != nil {
-					key := ps.PodRef.Namespace + "/" + ps.PodRef.Name
 					podDiskMap[key] = ps.EphemeralStorage.UsedBytes
+				}
+				if ps.Network != nil {
+					var rxTotal, txTotal int64
+					for _, iface := range ps.Network.Interfaces {
+						rxTotal += iface.RxBytes
+						txTotal += iface.TxBytes
+					}
+					if rxTotal > 0 || txTotal > 0 {
+						podNetMap[key] = &PodNetworkStats{RxBytes: rxTotal, TxBytes: txTotal}
+					}
 				}
 			}
 			mu.Unlock()
@@ -194,7 +223,7 @@ func (s *ClusterState) fetchDiskStats(ctx context.Context, nodeNames []string) (
 	if firstErr != nil && len(diskMap) == 0 {
 		slog.Warn("kubelet disk stats fetch failed", "error", firstErr, "nodes", len(nodeNames))
 	}
-	return diskMap, podDiskMap
+	return diskMap, podDiskMap, podNetMap
 }
 
 // listAllNodes fetches all nodes using pagination to avoid OOM on large clusters.
@@ -349,16 +378,17 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 		}
 	}
 
-	// Fetch disk utilization from kubelet stats summary (parallel, best-effort).
+	// Fetch disk utilization and network I/O from kubelet stats summary (parallel, best-effort).
 	var diskStatsMap map[string][2]int64
 	var podDiskMap map[string]int64
+	var podNetMap map[string]*PodNetworkStats
 	if s.kubeClientset != nil {
 		nodeNames := make([]string, len(nodeList.Items))
 		for i := range nodeList.Items {
 			nodeNames[i] = nodeList.Items[i].Name
 		}
 		diskCtx, diskCancel := context.WithTimeout(ctx, 15*time.Second)
-		diskStatsMap, podDiskMap = s.fetchDiskStats(diskCtx, nodeNames)
+		diskStatsMap, podDiskMap, podNetMap = s.fetchDiskStats(diskCtx, nodeNames)
 		diskCancel()
 		if len(diskStatsMap) == 0 && !s.diskStatsWarned {
 			slog.Warn("kubelet disk stats unavailable, disk utilization will use capacity only")
@@ -553,6 +583,13 @@ func (s *ClusterState) Refresh(ctx context.Context) error {
 	for key, ps := range newPods {
 		if usage, ok := podDiskMap[key]; ok {
 			ps.DiskUsage = usage
+		}
+	}
+	// Apply per-pod network I/O from kubelet stats summary.
+	for key, ps := range newPods {
+		if ns, ok := podNetMap[key]; ok {
+			ps.NetworkRxBytes = ns.RxBytes
+			ps.NetworkTxBytes = ns.TxBytes
 		}
 	}
 

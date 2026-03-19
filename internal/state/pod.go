@@ -25,6 +25,10 @@ type PodState struct {
 	MemoryUsage int64
 	DiskUsage   int64 // bytes (from kubelet ephemeral-storage stats)
 
+	// Network I/O (cumulative bytes from kubelet stats summary)
+	NetworkRxBytes int64 // total bytes received
+	NetworkTxBytes int64 // total bytes transmitted
+
 	// Flags
 	IsGPUWorkload bool
 	HasPDB        bool

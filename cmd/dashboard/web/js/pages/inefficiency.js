@@ -14,6 +14,7 @@ const tabDefs = [
   { id: 'pdb', label: 'Bad PDBs' },
   { id: 'pods', label: 'Bad Pods' },
   { id: 'fragmentation', label: 'Fragmentation' },
+  { id: 'network', label: 'Network I/O' },
 ];
 
 const subRenderers = {
@@ -25,6 +26,7 @@ const subRenderers = {
   pdb: renderPDB,
   pods: renderBadPods,
   fragmentation: renderFragmentation,
+  network: renderNetwork,
 };
 
 export async function renderInefficiency(params) {
@@ -89,6 +91,7 @@ const categoryLabels = {
   badPDBs: 'Bad PDBs',
   badPods: 'Bad State Pods',
   fragmentation: 'Node Fragmentation',
+  networkHogs: 'Network I/O Hogs',
 };
 
 const categoryIcons = {
@@ -99,6 +102,7 @@ const categoryIcons = {
   badPDBs: '&#x1F6E1;',
   badPods: '&#x2620;',
   fragmentation: '&#x1F9E9;',
+  networkHogs: '&#x1F4E1;',
 };
 
 const categoryTabs = {
@@ -109,6 +113,7 @@ const categoryTabs = {
   badPDBs: 'pdb',
   badPods: 'pods',
   fragmentation: 'fragmentation',
+  networkHogs: 'network',
 };
 
 // --- Exec Summary Tab ---
@@ -202,6 +207,9 @@ function renderTopIssues(data) {
   }
   for (const item of (data.fragmentation || []).slice(0, 3)) {
     issues.push({ category: 'Fragmentation', severity: item.severity, target: item.nodeName, impact: item.impact });
+  }
+  for (const item of (data.networkHogs || []).slice(0, 3)) {
+    issues.push({ category: 'Network I/O', severity: item.severity, target: `${item.namespace}/${item.name}`, impact: item.impact });
   }
 
   // Sort by severity
@@ -789,5 +797,85 @@ async function renderFragmentation(targetEl) {
     const table = $('#frag-table');
     makeSortable(table);
     attachPagination(table);
+  }
+}
+
+// --- Network I/O Tab ---
+
+function fmtGB(v) {
+  if (v == null || v === 0) return '0';
+  if (v >= 1000) return (v / 1000).toFixed(1) + ' TB';
+  if (v >= 1) return v.toFixed(1) + ' GB';
+  return (v * 1024).toFixed(0) + ' MB';
+}
+
+async function renderNetwork(targetEl) {
+  targetEl.innerHTML = skeleton(5);
+  let data;
+  try {
+    data = await api('/inefficiencies');
+  } catch (err) {
+    targetEl.innerHTML = errorMsg('Failed to load: ' + err.message);
+    return;
+  }
+
+  const items = data.networkHogs || [];
+
+  targetEl.innerHTML = `
+    ${items.length > 0 ? `
+    <div class="card alert-border-amber mb-4">
+      <div class="alert-card">
+        <span class="alert-card-icon">&#9888;</span>
+        <div>
+          <strong>${items.length} workload${items.length > 1 ? 's' : ''} with high network I/O</strong>
+          <div class="alert-card-sub">
+            These workloads have the highest cumulative network bytes (rx+tx) since pod start, as reported by kubelet stats.
+            High network I/O can indicate chatty services, missing caching, or unexpected traffic patterns.
+            Bytes shown are cumulative since pod start — longer-running pods naturally accumulate more.
+          </div>
+        </div>
+      </div>
+    </div>` : ''}
+
+    <div class="card">
+      ${cardHeader('Network I/O by Workload (' + items.length + ')')}
+      ${filterBar({ placeholder: 'Search workloads...', filters: [
+        { id: 'ns-filter', label: 'Namespace', options: [...new Set(items.map(p => p.namespace))].sort() },
+      ]})}
+      ${items.length === 0
+        ? '<div class="empty-state-center text-small-muted">No network data available (requires kubelet stats)</div>'
+        : `<div class="table-wrap"><table id="network-table">
+          <thead><tr>
+            <th>Workload</th>
+            <th>Namespace</th>
+            <th>Replicas</th>
+            <th>Total Rx</th>
+            <th>Total Tx</th>
+            <th>Total I/O</th>
+            <th>Per-Pod Rx</th>
+            <th>Per-Pod Tx</th>
+            <th>Severity</th>
+          </tr></thead>
+          <tbody>
+            ${items.map(i => `<tr data-ns="${escapeHtml(i.namespace)}">
+              <td><a href="#/workloads/${encodeURIComponent(i.namespace)}/${encodeURIComponent(i.kind)}/${encodeURIComponent(i.name)}">${escapeHtml(i.name)}</a></td>
+              <td>${escapeHtml(i.namespace)}</td>
+              <td>${i.replicas}</td>
+              <td>${fmtGB(i.totalRxGB)}</td>
+              <td>${fmtGB(i.totalTxGB)}</td>
+              <td>${fmtGB(i.totalRxGB + i.totalTxGB)}</td>
+              <td>${fmtGB(i.perPodRxGB)}</td>
+              <td>${fmtGB(i.perPodTxGB)}</td>
+              <td>${sevBadge(i.severity)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`}
+    </div>`;
+
+  if (items.length > 0) {
+    const table = $('#network-table');
+    makeSortable(table);
+    attachPagination(table);
+    attachFilterHandlers($('.filter-bar'), table);
   }
 }

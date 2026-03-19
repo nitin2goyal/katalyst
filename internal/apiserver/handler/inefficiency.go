@@ -160,6 +160,20 @@ type badRatioIssue struct {
 	Impact         string  `json:"impact"`
 }
 
+type networkHogIssue struct {
+	Namespace  string `json:"namespace"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Replicas   int    `json:"replicas"`
+	TotalRxGB  float64 `json:"totalRxGB"`
+	TotalTxGB  float64 `json:"totalTxGB"`
+	TotalBytes int64   `json:"totalBytes"`
+	PerPodRxGB float64 `json:"perPodRxGB"`
+	PerPodTxGB float64 `json:"perPodTxGB"`
+	Severity   string `json:"severity"`
+	Impact     string `json:"impact"`
+}
+
 // Get returns a consolidated view of all cluster inefficiencies.
 func (h *InefficiencyHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -172,9 +186,10 @@ func (h *InefficiencyHandler) Get(w http.ResponseWriter, r *http.Request) {
 	badPods := h.detectBadStatePods()
 	fragmentation := h.detectNodeFragmentation()
 	badRatios := h.detectBadRatioWorkloads()
+	networkHogs := h.detectNetworkHogs()
 
 	// Build summary
-	totalIssues := len(maxPods) + len(antiAffinity) + len(kedaIssues) + len(badPDBs) + len(badPods) + len(fragmentation) + len(badRatios)
+	totalIssues := len(maxPods) + len(antiAffinity) + len(kedaIssues) + len(badPDBs) + len(badPods) + len(fragmentation) + len(badRatios) + len(networkHogs)
 	critical, warning, info := 0, 0, 0
 	totalWasted := 0.0
 
@@ -212,6 +227,9 @@ func (h *InefficiencyHandler) Get(w http.ResponseWriter, r *http.Request) {
 		countSeverity(i.Severity)
 		totalWasted += i.WastedCostUSD
 	}
+	for _, i := range networkHogs {
+		countSeverity(i.Severity)
+	}
 
 	categories := []categoryCount{
 		{Category: "maxPods", Count: len(maxPods), Severity: maxSeverity(maxPods, func(i maxPodsIssue) string { return i.Severity })},
@@ -221,6 +239,7 @@ func (h *InefficiencyHandler) Get(w http.ResponseWriter, r *http.Request) {
 		{Category: "badPods", Count: len(badPods), Severity: maxSeverity(badPods, func(i badStatePodIssue) string { return i.Severity })},
 		{Category: "fragmentation", Count: len(fragmentation), Severity: maxSeverity(fragmentation, func(i nodeFragIssue) string { return i.Severity })},
 		{Category: "badRatio", Count: len(badRatios), Severity: maxSeverity(badRatios, func(i badRatioIssue) string { return i.Severity })},
+		{Category: "networkHogs", Count: len(networkHogs), Severity: maxSeverity(networkHogs, func(i networkHogIssue) string { return i.Severity })},
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -239,6 +258,7 @@ func (h *InefficiencyHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"badPods":       badPods,
 		"fragmentation": fragmentation,
 		"badRatio":      badRatios,
+		"networkHogs":   networkHogs,
 	})
 }
 
@@ -1258,6 +1278,105 @@ func (h *InefficiencyHandler) detectBadRatioWorkloads() []badRatioIssue {
 
 	if result == nil {
 		return []badRatioIssue{}
+	}
+	return result
+}
+
+// --- Detection: Network Hogs ---
+
+// detectNetworkHogs finds workloads with the highest cumulative network I/O.
+// Network bytes come from the kubelet /stats/summary API (cumulative since pod start).
+// Only workloads above the top-N threshold are returned to filter out the long tail.
+func (h *InefficiencyHandler) detectNetworkHogs() []networkHogIssue {
+	pods := h.state.GetAllPods()
+
+	const gb = 1024 * 1024 * 1024
+
+	// Group pods by owner workload
+	type wlNet struct {
+		namespace string
+		kind      string
+		name      string
+		replicas  int
+		rxBytes   int64
+		txBytes   int64
+	}
+	workloads := make(map[string]*wlNet)
+
+	for _, p := range pods {
+		if p.Pod == nil || p.Pod.Status.Phase != "Running" {
+			continue
+		}
+		if p.NetworkRxBytes == 0 && p.NetworkTxBytes == 0 {
+			continue
+		}
+		ownerKind, ownerName := resolveOwner(p)
+		key := p.Namespace + "/" + ownerKind + "/" + ownerName
+		wl, ok := workloads[key]
+		if !ok {
+			wl = &wlNet{
+				namespace: p.Namespace,
+				kind:      ownerKind,
+				name:      ownerName,
+			}
+			workloads[key] = wl
+		}
+		wl.replicas++
+		wl.rxBytes += p.NetworkRxBytes
+		wl.txBytes += p.NetworkTxBytes
+	}
+
+	var result []networkHogIssue
+	for _, wl := range workloads {
+		totalBytes := wl.rxBytes + wl.txBytes
+		// Only include workloads with > 1 GB total network I/O
+		if totalBytes < gb {
+			continue
+		}
+
+		totalRxGB := float64(wl.rxBytes) / float64(gb)
+		totalTxGB := float64(wl.txBytes) / float64(gb)
+		perPodRxGB := totalRxGB / float64(wl.replicas)
+		perPodTxGB := totalTxGB / float64(wl.replicas)
+
+		severity := "info"
+		totalGB := totalRxGB + totalTxGB
+		if totalGB > 100 {
+			severity = "critical"
+		} else if totalGB > 10 {
+			severity = "warning"
+		}
+
+		impact := fmt.Sprintf("%d replicas, %.1f GB rx + %.1f GB tx total (%.1f GB/pod rx, %.1f GB/pod tx)",
+			wl.replicas, totalRxGB, totalTxGB, perPodRxGB, perPodTxGB)
+
+		result = append(result, networkHogIssue{
+			Namespace:  wl.namespace,
+			Name:       wl.name,
+			Kind:       wl.kind,
+			Replicas:   wl.replicas,
+			TotalRxGB:  math.Round(totalRxGB*100) / 100,
+			TotalTxGB:  math.Round(totalTxGB*100) / 100,
+			TotalBytes: totalBytes,
+			PerPodRxGB: math.Round(perPodRxGB*100) / 100,
+			PerPodTxGB: math.Round(perPodTxGB*100) / 100,
+			Severity:   severity,
+			Impact:     impact,
+		})
+	}
+
+	// Sort by total bytes descending — biggest talkers first
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].TotalBytes > result[j].TotalBytes
+	})
+
+	// Cap at top 50
+	if len(result) > 50 {
+		result = result[:50]
+	}
+
+	if result == nil {
+		return []networkHogIssue{}
 	}
 	return result
 }
