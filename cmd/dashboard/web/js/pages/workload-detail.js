@@ -1,6 +1,6 @@
 import { api } from '../api.js';
-import { $, fmt$, fmtPct, fmtCPU, fmtMem, errorMsg, escapeHtml, esc, chartColors } from '../utils.js';
-import { skeleton, breadcrumbs, tabs, attachTabHandlers, badge } from '../components.js';
+import { $, fmt$, fmtPct, fmtCPU, fmtMem, fmtCPUm, fmtMemB, errorMsg, escapeHtml, esc, chartColors, podStatusColor } from '../utils.js';
+import { skeleton, breadcrumbs, tabs, attachTabHandlers, badge, makeSortable } from '../components.js';
 import { makeChart, destroyCharts } from '../charts.js';
 
 const container = () => $('#page-container');
@@ -41,6 +41,7 @@ export async function renderWorkloadDetail(params) {
       <div class="card" id="wl-tabs-card">
         ${tabs([
           { id: 'overview', label: 'Overview' },
+          { id: 'pods', label: 'Pods' },
           { id: 'rightsizing', label: 'Rightsizing' },
           { id: 'scaling', label: 'Scaling' },
         ], 'overview')}
@@ -95,6 +96,56 @@ export async function renderWorkloadDetail(params) {
           },
           options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
         });
+      } else if (tab === 'pods') {
+        const podList = wl.pods || [];
+        if (!podList.length) {
+          tabContent.innerHTML = '<div class="empty-state"><div class="empty-state-msg">No pods found</div></div>';
+          return;
+        }
+        const fmtNetB = (b) => {
+          if (!b || b === 0) return '-';
+          const gb = 1024*1024*1024, mb = 1024*1024, kb = 1024;
+          if (b >= gb) return (b/gb).toFixed(1) + ' GB';
+          if (b >= mb) return (b/mb).toFixed(0) + ' MB';
+          if (b >= kb) return (b/kb).toFixed(0) + ' KB';
+          return b + ' B';
+        };
+        tabContent.innerHTML = `
+          <div class="mt-4">
+            <div class="table-wrap"><table id="wl-pods-table">
+              <thead><tr>
+                <th>Pod</th>
+                <th>Node</th>
+                <th>CPU Req</th>
+                <th>CPU Used</th>
+                <th>Mem Req</th>
+                <th>Mem Used</th>
+                <th>Net Rx</th>
+                <th>Net Tx</th>
+                <th>Net Total</th>
+                <th>Status</th>
+              </tr></thead>
+              <tbody>
+                ${podList.map(p => {
+                  const rx = p.networkRxBytes || 0;
+                  const tx = p.networkTxBytes || 0;
+                  return `<tr>
+                    <td class="cell-truncate" title="${esc(p.name)}">${esc(p.name)}</td>
+                    <td>${p.nodeName ? `<a href="#/nodes/${encodeURIComponent(p.nodeName)}">${esc(p.nodeName.split('-').slice(-3).join('-'))}</a>` : '-'}</td>
+                    <td>${fmtCPUm(p.cpuRequestMilli)}</td>
+                    <td>${p.cpuUsageMilli ? fmtCPUm(p.cpuUsageMilli) : '-'}</td>
+                    <td>${fmtMemB(p.memoryRequestBytes)}</td>
+                    <td>${p.memoryUsageBytes ? fmtMemB(p.memoryUsageBytes) : '-'}</td>
+                    <td>${fmtNetB(rx)}</td>
+                    <td>${fmtNetB(tx)}</td>
+                    <td>${(rx + tx) > 0 ? fmtNetB(rx + tx) : '-'}</td>
+                    <td>${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table></div>
+          </div>`;
+        makeSortable($('#wl-pods-table'));
       } else if (tab === 'rightsizing') {
         if (!rs.current && !rs.recommended) {
           tabContent.innerHTML = '<div class="empty-state"><div class="empty-state-msg">No rightsizing data available</div></div>';

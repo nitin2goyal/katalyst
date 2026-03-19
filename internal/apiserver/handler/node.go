@@ -150,11 +150,13 @@ func (h *NodeHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"ready":      computeContainerReady(pod),
 			"isSystem":   isSys,
 		}
-		// Include actual utilization and disk usage from metrics-server
+		// Include actual utilization, disk usage, and network I/O from metrics/kubelet
 		if ps, ok := podStateMap[pod.Namespace+"/"+pod.Name]; ok {
 			p["cpuUsed"] = ps.CPUUsage    // millicores
 			p["memUsed"] = ps.MemoryUsage // bytes
 			p["diskUsage"] = ps.DiskUsage
+			p["networkRxBytes"] = ps.NetworkRxBytes
+			p["networkTxBytes"] = ps.NetworkTxBytes
 		}
 		pods = append(pods, p)
 	}

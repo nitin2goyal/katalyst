@@ -57,7 +57,7 @@ export async function renderNodeDetail(params) {
       <div class="card">
         <h2>Pods on this Node</h2>
         <div class="table-wrap"><table id="node-pods-table">
-          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>Ready</th><th>CPU Req</th><th>CPU Used</th><th>CPU %</th><th>Mem Req</th><th>Mem Used</th><th>Mem %</th><th>Disk</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>Ready</th><th>CPU Req</th><th>CPU Used</th><th>CPU %</th><th>Mem Req</th><th>Mem Used</th><th>Mem %</th><th>Disk</th><th>Net Rx</th><th>Net Tx</th><th>Status</th></tr></thead>
           <tbody id="node-pods-body"></tbody>
         </table></div>
       </div>`;
@@ -145,9 +145,11 @@ export async function renderNodeDetail(params) {
       <td>${memUsedB != null ? fmtMemB(memUsedB) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${memPctVal != null ? utilBar(memPctVal) : '<span style="color:var(--text-muted)">-</span>'}</td>
       <td>${p.diskUsage ? fmtMem(p.diskUsage) : '-'}</td>
+      <td>${p.networkRxBytes ? fmtMem(p.networkRxBytes) : '-'}</td>
+      <td>${p.networkTxBytes ? fmtMem(p.networkTxBytes) : '-'}</td>
       <td title="${esc(podStatusReason(p.status))}">${badge(p.status || 'Unknown', podStatusColor(p.status))}</td>
     </tr>`;
-    }).join('') : '<tr><td colspan="12" style="color:var(--text-muted)">No pods found</td></tr>';
+    }).join('') : '<tr><td colspan="14" style="color:var(--text-muted)">No pods found</td></tr>';
     makeSortable($('#node-pods-table'));
 
   } catch (e) {

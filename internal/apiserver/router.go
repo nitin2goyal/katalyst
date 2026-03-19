@@ -164,6 +164,7 @@ func NewRouter(cfg *config.Config, clusterState *state.ClusterState, provider cl
 
 		// Cluster Inefficiencies
 		r.Get("/inefficiencies", inefficiencyHandler.Get)
+		r.Get("/inefficiencies/network", inefficiencyHandler.GetNetworkPods)
 
 		// Helm Drift
 		r.Get("/helm-drift", helmDriftHandler.Get)

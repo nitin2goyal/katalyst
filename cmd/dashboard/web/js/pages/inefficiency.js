@@ -811,15 +811,29 @@ function fmtGB(v) {
 
 async function renderNetwork(targetEl) {
   targetEl.innerHTML = skeleton(5);
-  let data;
+  let data, netData;
   try {
-    data = await api('/inefficiencies');
+    [data, netData] = await Promise.all([
+      api('/inefficiencies'),
+      api('/inefficiencies/network'),
+    ]);
   } catch (err) {
     targetEl.innerHTML = errorMsg('Failed to load: ' + err.message);
     return;
   }
 
   const items = data.networkHogs || [];
+  const podItems = netData.pods || [];
+  const nodeItems = netData.nodes || [];
+
+  const fmtBytes = (b) => {
+    if (!b || b === 0) return '-';
+    const gb = 1024*1024*1024, mb = 1024*1024, kb = 1024;
+    if (b >= gb) return (b/gb).toFixed(1) + ' GB';
+    if (b >= mb) return (b/mb).toFixed(0) + ' MB';
+    if (b >= kb) return (b/kb).toFixed(0) + ' KB';
+    return b + ' B';
+  };
 
   targetEl.innerHTML = `
     ${items.length > 0 ? `
@@ -827,24 +841,46 @@ async function renderNetwork(targetEl) {
       <div class="alert-card">
         <span class="alert-card-icon">&#9888;</span>
         <div>
-          <strong>${items.length} workload${items.length > 1 ? 's' : ''} with high network I/O</strong>
+          <strong>Network I/O data from kubelet stats (cumulative since pod start)</strong>
           <div class="alert-card-sub">
-            These workloads have the highest cumulative network bytes (rx+tx) since pod start, as reported by kubelet stats.
-            High network I/O can indicate chatty services, missing caching, or unexpected traffic patterns.
-            Bytes shown are cumulative since pod start — longer-running pods naturally accumulate more.
+            Use the node view to find which pods drive high NAT/egress cost on a specific node.
+            Use the pod view to find the single biggest talkers across the cluster.
           </div>
         </div>
       </div>
     </div>` : ''}
 
     <div class="card">
-      ${cardHeader('Network I/O by Workload (' + items.length + ')')}
-      ${filterBar({ placeholder: 'Search workloads...', filters: [
-        { id: 'ns-filter', label: 'Namespace', options: [...new Set(items.map(p => p.namespace))].sort() },
-      ]})}
+      ${cardHeader('By Node (' + nodeItems.length + ')')}
+      ${nodeItems.length === 0
+        ? '<div class="empty-state-center text-small-muted">No network data available</div>'
+        : `<div class="table-wrap"><table id="net-node-table">
+          <thead><tr>
+            <th>Node</th>
+            <th>Instance Type</th>
+            <th>Pods w/ Net</th>
+            <th>Total Rx</th>
+            <th>Total Tx</th>
+            <th>Total I/O</th>
+          </tr></thead>
+          <tbody>
+            ${nodeItems.map(n => `<tr>
+              <td><a href="#/nodes/${encodeURIComponent(n.nodeName)}">${escapeHtml(shortNode(n.nodeName))}</a></td>
+              <td>${escapeHtml(n.instanceType || '-')}</td>
+              <td>${n.podCount}</td>
+              <td>${fmtGB(n.rxGB)}</td>
+              <td>${fmtGB(n.txGB)}</td>
+              <td>${fmtGB(n.rxGB + n.txGB)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`}
+    </div>
+
+    <div class="card">
+      ${cardHeader('By Workload (' + items.length + ')')}
       ${items.length === 0
-        ? '<div class="empty-state-center text-small-muted">No network data available (requires kubelet stats)</div>'
-        : `<div class="table-wrap"><table id="network-table">
+        ? '<div class="empty-state-center text-small-muted">No workloads with >1 GB network I/O</div>'
+        : `<div class="table-wrap"><table id="net-wl-table">
           <thead><tr>
             <th>Workload</th>
             <th>Namespace</th>
@@ -857,7 +893,7 @@ async function renderNetwork(targetEl) {
             <th>Severity</th>
           </tr></thead>
           <tbody>
-            ${items.map(i => `<tr data-ns="${escapeHtml(i.namespace)}">
+            ${items.map(i => `<tr>
               <td><a href="#/workloads/${encodeURIComponent(i.namespace)}/${encodeURIComponent(i.kind)}/${encodeURIComponent(i.name)}">${escapeHtml(i.name)}</a></td>
               <td>${escapeHtml(i.namespace)}</td>
               <td>${i.replicas}</td>
@@ -870,12 +906,53 @@ async function renderNetwork(targetEl) {
             </tr>`).join('')}
           </tbody>
         </table></div>`}
+    </div>
+
+    <div class="card">
+      ${cardHeader('By Pod (' + podItems.length + ')')}
+      ${filterBar({ placeholder: 'Search pods...', filters: [
+        { id: 'ns-filter', label: 'Namespace', options: [...new Set(podItems.map(p => p.namespace))].sort() },
+        { id: 'node-filter', label: 'Node', options: [...new Set(podItems.map(p => p.nodeName).filter(Boolean))].sort() },
+      ]})}
+      ${podItems.length === 0
+        ? '<div class="empty-state-center text-small-muted">No per-pod network data available (requires kubelet stats)</div>'
+        : `<div class="table-wrap"><table id="net-pod-table">
+          <thead><tr>
+            <th>Pod</th>
+            <th>Namespace</th>
+            <th>Node</th>
+            <th>Owner</th>
+            <th>Rx</th>
+            <th>Tx</th>
+            <th>Total</th>
+            <th>Status</th>
+          </tr></thead>
+          <tbody>
+            ${podItems.map(p => `<tr data-ns="${escapeHtml(p.namespace)}" data-node="${escapeHtml(p.nodeName || '')}">
+              <td class="cell-truncate" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
+              <td>${escapeHtml(p.namespace)}</td>
+              <td>${p.nodeName ? `<a href="#/nodes/${encodeURIComponent(p.nodeName)}">${escapeHtml(shortNode(p.nodeName))}</a>` : '-'}</td>
+              <td><a href="#/workloads/${encodeURIComponent(p.namespace)}/${encodeURIComponent(p.ownerKind)}/${encodeURIComponent(p.owner)}">${escapeHtml(p.owner)}</a></td>
+              <td>${fmtBytes(p.rxBytes)}</td>
+              <td>${fmtBytes(p.txBytes)}</td>
+              <td>${fmtBytes(p.totalBytes)}</td>
+              <td>${statusBadge(p.status)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`}
     </div>`;
 
+  if (nodeItems.length > 0) {
+    makeSortable($('#net-node-table'));
+    attachPagination($('#net-node-table'));
+  }
   if (items.length > 0) {
-    const table = $('#network-table');
-    makeSortable(table);
-    attachPagination(table);
-    attachFilterHandlers($('.filter-bar'), table);
+    makeSortable($('#net-wl-table'));
+    attachPagination($('#net-wl-table'));
+  }
+  if (podItems.length > 0) {
+    makeSortable($('#net-pod-table'));
+    attachPagination($('#net-pod-table'));
+    attachFilterHandlers($('.filter-bar'), $('#net-pod-table'));
   }
 }

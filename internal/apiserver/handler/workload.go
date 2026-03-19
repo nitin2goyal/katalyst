@@ -251,14 +251,16 @@ func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	pods := h.state.GetAllPods()
 	type podDetail struct {
-		Name          string `json:"name"`
-		Namespace     string `json:"namespace"`
-		NodeName      string `json:"nodeName"`
-		CPURequest    int64  `json:"cpuRequestMilli"`
-		MemoryRequest int64  `json:"memoryRequestBytes"`
-		CPUUsage      int64  `json:"cpuUsageMilli"`
-		MemoryUsage   int64  `json:"memoryUsageBytes"`
-		Status        string `json:"status"`
+		Name           string `json:"name"`
+		Namespace      string `json:"namespace"`
+		NodeName       string `json:"nodeName"`
+		CPURequest     int64  `json:"cpuRequestMilli"`
+		MemoryRequest  int64  `json:"memoryRequestBytes"`
+		CPUUsage       int64  `json:"cpuUsageMilli"`
+		MemoryUsage    int64  `json:"memoryUsageBytes"`
+		NetworkRxBytes int64  `json:"networkRxBytes"`
+		NetworkTxBytes int64  `json:"networkTxBytes"`
+		Status         string `json:"status"`
 	}
 	var matchedPods []podDetail
 	totalCPUReq := int64(0)
@@ -270,14 +272,16 @@ func (h *WorkloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 		if p.Namespace == ns && ownerKind == kind && ownerName == name {
 			status := computePodStatus(p.Pod)
 			matchedPods = append(matchedPods, podDetail{
-				Name:          p.Name,
-				Namespace:     p.Namespace,
-				NodeName:      p.NodeName,
-				CPURequest:    p.CPURequest,
-				MemoryRequest: p.MemoryRequest,
-				CPUUsage:      p.CPUUsage,
-				MemoryUsage:   p.MemoryUsage,
-				Status:        status,
+				Name:           p.Name,
+				Namespace:      p.Namespace,
+				NodeName:       p.NodeName,
+				CPURequest:     p.CPURequest,
+				MemoryRequest:  p.MemoryRequest,
+				CPUUsage:       p.CPUUsage,
+				MemoryUsage:    p.MemoryUsage,
+				NetworkRxBytes: p.NetworkRxBytes,
+				NetworkTxBytes: p.NetworkTxBytes,
+				Status:         status,
 			})
 			// Only count Running+Pending for replica count (consistent with List handler)
 			phase := p.Pod.Status.Phase

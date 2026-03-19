@@ -2,8 +2,8 @@ import { api } from '../api.js';
 import { $, fmt$, fmtPct, errorMsg, esc } from '../utils.js';
 import { skeleton, makeSortable, filterBar, attachFilterHandlers, attachPagination, exportCSV, cardHeader, badge } from '../components.js';
 
-export async function renderHelmDrift(targetEl) {
-  const container = () => targetEl || $('#page-container');
+export async function renderHelmDrift() {
+  const container = () => $('#page-container');
   container().innerHTML = skeleton(5);
   try {
     const data = await api('/helm-drift');

@@ -262,6 +262,101 @@ func (h *InefficiencyHandler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetNetworkPods returns per-pod and per-node network I/O for debugging.
+func (h *InefficiencyHandler) GetNetworkPods(w http.ResponseWriter, r *http.Request) {
+	pods := h.state.GetAllPods()
+	nodes := h.state.GetAllNodes()
+
+	const gb = float64(1024 * 1024 * 1024)
+
+	// Per-pod data
+	type podNet struct {
+		Name      string  `json:"name"`
+		Namespace string  `json:"namespace"`
+		NodeName  string  `json:"nodeName"`
+		Owner     string  `json:"owner"`
+		OwnerKind string  `json:"ownerKind"`
+		RxBytes   int64   `json:"rxBytes"`
+		TxBytes   int64   `json:"txBytes"`
+		TotalBytes int64  `json:"totalBytes"`
+		RxGB      float64 `json:"rxGB"`
+		TxGB      float64 `json:"txGB"`
+		Status    string  `json:"status"`
+	}
+	var podResults []podNet
+	for _, p := range pods {
+		if p.Pod == nil {
+			continue
+		}
+		if p.NetworkRxBytes == 0 && p.NetworkTxBytes == 0 {
+			continue
+		}
+		ownerKind, ownerName := resolveOwner(p)
+		total := p.NetworkRxBytes + p.NetworkTxBytes
+		podResults = append(podResults, podNet{
+			Name:       p.Name,
+			Namespace:  p.Namespace,
+			NodeName:   p.NodeName,
+			Owner:      ownerName,
+			OwnerKind:  ownerKind,
+			RxBytes:    p.NetworkRxBytes,
+			TxBytes:    p.NetworkTxBytes,
+			TotalBytes: total,
+			RxGB:       math.Round(float64(p.NetworkRxBytes)/gb*100) / 100,
+			TxGB:       math.Round(float64(p.NetworkTxBytes)/gb*100) / 100,
+			Status:     computePodStatus(p.Pod),
+		})
+	}
+	sort.Slice(podResults, func(i, j int) bool {
+		return podResults[i].TotalBytes > podResults[j].TotalBytes
+	})
+
+	// Per-node aggregated data
+	type nodeNet struct {
+		NodeName     string  `json:"nodeName"`
+		InstanceType string  `json:"instanceType"`
+		NodeGroup    string  `json:"nodeGroup"`
+		PodCount     int     `json:"podCount"`
+		TotalRxBytes int64   `json:"totalRxBytes"`
+		TotalTxBytes int64   `json:"totalTxBytes"`
+		TotalBytes   int64   `json:"totalBytes"`
+		RxGB         float64 `json:"rxGB"`
+		TxGB         float64 `json:"txGB"`
+	}
+	nodeAgg := make(map[string]*nodeNet)
+	for _, p := range podResults {
+		nn, ok := nodeAgg[p.NodeName]
+		if !ok {
+			nn = &nodeNet{NodeName: p.NodeName}
+			nodeAgg[p.NodeName] = nn
+		}
+		nn.PodCount++
+		nn.TotalRxBytes += p.RxBytes
+		nn.TotalTxBytes += p.TxBytes
+	}
+	var nodeResults []nodeNet
+	for _, n := range nodes {
+		nn, ok := nodeAgg[n.Node.Name]
+		if !ok {
+			continue
+		}
+		nn.InstanceType = n.InstanceType
+		nn.NodeGroup = n.NodeGroupID
+		nn.TotalBytes = nn.TotalRxBytes + nn.TotalTxBytes
+		nn.RxGB = math.Round(float64(nn.TotalRxBytes)/gb*100) / 100
+		nn.TxGB = math.Round(float64(nn.TotalTxBytes)/gb*100) / 100
+		nodeResults = append(nodeResults, *nn)
+	}
+	sort.Slice(nodeResults, func(i, j int) bool {
+		return nodeResults[i].TotalBytes > nodeResults[j].TotalBytes
+	})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"pods":  podResults,
+		"nodes": nodeResults,
+	})
+}
+
 // --- Detection: Max Pods per Node ---
 
 func (h *InefficiencyHandler) detectMaxPodsIssues() []maxPodsIssue {
